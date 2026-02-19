@@ -1,67 +1,164 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getProject } from '@/lib/api';
-import { ProjectDetail } from '@/lib/types';
+import { useProjectStore } from '@/lib/stores';
+import { Timeline } from '@/components/Timeline';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ArrowLeft, Volume2, Film } from 'lucide-react';
 
-export default function TimelinePage() {
+export default function TimelineEditorPage() {
   const params = useParams();
   const id = params.id as string;
-  const [project, setProject] = useState<ProjectDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    project, segments, isLoading, error,
+    fetchProject, updateSegment, deleteSegment,
+    uploadImage, removeImage, reset,
+  } = useProjectStore();
 
   useEffect(() => {
-    const fetchProject = async () => {
-      try {
-        setLoading(true);
-        const data = await getProject(id);
-        setProject(data);
-      } catch (err) {
-        setError('Failed to load project.');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
+    fetchProject(id);
+    return () => reset();
+  }, [id, fetchProject, reset]);
 
-    fetchProject();
-  }, [id]);
-
-  if (loading) {
-    return <p className="text-muted-foreground">Loading project...</p>;
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-screen bg-background">
+        <header className="border-b p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <Skeleton className="h-8 w-48 sm:w-64" />
+          <Skeleton className="h-9 w-40" />
+        </header>
+        <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+          <aside className="lg:w-64 lg:border-r border-b lg:border-b-0 p-4 flex-shrink-0">
+            <div className="flex flex-row lg:flex-col gap-4 lg:gap-4 flex-wrap">
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-5 w-20" />
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-5 w-36" />
+            </div>
+          </aside>
+          <main className="flex-1 p-4 space-y-4">
+            <Skeleton className="h-48 w-full" />
+            <Skeleton className="h-48 w-full" />
+            <Skeleton className="h-48 w-full" />
+          </main>
+        </div>
+      </div>
+    );
   }
 
+  // Error state
   if (error || !project) {
     return (
-      <div>
-        <p className="text-destructive mb-4">{error || 'Project not found.'}</p>
-        <Link href="/">
-          <Button variant="outline">Back to Dashboard</Button>
-        </Link>
+      <div className="flex flex-col items-center justify-center h-screen gap-4 bg-background px-4">
+        <p className="text-lg text-destructive">{error || 'Project not found'}</p>
+        <div className="flex gap-2">
+          <Button onClick={() => fetchProject(id)}>Retry</Button>
+          <Button variant="outline" asChild>
+            <Link href="/">Back to Dashboard</Link>
+          </Button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="mb-8">
-        <Link href="/">
-          <Button variant="outline" size="sm">← Back to Dashboard</Button>
-        </Link>
+    <div className="flex flex-col h-screen bg-background text-foreground">
+      {/* Header */}
+      <header className="border-b p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold truncate">
+            StoryFlow — {project.title}
+          </h1>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/">
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              <span className="hidden sm:inline">Back to Dashboard</span>
+              <span className="sm:hidden">Back</span>
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" disabled>
+            Export
+          </Button>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
+        {/* Sidebar — horizontal on mobile/tablet, vertical on desktop */}
+        <aside className="lg:w-64 lg:border-r border-b lg:border-b-0 p-4 flex-shrink-0">
+          <div className="flex flex-row lg:flex-col gap-4 lg:gap-4 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">Project</p>
+              <p className="font-medium truncate">{project.title}</p>
+            </div>
+            <Separator className="hidden lg:block" />
+            <div>
+              <p className="text-sm text-muted-foreground">Status</p>
+              <Badge variant="secondary" className="mt-1">
+                {project.status}
+              </Badge>
+            </div>
+            <Separator className="hidden lg:block" />
+            <div>
+              <p className="text-sm text-muted-foreground">Segments</p>
+              <p className="font-medium">{segments.length}</p>
+            </div>
+            <Separator className="hidden lg:block" />
+            <div>
+              <p className="text-sm text-muted-foreground">Created</p>
+              <p className="font-medium">
+                {new Date(project.created_at).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+        </aside>
+
+        {/* Center panel */}
+        <main className="flex-1 overflow-auto">
+          <Timeline
+            segments={segments}
+            onUpdateSegment={updateSegment}
+            onDeleteSegment={deleteSegment}
+            onUploadImage={uploadImage}
+            onRemoveImage={removeImage}
+          />
+        </main>
       </div>
-      <h2 className="text-3xl font-bold mb-4">{project.title}</h2>
-      <div className="rounded-lg border p-8 text-center">
-        <p className="text-xl text-muted-foreground">
-          Timeline Editor — Coming in Phase 02
-        </p>
-        <p className="text-sm text-muted-foreground mt-2">
-          This page will contain the segment-by-segment editing interface.
-        </p>
-      </div>
+
+      {/* Action bar */}
+      <footer className="border-t p-3 sm:p-4 flex flex-wrap items-center gap-2 sm:gap-4">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button disabled>
+                <Volume2 className="h-4 w-4 mr-2" />
+                Generate All Audio
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Coming in Phase 03</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button disabled>
+                <Film className="h-4 w-4 mr-2" />
+                Export Video
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Coming in Phase 04</TooltipContent>
+        </Tooltip>
+      </footer>
     </div>
   );
 }

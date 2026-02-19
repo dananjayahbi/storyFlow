@@ -39,6 +39,24 @@ export interface CreateProjectPayload {
   title: string;
 }
 
+export interface ImportProjectRequest {
+  format: 'json' | 'text';
+  title: string;
+  segments?: Array<{ text_content: string; image_prompt?: string }>;
+  raw_text?: string;
+}
+
+export interface UpdateSegmentPayload {
+  text_content?: string;
+  image_prompt?: string;
+  is_locked?: boolean;
+}
+
+export interface ReorderPayload {
+  project_id: string;
+  segment_order: string[];
+}
+
 export interface PaginatedResponse<T> {
   count: number;
   next: string | null;
