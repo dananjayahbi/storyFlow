@@ -700,3 +700,512 @@ class TestImageRemoval(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.segment.refresh_from_db()
         self.assertFalse(bool(self.segment.image_file))
+
+
+# ==========================================================================
+# Phase 03 — Audio Generation & Task System Integration Tests
+# ==========================================================================
+
+from unittest.mock import patch, MagicMock
+from api.tasks import TaskManager, TASK_PENDING, TASK_PROCESSING, TASK_COMPLETED, TASK_FAILED
+from api.models import GlobalSettings
+
+TEMP_MEDIA_AUDIO = tempfile.mkdtemp()
+
+
+def _reset_task_manager():
+    """Reset TaskManager singleton for test isolation."""
+    TaskManager._instance = None
+    tm = TaskManager()
+    tm._tasks.clear()
+    return tm
+
+
+# --------------------------------------------------------------------------
+# Generate Audio endpoint tests
+# --------------------------------------------------------------------------
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA_AUDIO)
+class TestGenerateAudioEndpoint(APITestCase):
+    """Tests for POST /api/segments/{id}/generate-audio/."""
+
+    def setUp(self):
+        self.tm = _reset_task_manager()
+        self.project = Project.objects.create(title='Audio Test')
+        self.segment = Segment.objects.create(
+            project=self.project, sequence_index=0,
+            text_content='Hello world.', image_prompt='Test',
+        )
+        GlobalSettings.objects.all().delete()
+        GlobalSettings.objects.create()
+
+    def tearDown(self):
+        self.tm.shutdown(wait=True)
+        _reset_task_manager()
+        if os.path.isdir(TEMP_MEDIA_AUDIO):
+            shutil.rmtree(TEMP_MEDIA_AUDIO, ignore_errors=True)
+            os.makedirs(TEMP_MEDIA_AUDIO, exist_ok=True)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=True)
+    @patch('core_engine.tts_wrapper.generate_audio')
+    def test_generate_audio_returns_202(self, mock_gen, mock_model):
+        mock_gen.return_value = {
+            'success': True, 'duration': 2.5,
+            'audio_path': '/fake/path.wav', 'error': None,
+        }
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-audio/',
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertIn('task_id', response.data)
+        self.assertEqual(response.data['segment_id'], str(self.segment.id))
+        self.assertEqual(response.data['status'], 'PENDING')
+
+    def test_empty_text_returns_400(self):
+        self.segment.text_content = ''
+        self.segment.save()
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-audio/',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_whitespace_text_returns_400(self):
+        self.segment.text_content = '   '
+        self.segment.save()
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-audio/',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_locked_segment_returns_409(self):
+        self.segment.is_locked = True
+        self.segment.save()
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-audio/',
+        )
+        self.assertEqual(response.status_code, 409)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=False)
+    def test_missing_model_returns_503(self, mock_model):
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-audio/',
+        )
+        self.assertEqual(response.status_code, 503)
+
+    def test_nonexistent_segment_returns_404(self):
+        import uuid as uuid_lib
+        fake_id = uuid_lib.uuid4()
+        response = self.client.post(
+            f'/api/segments/{fake_id}/generate-audio/',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=True)
+    @patch('core_engine.tts_wrapper.generate_audio')
+    def test_background_task_updates_segment(self, mock_gen, mock_model):
+        """After task completion, segment audio_file and audio_duration are populated.
+
+        Runs the task function synchronously to avoid SQLite
+        thread/transaction isolation issues in the test runner.
+        """
+        mock_gen.return_value = {
+            'success': True, 'duration': 3.14,
+            'audio_path': '/fake/path.wav', 'error': None,
+        }
+
+        # Capture the task function and run it synchronously
+        captured = {}
+        original_submit = self.tm.submit_task
+
+        def capture_submit(task_fn, task_id=None):
+            tid = original_submit(lambda: None, task_id=task_id)  # register task only
+            captured['fn'] = task_fn
+            captured['tid'] = tid
+            return tid
+
+        with patch.object(self.tm, 'submit_task', side_effect=capture_submit):
+            response = self.client.post(
+                f'/api/segments/{self.segment.id}/generate-audio/',
+            )
+
+        # Run the actual task function synchronously in the test thread
+        import time as time_mod
+        time_mod.sleep(0.5)  # let no-op task finish
+        captured['fn']()
+
+        self.segment.refresh_from_db()
+        self.assertIsNotNone(self.segment.audio_file)
+        self.assertAlmostEqual(self.segment.audio_duration, 3.14, places=2)
+
+
+# --------------------------------------------------------------------------
+# Generate All Audio endpoint tests
+# --------------------------------------------------------------------------
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA_AUDIO)
+class TestGenerateAllAudioEndpoint(APITestCase):
+    """Tests for POST /api/projects/{id}/generate-all-audio/."""
+
+    def setUp(self):
+        self.tm = _reset_task_manager()
+        self.project = Project.objects.create(title='Batch Test')
+        self.seg1 = Segment.objects.create(
+            project=self.project, sequence_index=0,
+            text_content='Segment one.', image_prompt='P1',
+        )
+        self.seg2 = Segment.objects.create(
+            project=self.project, sequence_index=1,
+            text_content='Segment two.', image_prompt='P2',
+        )
+        self.seg3 = Segment.objects.create(
+            project=self.project, sequence_index=2,
+            text_content='Segment three.', image_prompt='P3',
+        )
+        GlobalSettings.objects.all().delete()
+        GlobalSettings.objects.create()
+
+    def tearDown(self):
+        self.tm.shutdown(wait=True)
+        _reset_task_manager()
+        if os.path.isdir(TEMP_MEDIA_AUDIO):
+            shutil.rmtree(TEMP_MEDIA_AUDIO, ignore_errors=True)
+            os.makedirs(TEMP_MEDIA_AUDIO, exist_ok=True)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=True)
+    @patch('core_engine.tts_wrapper.generate_audio')
+    def test_generate_all_returns_202(self, mock_gen, mock_model):
+        mock_gen.return_value = {
+            'success': True, 'duration': 2.0,
+            'audio_path': '/fake.wav', 'error': None,
+        }
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/generate-all-audio/',
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertIn('task_id', response.data)
+        self.assertEqual(response.data['segments_to_process'], 3)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=True)
+    @patch('core_engine.tts_wrapper.generate_audio')
+    def test_skip_locked_true(self, mock_gen, mock_model):
+        """Locked segments are skipped when skip_locked=True."""
+        mock_gen.return_value = {
+            'success': True, 'duration': 2.0,
+            'audio_path': '/fake.wav', 'error': None,
+        }
+        self.seg2.is_locked = True
+        self.seg2.save()
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/generate-all-audio/',
+            {'skip_locked': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['segments_to_process'], 2)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=True)
+    @patch('core_engine.tts_wrapper.generate_audio')
+    def test_force_regenerate(self, mock_gen, mock_model):
+        """With force_regenerate=True, segments with existing audio are re-processed."""
+        mock_gen.return_value = {
+            'success': True, 'duration': 2.0,
+            'audio_path': '/fake.wav', 'error': None,
+        }
+        self.seg1.audio_file = 'projects/1/audio/existing.wav'
+        self.seg1.save()
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/generate-all-audio/',
+            {'force_regenerate': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data['segments_to_process'], 3)
+
+    def test_no_segments_to_process_returns_200(self):
+        """All segments empty → 200 with message."""
+        self.seg1.text_content = ''
+        self.seg2.text_content = ''
+        self.seg3.text_content = ''
+        self.seg1.save()
+        self.seg2.save()
+        self.seg3.save()
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/generate-all-audio/',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['segments_to_process'], 0)
+
+    def test_nonexistent_project_returns_404(self):
+        response = self.client.post(
+            '/api/projects/99999/generate-all-audio/',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=False)
+    def test_missing_model_returns_503(self, mock_model):
+        response = self.client.post(
+            f'/api/projects/{self.project.id}/generate-all-audio/',
+        )
+        self.assertEqual(response.status_code, 503)
+
+    @patch('core_engine.model_loader.KokoroModelLoader.is_model_available', return_value=True)
+    @patch('core_engine.tts_wrapper.generate_audio')
+    def test_progress_tracking(self, mock_gen, mock_model):
+        """After batch completes, progress.current == progress.total.
+
+        Runs the task function synchronously to avoid SQLite
+        thread/transaction isolation issues in the test runner.
+        """
+        mock_gen.return_value = {
+            'success': True, 'duration': 1.0,
+            'audio_path': '/fake.wav', 'error': None,
+        }
+
+        # Capture the task function and run it synchronously
+        captured = {}
+        original_submit = self.tm.submit_task
+
+        def capture_submit(task_fn, task_id=None):
+            tid = original_submit(lambda: None, task_id=task_id)
+            captured['fn'] = task_fn
+            captured['tid'] = tid
+            return tid
+
+        with patch.object(self.tm, 'submit_task', side_effect=capture_submit):
+            response = self.client.post(
+                f'/api/projects/{self.project.id}/generate-all-audio/',
+            )
+
+        import time as time_mod
+        time_mod.sleep(0.5)  # let no-op task finish
+        captured['fn']()
+
+        s = self.tm.get_task_status(captured['tid'])
+        self.assertEqual(s['progress']['current'], s['progress']['total'])
+
+
+# --------------------------------------------------------------------------
+# Task Status endpoint tests
+# --------------------------------------------------------------------------
+
+class TestTaskStatusEndpoint(APITestCase):
+    """Tests for GET /api/tasks/{task_id}/status/."""
+
+    def setUp(self):
+        self.tm = _reset_task_manager()
+
+    def tearDown(self):
+        self.tm.shutdown(wait=True)
+        _reset_task_manager()
+
+    def test_known_task_returns_200(self):
+        task_id = self.tm.submit_task(lambda: None)
+        import time as time_mod
+        time_mod.sleep(0.5)
+        response = self.client.get(f'/api/tasks/{task_id}/status/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['task_id'], task_id)
+        self.assertIn('status', response.data)
+        self.assertIn('progress', response.data)
+        self.assertIn('completed_segments', response.data)
+        self.assertIn('errors', response.data)
+
+    def test_unknown_task_returns_404(self):
+        response = self.client.get('/api/tasks/nonexistent-task-id/status/')
+        self.assertEqual(response.status_code, 404)
+
+    def test_status_transitions(self):
+        """Verify task transitions PENDING → PROCESSING → COMPLETED."""
+        import time as time_mod
+
+        def slow_task():
+            time_mod.sleep(1)
+
+        task_id = self.tm.submit_task(slow_task)
+
+        # Should start as PENDING or PROCESSING
+        s = self.tm.get_task_status(task_id)
+        self.assertIn(s['status'], [TASK_PENDING, TASK_PROCESSING])
+
+        # Wait for completion
+        for _ in range(20):
+            time_mod.sleep(0.5)
+            s = self.tm.get_task_status(task_id)
+            if s['status'] == TASK_COMPLETED:
+                break
+
+        self.assertEqual(s['status'], TASK_COMPLETED)
+
+    def test_error_reporting(self):
+        """Failed segments appear in the errors array."""
+        import time as time_mod
+
+        def failing_task():
+            self.tm.add_error('test-err', 'seg-1', 'Something went wrong')
+
+        task_id = self.tm.submit_task(failing_task, task_id='test-err')
+
+        for _ in range(20):
+            time_mod.sleep(0.5)
+            s = self.tm.get_task_status(task_id)
+            if s['status'] in (TASK_COMPLETED, TASK_FAILED):
+                break
+
+        self.assertEqual(len(s['errors']), 1)
+        self.assertEqual(s['errors'][0]['segment_id'], 'seg-1')
+        self.assertEqual(s['errors'][0]['error'], 'Something went wrong')
+
+
+# --------------------------------------------------------------------------
+# Segment Delete Audio Cleanup tests
+# --------------------------------------------------------------------------
+
+@override_settings(MEDIA_ROOT=TEMP_MEDIA_AUDIO)
+class TestSegmentDeleteAudioCleanup(APITestCase):
+    """Tests for audio file cleanup when deleting a segment."""
+
+    def setUp(self):
+        self.project = Project.objects.create(title='Cleanup Test')
+        self.segment = Segment.objects.create(
+            project=self.project, sequence_index=0,
+            text_content='Cleanup segment', image_prompt='',
+        )
+
+    def tearDown(self):
+        if os.path.isdir(TEMP_MEDIA_AUDIO):
+            shutil.rmtree(TEMP_MEDIA_AUDIO, ignore_errors=True)
+            os.makedirs(TEMP_MEDIA_AUDIO, exist_ok=True)
+
+    def test_delete_segment_removes_audio_file(self):
+        """Deleting a segment with a .wav on disk removes the file."""
+        from core_engine.tts_wrapper import construct_audio_path
+        audio_path = construct_audio_path(self.project.id, self.segment.id)
+        # Create a dummy wav file
+        with open(str(audio_path), 'w') as f:
+            f.write('fake audio data')
+        self.assertTrue(os.path.isfile(str(audio_path)))
+
+        self.client.delete(f'/api/segments/{self.segment.id}/')
+
+        self.assertFalse(os.path.isfile(str(audio_path)))
+        self.assertEqual(Segment.objects.count(), 0)
+
+    def test_delete_segment_without_audio_succeeds(self):
+        """Deleting a segment that has no audio file works without errors."""
+        response = self.client.delete(f'/api/segments/{self.segment.id}/')
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(Segment.objects.count(), 0)
+
+
+# --------------------------------------------------------------------------
+# TaskManager unit tests
+# --------------------------------------------------------------------------
+
+class TestTaskManagerUnit(TestCase):
+    """Unit tests for TaskManager singleton and lifecycle."""
+
+    def setUp(self):
+        self.tm = _reset_task_manager()
+
+    def tearDown(self):
+        self.tm.shutdown(wait=True)
+        _reset_task_manager()
+
+    def test_singleton_returns_same_instance(self):
+        tm1 = TaskManager()
+        tm2 = TaskManager()
+        self.assertIs(tm1, tm2)
+
+    def test_submit_task_creates_pending(self):
+        import time as time_mod
+
+        def slow():
+            time_mod.sleep(5)
+
+        # Submit a slow task to fill the executor
+        self.tm.submit_task(slow, task_id='blocker')
+
+        # Submit a second task — it should be queued as PENDING
+        tid = self.tm.submit_task(lambda: None, task_id='test-pending')
+        s = self.tm.get_task_status(tid)
+        self.assertEqual(s['status'], TASK_PENDING)
+
+    def test_lifecycle_pending_to_completed(self):
+        import time as time_mod
+
+        tid = self.tm.submit_task(lambda: None)
+
+        for _ in range(20):
+            time_mod.sleep(0.5)
+            s = self.tm.get_task_status(tid)
+            if s['status'] == TASK_COMPLETED:
+                break
+
+        self.assertEqual(s['status'], TASK_COMPLETED)
+
+    def test_lifecycle_failed_on_exception(self):
+        import time as time_mod
+
+        def failing():
+            raise ValueError('Test failure')
+
+        tid = self.tm.submit_task(failing)
+
+        for _ in range(20):
+            time_mod.sleep(0.5)
+            s = self.tm.get_task_status(tid)
+            if s['status'] == TASK_FAILED:
+                break
+
+        self.assertEqual(s['status'], TASK_FAILED)
+
+    def test_add_completed_segment_accumulates(self):
+        tid = self.tm.submit_task(lambda: None, task_id='acc-test')
+        self.tm.add_completed_segment(tid, 'seg-1', {'audio_url': '/a.wav', 'duration': 1.0})
+        self.tm.add_completed_segment(tid, 'seg-2', {'audio_url': '/b.wav', 'duration': 2.0})
+        s = self.tm.get_task_status(tid)
+        self.assertEqual(len(s['completed_segments']), 2)
+
+    def test_add_error_accumulates(self):
+        tid = self.tm.submit_task(lambda: None, task_id='err-test')
+        self.tm.add_error(tid, 'seg-1', 'Error one')
+        self.tm.add_error(tid, 'seg-2', 'Error two')
+        s = self.tm.get_task_status(tid)
+        self.assertEqual(len(s['errors']), 2)
+
+    def test_cancel_task_sets_flag(self):
+        import time as time_mod
+
+        def slow():
+            time_mod.sleep(5)
+
+        tid = self.tm.submit_task(slow)
+        self.tm.cancel_task(tid)
+        self.assertTrue(self.tm.is_cancelled(tid))
+
+    def test_cleanup_old_tasks(self):
+        """Tasks older than threshold are cleaned up."""
+        import time as time_mod
+
+        tid = self.tm.submit_task(lambda: None)
+        for _ in range(20):
+            time_mod.sleep(0.5)
+            s = self.tm.get_task_status(tid)
+            if s['status'] == TASK_COMPLETED:
+                break
+
+        # Manipulate completed_at to be old
+        with self.tm._tasks_lock:
+            self.tm._tasks[tid]['completed_at'] = time_mod.time() - 7200
+
+        self.tm._cleanup_old_tasks()
+        self.assertIsNone(self.tm.get_task_status(tid))
+
+    def test_get_status_unknown_returns_none(self):
+        result = self.tm.get_task_status('does-not-exist')
+        self.assertIsNone(result)
+
+    def test_update_progress_unknown_id_no_crash(self):
+        """Updating progress on unknown task silently does nothing."""
+        self.tm.update_task_progress('fake-id', 1, 10)
+        # Should not raise

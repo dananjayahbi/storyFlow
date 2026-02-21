@@ -2,3 +2,12 @@ Django>=5.0,<6.0
 djangorestframework>=3.15,<4.0
 django-cors-headers>=4.3,<5.0
 Pillow>=11.0,<13.0
+
+# TTS / Audio
+# onnxruntime and onnxruntime-gpu are mutually exclusive.
+# If you have a CUDA-capable GPU, replace onnxruntime with onnxruntime-gpu.
+onnxruntime>=1.17.0
+# soundfile depends on libsndfile, bundled on Windows/macOS.
+# On Linux, install system package: apt install libsndfile1
+soundfile>=0.12.1
+numpy>=1.26.0

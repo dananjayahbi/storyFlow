@@ -1,7 +1,8 @@
 'use client';
 
-import React from 'react';
-import type { Segment, UpdateSegmentPayload } from '@/lib/types';
+import React, { useCallback } from 'react';
+import type { Segment, UpdateSegmentPayload, AudioGenerationState } from '@/lib/types';
+import { useProjectStore } from '@/lib/stores';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,10 +13,19 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Lock, LockOpen, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle } from 'lucide-react';
 import { SegmentTextEditor } from './SegmentTextEditor';
 import { ImageUploader } from './ImageUploader';
 import { ImagePromptDisplay } from './ImagePromptDisplay';
+import { AudioPlayer } from './AudioPlayer';
+import { GenerateAudioButton } from './GenerateAudioButton';
+import { AudioStatusBadge } from './AudioStatusBadge';
+
+/** Stable reference for the default (idle) audio status — avoids new object on each render. */
+const DEFAULT_AUDIO_STATUS: AudioGenerationState = { status: 'idle' };
 
 interface SegmentCardProps {
   segment: Segment;
@@ -28,19 +38,43 @@ interface SegmentCardProps {
 function SegmentCardComponent({
   segment, onUpdate, onDelete, onUploadImage, onRemoveImage,
 }: SegmentCardProps) {
-  const handleLockToggle = () => {
+  // Granular selector: only re-renders when THIS segment's audio status changes,
+  // not when other segments' statuses update in the audioGenerationStatus map.
+  const generationStatus = useProjectStore(
+    (state) => state.audioGenerationStatus[segment.id] ?? DEFAULT_AUDIO_STATUS,
+  );
+  const generateAudio = useProjectStore((state) => state.generateAudio);
+  const isStale = useProjectStore(
+    (state) => state.staleAudioSegments.has(segment.id),
+  );
+
+  const isGenerating = generationStatus.status === 'generating';
+
+  // Stable callback refs — prevent unnecessary child re-renders
+  const handleLockToggle = useCallback(() => {
     onUpdate(segment.id, { is_locked: !segment.is_locked });
-  };
+  }, [onUpdate, segment.id, segment.is_locked]);
+
+  const handleGenerateAudio = useCallback(() => {
+    generateAudio(segment.id);
+  }, [generateAudio, segment.id]);
 
   return (
     <Card className={`p-4 space-y-3 ${
       segment.is_locked ? 'border-amber-300' : ''
-    }`}>
+    } ${isGenerating ? 'animate-pulse border-amber-400' : ''}`}>
       {/* 3a. Header Row */}
       <div className="flex items-center justify-between">
-        <Badge variant="secondary">
-          #{segment.sequence_index + 1}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">
+            #{segment.sequence_index + 1}
+          </Badge>
+          <AudioStatusBadge
+            audioFile={segment.audio_file}
+            audioDuration={segment.audio_duration}
+            generationStatus={generationStatus}
+          />
+        </div>
         <div className="flex items-center gap-1">
           {/* Lock toggle */}
           <Tooltip>
@@ -83,6 +117,25 @@ function SegmentCardComponent({
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+          {/* More actions dropdown */}
+          {segment.audio_file && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={segment.is_locked || isGenerating}
+                  onClick={handleGenerateAudio}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Regenerate Audio
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -112,11 +165,35 @@ function SegmentCardComponent({
         </div>
       </div>
 
-      {/* 3e. Audio Placeholder */}
-      <div className="rounded-md bg-muted/50 p-3 opacity-60">
-        <p className="text-sm text-muted-foreground">
-          🔊 Audio — Coming in Phase 03
-        </p>
+      {/* 3e. Audio Section */}
+      <div className="overflow-hidden">
+      {segment.audio_file && !isGenerating ? (
+        <div className="space-y-2">
+          <AudioPlayer
+            audioUrl={segment.audio_file}
+            duration={segment.audio_duration ?? 0}
+          />
+          {isStale && (
+            <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 rounded">
+              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+              <span>Text changed — audio may be out of sync.</span>
+              <button
+                className="ml-auto underline hover:no-underline font-medium"
+                onClick={handleGenerateAudio}
+              >
+                Regenerate
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <GenerateAudioButton
+          segmentId={segment.id}
+          isLocked={segment.is_locked}
+          generationStatus={generationStatus}
+          onGenerate={handleGenerateAudio}
+        />
+      )}
       </div>
     </Card>
   );

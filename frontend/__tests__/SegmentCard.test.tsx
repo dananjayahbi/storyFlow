@@ -1,7 +1,14 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SegmentCard } from '@/components/SegmentCard';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useProjectStore } from '@/lib/stores';
 import type { Segment } from '@/lib/types';
+
+// Mock the Zustand store
+jest.mock('@/lib/stores', () => ({
+  useProjectStore: jest.fn(),
+}));
+const mockUseProjectStore = useProjectStore as unknown as jest.Mock;
 
 const mockSegment: Segment = {
   id: 'seg-abc-123',
@@ -25,8 +32,19 @@ describe('SegmentCard', () => {
   const mockUploadImage = jest.fn().mockResolvedValue(undefined);
   const mockRemoveImage = jest.fn().mockResolvedValue(undefined);
 
+  const mockGenerateAudio = jest.fn();
+
   beforeEach(() => {
     jest.clearAllMocks();
+    // Mock useProjectStore selector calls
+    mockUseProjectStore.mockImplementation((selector: (state: Record<string, unknown>) => unknown) => {
+      const fakeState = {
+        audioGenerationStatus: {} as Record<string, { status: string }>,
+        generateAudio: mockGenerateAudio,
+        staleAudioSegments: new Set<string>(),
+      };
+      return selector(fakeState);
+    });
   });
 
   it('renders all sub-components (text editor, image zone, prompt)', () => {
@@ -51,9 +69,13 @@ describe('SegmentCard', () => {
     expect(
       screen.getByText('A medieval castle entrance')
     ).toBeInTheDocument();
-    // Audio placeholder
+    // Audio status badge (no audio)
     expect(
-      screen.getByText('🔊 Audio — Coming in Phase 03')
+      screen.getByText('No Audio')
+    ).toBeInTheDocument();
+    // Generate Audio button (idle, unlocked)
+    expect(
+      screen.getByText('Generate Audio')
     ).toBeInTheDocument();
   });
 

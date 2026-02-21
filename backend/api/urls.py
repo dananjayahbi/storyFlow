@@ -9,5 +9,6 @@ router.register(r'segments', views.SegmentViewSet)
 urlpatterns = [
     path('projects/import/', views.import_project, name='project-import'),
     path('segments/reorder/', views.reorder_segments, name='segment-reorder'),
+    path('tasks/<str:task_id>/status/', views.task_status_view, name='task-status'),
     path('', include(router.urls)),
 ]

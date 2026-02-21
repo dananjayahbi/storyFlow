@@ -1,5 +1,17 @@
 import axios from 'axios';
-import { Project, ProjectDetail, Segment, CreateProjectPayload, ImportProjectRequest, UpdateSegmentPayload, PaginatedResponse } from './types';
+import {
+  Project,
+  ProjectDetail,
+  Segment,
+  CreateProjectPayload,
+  ImportProjectRequest,
+  UpdateSegmentPayload,
+  PaginatedResponse,
+  TaskResponse,
+  BulkTaskResponse,
+  GenerateAllAudioOptions,
+  TaskStatusResponse,
+} from './types';
 
 const api = axios.create({
   baseURL: 'http://localhost:8000',
@@ -30,6 +42,11 @@ export async function importProject(payload: ImportProjectRequest): Promise<Proj
 
 export async function getSegments(projectId: string): Promise<Segment[]> {
   const response = await api.get<Segment[]>(`/api/segments/?project=${projectId}`);
+  return response.data;
+}
+
+export async function getSegment(id: string): Promise<Segment> {
+  const response = await api.get<Segment>(`/api/segments/${id}/`);
   return response.data;
 }
 
@@ -74,6 +91,74 @@ export async function reorderSegments(
 
 export async function deleteProject(id: string): Promise<void> {
   await api.delete(`/api/projects/${id}/`);
+}
+
+// ── Audio Generation & Task Tracking ──
+
+export async function generateSegmentAudio(
+  segmentId: string
+): Promise<TaskResponse> {
+  const response = await api.post<TaskResponse>(
+    `/api/segments/${segmentId}/generate-audio/`
+  );
+  return response.data;
+}
+
+export async function generateAllAudio(
+  projectId: string,
+  options: GenerateAllAudioOptions = {}
+): Promise<BulkTaskResponse> {
+  const body = {
+    skip_locked: options.skip_locked ?? true,
+    force_regenerate: options.force_regenerate ?? false,
+  };
+  const response = await api.post<BulkTaskResponse>(
+    `/api/projects/${projectId}/generate-all-audio/`,
+    body
+  );
+  return response.data;
+}
+
+export async function getTaskStatus(
+  taskId: string
+): Promise<TaskStatusResponse> {
+  const response = await api.get<TaskStatusResponse>(
+    `/api/tasks/${taskId}/status/`
+  );
+  return response.data;
+}
+
+export async function pollTaskStatus(
+  taskId: string,
+  onProgress: (status: TaskStatusResponse) => void,
+  intervalMs: number = 2000,
+  maxRetries: number = 3
+): Promise<TaskStatusResponse> {
+  return new Promise<TaskStatusResponse>((resolve, reject) => {
+    let consecutiveFailures = 0;
+    const timer = setInterval(async () => {
+      try {
+        const taskStatus = await getTaskStatus(taskId);
+        consecutiveFailures = 0; // Reset on successful poll
+        onProgress(taskStatus);
+
+        if (
+          taskStatus.status === 'COMPLETED' ||
+          taskStatus.status === 'FAILED'
+        ) {
+          clearInterval(timer);
+          resolve(taskStatus);
+        }
+      } catch {
+        consecutiveFailures++;
+        if (consecutiveFailures >= maxRetries) {
+          clearInterval(timer);
+          reject(new Error('Lost connection to server'));
+        }
+        // Otherwise continue polling (transient failure)
+      }
+    }, intervalMs);
+  });
 }
 
 export default api;

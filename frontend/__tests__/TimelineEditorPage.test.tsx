@@ -133,10 +133,10 @@ describe('TimelineEditorPage', () => {
       expect(screen.getByText('Generate All Audio')).toBeInTheDocument();
     });
 
-    // Both buttons should be disabled
+    // Generate All Audio button is now enabled (activated in Phase 03)
     const generateButton = screen.getByText('Generate All Audio').closest('button');
     const exportButton = screen.getByText('Export Video').closest('button');
-    expect(generateButton).toBeDisabled();
+    expect(generateButton).toBeEnabled();
     expect(exportButton).toBeDisabled();
   });
 });
