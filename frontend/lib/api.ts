@@ -97,6 +97,13 @@ export async function removeSegmentImage(
   return response.data;
 }
 
+export async function removeSegmentAudio(
+  id: string
+): Promise<{ id: string; audio_file: null; audio_duration: null; message: string }> {
+  const response = await api.delete(`/api/segments/${id}/remove-audio/`);
+  return response.data;
+}
+
 export async function reorderSegments(
   projectId: string,
   segmentOrder: string[]

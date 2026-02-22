@@ -16,7 +16,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions } from 'lucide-react';
+import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions, Volume2, VolumeX } from 'lucide-react';
 import { SegmentTextEditor } from './SegmentTextEditor';
 import { ImageUploader } from './ImageUploader';
 import { ImagePromptDisplay } from './ImagePromptDisplay';
@@ -47,6 +47,7 @@ function SegmentCardComponent({
     (state) => state.audioGenerationStatus[segment.id] ?? DEFAULT_AUDIO_STATUS,
   );
   const generateAudio = useProjectStore((state) => state.generateAudio);
+  const removeAudio = useProjectStore((state) => state.removeAudio);
   const isStale = useProjectStore(
     (state) => state.staleAudioSegments.has(segment.id),
   );
@@ -68,6 +69,10 @@ function SegmentCardComponent({
   const handleGenerateAudio = useCallback(() => {
     generateAudio(segment.id);
   }, [generateAudio, segment.id]);
+
+  const handleRemoveAudio = useCallback(() => {
+    removeAudio(segment.id);
+  }, [removeAudio, segment.id]);
 
   // Split text_content into word chunks for subtitle preview
   const subtitleChunks = segment.text_content
@@ -156,6 +161,14 @@ function SegmentCardComponent({
                 >
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Regenerate Audio
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={segment.is_locked || isGenerating}
+                  onClick={handleRemoveAudio}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <VolumeX className="h-4 w-4 mr-2" />
+                  Remove Audio
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

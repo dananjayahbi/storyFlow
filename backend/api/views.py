@@ -480,6 +480,44 @@ class SegmentViewSet(viewsets.ModelViewSet):
             'message': 'Image removed successfully',
         }, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['delete'], url_path='remove-audio')
+    def remove_audio(self, request, pk=None):
+        segment = self.get_object()
+
+        # 1. Lock check
+        if segment.is_locked:
+            return Response(
+                {'error': 'Cannot modify a locked segment.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 2. Check audio exists
+        if not segment.audio_file:
+            return Response(
+                {'error': 'No audio to remove'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3. Delete file from disk (self-healing if already missing)
+        try:
+            audio_path = construct_audio_path(segment.project_id, segment.id)
+            if os.path.isfile(str(audio_path)):
+                os.remove(str(audio_path))
+        except FileNotFoundError:
+            pass  # File already gone — clear field anyway
+
+        # 4. Clear model fields
+        segment.audio_file = None
+        segment.audio_duration = None
+        segment.save(update_fields=['audio_file', 'audio_duration'])
+
+        return Response({
+            'id': str(segment.id),
+            'audio_file': None,
+            'audio_duration': None,
+            'message': 'Audio removed successfully',
+        }, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'], url_path='generate-audio')
     def generate_audio(self, request, pk=None):
         """Generate TTS audio for a single segment (async).

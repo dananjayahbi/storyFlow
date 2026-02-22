@@ -9,6 +9,7 @@ import {
   deleteSegment as apiDeleteSegment,
   uploadSegmentImage,
   removeSegmentImage,
+  removeSegmentAudio,
   reorderSegments as apiReorderSegments,
   generateSegmentAudio,
   generateAllAudio as apiGenerateAllAudio,
@@ -75,6 +76,7 @@ interface ProjectStore {
   reorderSegments: (newOrder: string[]) => Promise<void>;
   uploadImage: (segmentId: string, file: File) => Promise<void>;
   removeImage: (segmentId: string) => Promise<void>;
+  removeAudio: (segmentId: string) => Promise<void>;
 
   /** Trigger audio generation for a single segment. */
   generateAudio: (segmentId: string) => Promise<void>;
@@ -265,6 +267,26 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       }));
     } catch {
       set({ error: 'Failed to remove image' });
+    }
+  },
+
+  removeAudio: async (segmentId) => {
+    try {
+      await removeSegmentAudio(segmentId);
+      set((state) => ({
+        segments: state.segments.map((s) =>
+          s.id === segmentId ? { ...s, audio_file: null, audio_duration: null } : s
+        ),
+        // Clear any audio generation status for this segment
+        audioGenerationStatus: {
+          ...state.audioGenerationStatus,
+          [segmentId]: { status: 'idle' as const },
+        },
+      }));
+      // Also clear the stale flag if set
+      get().clearAudioStale(segmentId);
+    } catch {
+      set({ error: 'Failed to remove audio' });
     }
   },
 
