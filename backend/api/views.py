@@ -5,7 +5,7 @@ import uuid as uuid_mod
 
 from django.conf import settings
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import models, transaction
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
@@ -337,8 +337,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
 class SegmentViewSet(viewsets.ModelViewSet):
     """ViewSet for segment CRUD operations.
 
-    Segments are created exclusively via the import endpoint.
-    This ViewSet provides list, retrieve, partial_update, and destroy.
+    Segments can be created individually via POST with a project ID,
+    or in bulk via the import endpoint.
+    This ViewSet provides create, list, retrieve, partial_update, and destroy.
     """
     queryset = Segment.objects.all()
     serializer_class = SegmentSerializer
@@ -348,11 +349,37 @@ class SegmentViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
     def create(self, request, *args, **kwargs):
-        """Disable direct segment creation — segments are created via import only."""
-        return Response(
-            {'error': 'Segments cannot be created directly. Use the import endpoint.'},
-            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        """Create a new segment within an existing project."""
+        project_id = request.data.get('project')
+        if not project_id:
+            return Response(
+                {'error': 'The "project" field is required.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            project = Project.objects.get(id=project_id)
+        except Project.DoesNotExist:
+            return Response(
+                {'error': 'Project not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Calculate next sequence_index
+        max_index = project.segments.aggregate(
+            max_idx=models.Max('sequence_index')
+        )['max_idx']
+        next_index = (max_index + 1) if max_index is not None else 0
+
+        segment = Segment.objects.create(
+            project=project,
+            sequence_index=next_index,
+            text_content=request.data.get('text_content', ''),
+            image_prompt=request.data.get('image_prompt', ''),
         )
+
+        serializer = self.get_serializer(segment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self):
         queryset = Segment.objects.all()
@@ -585,6 +612,92 @@ def import_project(request):
     # Serialize response with full project + nested segments
     response_serializer = ProjectDetailSerializer(project)
     return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+def import_segments(request, project_id):
+    """Import segments into an existing project.
+
+    Accepts JSON or text format via the 'format' field.
+    Appends parsed segments to the project (existing segments are preserved).
+    Returns the updated list of segments.
+    """
+    # 1. Validate project exists
+    try:
+        project = Project.objects.get(pk=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {'error': 'Project not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # 2. Parse the incoming data using the same parsers
+    fmt = request.data.get('format', 'json')
+    if fmt == 'json':
+        from .parsers import JSONParser as StoryJSONParser
+        parser = StoryJSONParser()
+        try:
+            parsed = parser.parse({
+                'title': project.title,
+                'segments': request.data.get('segments', []),
+            })
+        except ParseError as e:
+            return Response(
+                {'error': e.message, 'details': e.details},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    elif fmt == 'text':
+        from .parsers import TextParser
+        parser = TextParser()
+        try:
+            parsed = parser.parse(
+                title=project.title,
+                raw_text=request.data.get('raw_text', ''),
+            )
+        except ParseError as e:
+            return Response(
+                {'error': e.message, 'details': e.details},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    else:
+        return Response(
+            {'error': "format must be 'json' or 'text'"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # 3. Validate parsed segments
+    from .validators import validate_import_data
+    try:
+        validated = validate_import_data(parsed)
+    except ParseError as e:
+        return Response(
+            {'error': e.message, 'details': e.details},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # 4. Determine starting sequence_index
+    max_index = project.segments.aggregate(
+        max_idx=models.Max('sequence_index')
+    )['max_idx']
+    start_index = (max_index + 1) if max_index is not None else 0
+
+    # 5. Create segments atomically
+    with transaction.atomic():
+        segment_objects = [
+            Segment(
+                project=project,
+                sequence_index=start_index + i,
+                text_content=seg['text_content'],
+                image_prompt=seg.get('image_prompt', ''),
+            )
+            for i, seg in enumerate(validated['segments'])
+        ]
+        Segment.objects.bulk_create(segment_objects)
+
+    # 6. Return all segments for the project
+    all_segments = project.segments.order_by('sequence_index')
+    serializer = SegmentSerializer(all_segments, many=True)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])
@@ -822,3 +935,68 @@ def upload_font_view(request):
 
     serializer = GlobalSettingsSerializer(settings_obj)
     return Response(serializer.data)
+
+
+# ===================================================================
+# TTS Test Endpoint
+# ===================================================================
+
+@api_view(['POST'])
+def tts_test_view(request):
+    """Generate a test audio clip from arbitrary text.
+
+    Request body:
+        {
+            "text": "Hello world, this is a test.",
+            "voice": "af_bella",   // optional, defaults to settings
+            "speed": 1.0           // optional, defaults to settings
+        }
+
+    Returns the generated WAV file as an audio/wav response.
+    """
+    text = request.data.get('text', '').strip()
+    if not text:
+        return Response(
+            {'error': 'text is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    settings_obj = GlobalSettings.load()
+    voice = request.data.get('voice', settings_obj.tts_voice)
+    speed = float(request.data.get('speed', settings_obj.tts_speed))
+
+    # Generate audio to a temporary file
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+        output_path = tmp.name
+
+    try:
+        from core_engine.tts_wrapper import generate_audio as tts_generate
+        result = tts_generate(
+            text=text,
+            output_path=output_path,
+            voice=voice,
+            speed=speed,
+        )
+
+        if not result.get('success'):
+            return Response(
+                {'error': result.get('error', 'TTS generation failed')},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Return the audio file
+        from django.http import FileResponse
+        response = FileResponse(
+            open(output_path, 'rb'),
+            content_type='audio/wav',
+        )
+        response['Content-Disposition'] = 'inline; filename="tts_test.wav"'
+        return response
+
+    except Exception as e:
+        logger.error("TTS test failed: %s", str(e))
+        return Response(
+            {'error': str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

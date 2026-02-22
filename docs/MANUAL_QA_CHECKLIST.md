@@ -11,18 +11,18 @@
 
 ### 1.1 Project CRUD
 
-- [ ] Create a new project using the **"+ New Project"** button — verify the "Create New Project" dialog appears with a title input and "Create" button.
-- [ ] Enter a project title and submit — verify the project card appears on the dashboard with the correct title.
-- [ ] Verify the "Create" button shows **"Creating…"** and is disabled while the request is in progress.
-- [ ] Delete a project using the trash icon on its card — verify the "Delete Project" confirmation dialog appears warning about permanent removal.
-- [ ] Confirm deletion — verify the project is removed from the dashboard and all associated segments are deleted.
-- [ ] Create multiple projects (3+) — verify all appear in the dashboard card grid (responsive: 1 col mobile, 2 col md, 3 col lg).
+- [ok] Create a new project using the **"+ New Project"** button — verify the "Create New Project" dialog appears with a title input and "Create" button.
+- [ok] Enter a project title and submit — verify the project card appears on the dashboard with the correct title.
+- [ok] Verify the "Create" button shows **"Creating…"** and is disabled while the request is in progress.
+- [ok] Delete a project using the trash icon on its card — verify the "Delete Project" confirmation dialog appears warning about permanent removal.
+- [ok] Confirm deletion — verify the project is removed from the dashboard and all associated segments are deleted.
+- [ok] Create multiple projects (3+) — verify all appear in the dashboard card grid (responsive: 1 col mobile, 2 col md, 3 col lg).
 
 ### 1.2 Dashboard Display
 
-- [ ] Verify each project card displays: cover image thumbnail (gradient placeholder with image icon), project title (truncated with `line-clamp-1`), segment count ("{N} segment(s)"), and relative time ("Just now", "X minutes ago", etc.).
-- [ ] Hover over the relative time — verify a tooltip shows the absolute date.
-- [ ] Verify status badges display correctly for each state: **Draft** (muted), **In Progress** (amber, pulsing), **Rendered** (green), **Error** (red/destructive).
+- [x] Verify each project card displays: cover image thumbnail (gradient placeholder with image icon), project title (truncated with `line-clamp-1`), segment count ("{N} segment(s)"), and relative time ("Just now", "X minutes ago", etc.).
+- [ok] Hover over the relative time — verify a tooltip shows the absolute date.
+- [ok] Verify status badges display correctly for each state: **Draft** (muted), **In Progress** (amber, pulsing), **Rendered** (green), **Error** (red/destructive).
 - [ ] Verify the **"🎬 Watch"** button appears only on rendered projects and opens the video player.
 - [ ] Verify project cards are `opacity-75` when the project status is Error.
 

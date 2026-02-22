@@ -3,6 +3,8 @@ import {
   getProject,
   getSegments,
   getSegment,
+  createSegment as apiCreateSegment,
+  importSegments as apiImportSegments,
   updateSegment as apiUpdateSegment,
   deleteSegment as apiDeleteSegment,
   uploadSegmentImage,
@@ -66,6 +68,8 @@ interface ProjectStore {
 
   // Actions
   fetchProject: (id: string) => Promise<void>;
+  addSegment: (data?: { text_content?: string; image_prompt?: string }) => Promise<void>;
+  importSegmentsToProject: (payload: { format: 'json' | 'text'; segments?: Array<{ text_content: string; image_prompt?: string }>; raw_text?: string }) => Promise<void>;
   updateSegment: (id: string, data: UpdateSegmentPayload) => Promise<void>;
   deleteSegment: (id: string) => Promise<void>;
   reorderSegments: (newOrder: string[]) => Promise<void>;
@@ -153,6 +157,31 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       }
     } catch {
       set({ error: 'Failed to load project', isLoading: false });
+    }
+  },
+
+  addSegment: async (data) => {
+    const project = get().project;
+    if (!project) return;
+    try {
+      const newSegment = await apiCreateSegment(project.id, data);
+      set((state) => ({
+        segments: [...state.segments, newSegment],
+      }));
+    } catch {
+      // Let the caller handle errors via toast
+      throw new Error('Failed to add segment');
+    }
+  },
+
+  importSegmentsToProject: async (payload) => {
+    const project = get().project;
+    if (!project) return;
+    try {
+      const allSegments = await apiImportSegments(project.id, payload);
+      set({ segments: allSegments });
+    } catch {
+      throw new Error('Failed to import segments');
     }
   },
 

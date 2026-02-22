@@ -17,9 +17,6 @@ import { Voice } from './constants';
 
 const api = axios.create({
   baseURL: 'http://localhost:8000',
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 export async function getProjects(): Promise<PaginatedResponse<Project>> {
@@ -42,8 +39,27 @@ export async function importProject(payload: ImportProjectRequest): Promise<Proj
   return response.data;
 }
 
+export async function importSegments(
+  projectId: string,
+  payload: { format: 'json' | 'text'; segments?: Array<{ text_content: string; image_prompt?: string }>; raw_text?: string }
+): Promise<Segment[]> {
+  const response = await api.post<Segment[]>(`/api/projects/${projectId}/import-segments/`, payload);
+  return response.data;
+}
+
 export async function getSegments(projectId: string): Promise<Segment[]> {
-  const response = await api.get<Segment[]>(`/api/segments/?project=${projectId}`);
+  const response = await api.get<PaginatedResponse<Segment>>(`/api/segments/?project=${projectId}`);
+  return response.data.results;
+}
+
+export async function createSegment(
+  projectId: string,
+  data: { text_content?: string; image_prompt?: string } = {}
+): Promise<Segment> {
+  const response = await api.post<Segment>('/api/segments/', {
+    project: projectId,
+    ...data,
+  });
   return response.data;
 }
 
@@ -211,6 +227,21 @@ export async function uploadFont(
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return data;
+}
+
+// ── TTS Test ──
+
+export async function testTTS(
+  text: string,
+  voice?: string,
+  speed?: number
+): Promise<Blob> {
+  const response = await api.post(
+    '/api/settings/tts-test/',
+    { text, voice, speed },
+    { responseType: 'blob' }
+  );
+  return response.data;
 }
 
 export default api;

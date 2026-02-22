@@ -1,0 +1,25 @@
+{
+  "title": "The Lost City of Aurelia",
+  "segments": [
+    {
+      "text_content": "Deep in the heart of the Amazon rainforest, where sunlight barely pierces the dense canopy above, a team of archaeologists discovered something extraordinary. Half-buried beneath centuries of jungle growth, the stone walls of an ancient city emerged from the earth like the bones of a sleeping giant.",
+      "image_prompt": "An ancient stone city overgrown with jungle vines and moss, sunlight streaming through dense rainforest canopy, archaeological excavation site, cinematic wide shot, golden hour lighting"
+    },
+    {
+      "text_content": "Dr. Elena Vasquez, the expedition leader, brushed the dirt from a carved stone tablet. The inscriptions were unlike anything she had seen before — a language that predated every known civilization in the Americas by at least a thousand years. Her hands trembled as she traced the symbols with her fingertips.",
+      "image_prompt": "A female archaeologist carefully examining an ancient stone tablet with mysterious glowing inscriptions, headlamp illuminating carved symbols, close-up shot, dramatic lighting"
+    },
+    {
+      "text_content": "As the team ventured deeper into the ruins, they found a grand plaza surrounded by towering pyramids. At the center stood a crystalline obelisk, perfectly preserved despite millennia of exposure. It caught the afternoon sun and scattered rainbow light across the weathered stone walls.",
+      "image_prompt": "A magnificent ancient plaza with towering pyramids surrounding a glowing crystal obelisk, rainbow light refracting across stone walls, epic wide angle, fantasy archaeology setting"
+    },
+    {
+      "text_content": "The most remarkable discovery came in the underground chambers beneath the largest pyramid. Walls lined with gold and precious stones reflected the glow of bioluminescent fungi that had colonized the ceiling, creating a living starscape above their heads.",
+      "image_prompt": "Underground chamber with gold-lined walls and bioluminescent fungi on the ceiling creating a starry effect, treasure-filled ancient vault, ethereal blue-green glow, mysterious atmosphere"
+    },
+    {
+      "text_content": "But it was the final chamber that changed everything. A perfectly circular room, its walls covered in astronomical charts of impossible accuracy. Star positions that modern telescopes had only recently confirmed. Calendar systems that predicted celestial events thousands of years into the future. Whoever built this city had knowledge that defied explanation.",
+      "image_prompt": "A circular ancient observatory room with walls covered in precise astronomical charts and star maps, constellations glowing on dark stone walls, a lone archaeologist standing in awe at the center, dramatic overhead shot"
+    }
+  ]
+}

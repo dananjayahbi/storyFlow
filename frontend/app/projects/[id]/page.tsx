@@ -1,25 +1,27 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useProjectStore } from '@/lib/stores';
 import { Timeline } from '@/components/Timeline';
 import { GlobalSettingsPanel } from '@/components/GlobalSettingsPanel';
+import ImportDialog from '@/components/ImportDialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { ArrowLeft, Volume2, Film, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Volume2, Film, Loader2, X, Plus, FileUp } from 'lucide-react';
 
 export default function TimelineEditorPage() {
   const params = useParams();
   const id = params.id as string;
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const {
     project, segments, isLoading, error,
-    fetchProject, updateSegment, deleteSegment,
+    fetchProject, addSegment, importSegmentsToProject, updateSegment, deleteSegment,
     uploadImage, removeImage, reset,
     bulkGenerationProgress, generateAllAudio, cancelGeneration,
   } = useProjectStore();
@@ -99,6 +101,11 @@ export default function TimelineEditorPage() {
               <span className="sm:hidden">Back</span>
             </Link>
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)}>
+            <FileUp className="h-4 w-4 mr-1" />
+            <span className="hidden sm:inline">Import Story</span>
+            <span className="sm:hidden">Import</span>
+          </Button>
           <Button variant="outline" size="sm" disabled>
             Export
           </Button>
@@ -148,6 +155,7 @@ export default function TimelineEditorPage() {
         <main className="flex-1 overflow-auto">
           <Timeline
             segments={segments}
+            onAddSegment={async () => { await addSegment(); }}
             onUpdateSegment={updateSegment}
             onDeleteSegment={deleteSegment}
             onUploadImage={uploadImage}
@@ -217,6 +225,17 @@ export default function TimelineEditorPage() {
           </div>
         )}
       </footer>
+
+      {/* Import Segments Dialog */}
+      <ImportDialog
+        open={showImportDialog}
+        onOpenChange={setShowImportDialog}
+        projectId={id}
+        onSuccess={() => {}}
+        onSegmentsImported={(segments) => {
+          useProjectStore.setState({ segments });
+        }}
+      />
     </div>
   );
 }

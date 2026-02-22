@@ -4,13 +4,17 @@ import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { importProject } from '@/lib/api';
-import { Project, ImportProjectRequest } from '@/lib/types';
+import { importProject, importSegments } from '@/lib/api';
+import { Project, ImportProjectRequest, Segment } from '@/lib/types';
 
 interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: (project: Project) => void;
+  /** When provided, imports segments into an existing project instead of creating a new one. */
+  projectId?: string;
+  /** Called when segments are imported into an existing project. */
+  onSegmentsImported?: (segments: Segment[]) => void;
 }
 
 const JSON_PLACEHOLDER = `{
@@ -29,7 +33,7 @@ Prompt: Description of the image for segment 1...
 Text: Your narration text for segment 2...
 Prompt: Description of the image for segment 2...`;
 
-export default function ImportDialog({ open, onOpenChange, onSuccess }: ImportDialogProps) {
+export default function ImportDialog({ open, onOpenChange, onSuccess, projectId, onSegmentsImported }: ImportDialogProps) {
   const [format, setFormat] = useState<'json' | 'text'>('json');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -71,27 +75,25 @@ export default function ImportDialog({ open, onOpenChange, onSuccess }: ImportDi
     }
   };
 
+  const isAppendMode = !!projectId;
+
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setErrors(null);
 
     try {
-      const payload: ImportProjectRequest = {
-        format,
-        title: title.trim() || 'Untitled Project',
-        ...(format === 'json'
-          ? { segments: JSON.parse(content).segments }
-          : { raw_text: content }),
-      };
+      // Parse JSON content first if needed
+      let segments: Array<{ text_content: string; image_prompt?: string }> | undefined;
+      let rawText: string | undefined;
 
-      // If JSON format and content has a title, use it
       if (format === 'json') {
         try {
           const parsed = JSON.parse(content);
-          if (parsed.title && !title.trim()) {
-            payload.title = parsed.title;
+          segments = parsed.segments;
+          // For new project mode, extract title from JSON if not provided
+          if (!isAppendMode && parsed.title && !title.trim()) {
+            // will be used below
           }
-          payload.segments = parsed.segments;
         } catch {
           if (mountedRef.current) {
             setErrors({ content: ['Invalid JSON format'] });
@@ -99,12 +101,35 @@ export default function ImportDialog({ open, onOpenChange, onSuccess }: ImportDi
           }
           return;
         }
+      } else {
+        rawText = content;
       }
 
-      const project = await importProject(payload);
-      if (mountedRef.current) {
-        onSuccess(project as unknown as Project);
-        onOpenChange(false);
+      if (isAppendMode) {
+        // Import segments into existing project
+        const importPayload = {
+          format,
+          ...(format === 'json' ? { segments } : { raw_text: rawText }),
+        };
+        const allSegments = await importSegments(projectId, importPayload);
+        if (mountedRef.current) {
+          onSegmentsImported?.(allSegments);
+          onOpenChange(false);
+        }
+      } else {
+        // Create new project (original behavior)
+        const parsed = format === 'json' ? JSON.parse(content) : null;
+        const payload: ImportProjectRequest = {
+          format,
+          title: title.trim() || (parsed?.title) || 'Untitled Project',
+          ...(format === 'json' ? { segments } : { raw_text: rawText }),
+        };
+
+        const project = await importProject(payload);
+        if (mountedRef.current) {
+          onSuccess(project as unknown as Project);
+          onOpenChange(false);
+        }
       }
     } catch (err: unknown) {
       if (mountedRef.current) {
@@ -126,7 +151,7 @@ export default function ImportDialog({ open, onOpenChange, onSuccess }: ImportDi
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
-          <DialogTitle>Import Story</DialogTitle>
+          <DialogTitle>{isAppendMode ? 'Import Segments' : 'Import Story'}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -155,19 +180,21 @@ export default function ImportDialog({ open, onOpenChange, onSuccess }: ImportDi
               : 'Paste text blocks separated by --- with Text: and Prompt: lines.'}
           </p>
 
-          {/* Title Input */}
-          <div>
-            <label htmlFor="import-title" className="text-sm font-medium">
-              Project Title
-            </label>
-            <Input
-              id="import-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Optional — will use JSON title or default"
-              className="mt-1"
-            />
-          </div>
+          {/* Title Input — hidden when importing into an existing project */}
+          {!isAppendMode && (
+            <div>
+              <label htmlFor="import-title" className="text-sm font-medium">
+                Project Title
+              </label>
+              <Input
+                id="import-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Optional — will use JSON title or default"
+                className="mt-1"
+              />
+            </div>
+          )}
 
           {/* Content Textarea */}
           <div>

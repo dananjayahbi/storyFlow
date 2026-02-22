@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { getProjects } from '@/lib/api';
 import { Project } from '@/lib/types';
 import { ProjectCard } from '@/components/ProjectCard';
@@ -10,7 +11,7 @@ import ImportDialog from '@/components/ImportDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/EmptyState';
-import { FolderPlus, Search, X, ArrowUpDown } from 'lucide-react';
+import { FolderPlus, Search, X, ArrowUpDown, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Sort modes (Step 2) ──
@@ -141,6 +142,12 @@ export default function DashboardPage() {
           <CreateProjectDialog onProjectCreated={handleProjectCreated} />
           <Button variant="outline" onClick={() => setShowImportDialog(true)}>
             Import Story
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/settings">
+              <Settings className="h-4 w-4 mr-1" />
+              Settings
+            </Link>
           </Button>
         </div>
       </div>
