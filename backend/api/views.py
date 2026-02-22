@@ -720,13 +720,13 @@ def global_settings_view(request):
 # This is the canonical source — the frontend falls back to a
 # hardcoded copy if this endpoint is unreachable.
 VOICE_METADATA = {
-    'af_bella':   {'id': 'af_bella',   'name': 'Bella',   'gender': 'Female'},
-    'af_sarah':   {'id': 'af_sarah',   'name': 'Sarah',   'gender': 'Female'},
-    'af_nicole':  {'id': 'af_nicole',  'name': 'Nicole',  'gender': 'Female'},
-    'am_adam':    {'id': 'am_adam',    'name': 'Adam',    'gender': 'Male'},
-    'am_michael': {'id': 'am_michael', 'name': 'Michael', 'gender': 'Male'},
-    'bf_emma':    {'id': 'bf_emma',    'name': 'Emma',    'gender': 'Female', 'accent': 'British'},
-    'bm_george':  {'id': 'bm_george',  'name': 'George',  'gender': 'Male',   'accent': 'British'},
+    'af_bella':   {'id': 'af_bella',   'name': 'Bella',   'gender': 'Female', 'language': 'en-US'},
+    'af_sarah':   {'id': 'af_sarah',   'name': 'Sarah',   'gender': 'Female', 'language': 'en-US'},
+    'af_nicole':  {'id': 'af_nicole',  'name': 'Nicole',  'gender': 'Female', 'language': 'en-US'},
+    'am_adam':    {'id': 'am_adam',    'name': 'Adam',    'gender': 'Male',   'language': 'en-US'},
+    'am_michael': {'id': 'am_michael', 'name': 'Michael', 'gender': 'Male',   'language': 'en-US'},
+    'bf_emma':    {'id': 'bf_emma',    'name': 'Emma',    'gender': 'Female', 'accent': 'British', 'language': 'en-GB'},
+    'bm_george':  {'id': 'bm_george',  'name': 'George',  'gender': 'Male',   'accent': 'British', 'language': 'en-GB'},
 }
 
 
@@ -773,8 +773,8 @@ def upload_font_view(request):
     """Upload a custom subtitle font (.ttf or .otf).
 
     Accepts a multipart/form-data POST with a 'font' file field.
-    Saves the file to MEDIA_ROOT/fonts/ and updates the GlobalSettings
-    subtitle_font field with the saved path.
+    Saves the file to MEDIA_ROOT/fonts/, updates subtitle_font_family
+    to the font filename (without extension), and cleans up old files.
     """
     font_file = request.FILES.get('font')
     if not font_file:
@@ -790,7 +790,19 @@ def upload_font_view(request):
     fonts_dir = os.path.join(settings.MEDIA_ROOT, 'fonts')
     os.makedirs(fonts_dir, exist_ok=True)
 
-    # Save the file (overwrite if same name)
+    settings_obj = GlobalSettings.load()
+
+    # Delete old custom font file from disk if it exists
+    if settings_obj.custom_font_file:
+        try:
+            old_path = settings_obj.custom_font_file.path
+            if os.path.isfile(old_path):
+                os.remove(old_path)
+                logger.info("Removed previous custom font: %s", old_path)
+        except Exception:
+            pass  # file may already be gone
+
+    # Save the file
     safe_name = os.path.basename(font_file.name)
     dest_path = os.path.join(fonts_dir, safe_name)
 
@@ -798,14 +810,15 @@ def upload_font_view(request):
         for chunk in font_file.chunks():
             f.write(chunk)
 
-    # Update GlobalSettings with the font path
-    settings_obj = GlobalSettings.load()
-    settings_obj.subtitle_font = dest_path
+    # Derive font family from filename (strip extension)
+    font_family = os.path.splitext(safe_name)[0]
+
+    settings_obj.custom_font_file.name = os.path.join('fonts', safe_name)
+    settings_obj.subtitle_font_family = font_family
+    settings_obj.subtitle_font = dest_path  # legacy field
     settings_obj.save()
 
-    logger.info("Custom font uploaded: %s", dest_path)
+    logger.info("Custom font uploaded: %s (family: %s)", dest_path, font_family)
 
-    return Response({
-        'subtitle_font': dest_path,
-        'message': 'Font uploaded successfully.',
-    })
+    serializer = GlobalSettingsSerializer(settings_obj)
+    return Response(serializer.data)

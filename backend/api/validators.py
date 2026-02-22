@@ -6,8 +6,8 @@ import re
 ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 
-# ── Font upload constants (Task 05.03.03) ──
-ALLOWED_FONT_EXTENSIONS = ['.ttf', '.otf']
+# ── Font upload constants (Task 05.03.03 + 05.03.14) ──
+ALLOWED_FONT_EXTENSIONS = ['.ttf', '.otf', '.woff', '.woff2']
 MAX_FONT_SIZE = 10 * 1024 * 1024  # 10MB
 
 # ── Hex color validation (Task 05.03.03) ──
@@ -211,7 +211,7 @@ def validate_font_upload(file):
     if ext not in ALLOWED_FONT_EXTENSIONS:
         raise ValidationError({
             'error': 'Invalid font file',
-            'details': 'Only .ttf and .otf files are accepted.',
+            'details': 'Only .ttf, .otf, .woff, and .woff2 files are accepted.',
         })
 
     if file.size > MAX_FONT_SIZE:

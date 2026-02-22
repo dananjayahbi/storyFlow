@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ToastProvider } from '@/components/ToastProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { KeyboardShortcutProvider } from '@/components/KeyboardShortcutProvider';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -30,6 +31,7 @@ export default function RootLayout({
             <ErrorBoundary>
               {children}
             </ErrorBoundary>
+            <KeyboardShortcutProvider />
           </TooltipProvider>
         </main>
         <ToastProvider />

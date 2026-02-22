@@ -1,9 +1,20 @@
+import re
+
 from django.db import transaction
 from rest_framework import serializers
 
 from .models import Project, Segment, GlobalSettings
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
+
+# ── Allowed resolution presets (width × height) ──
+ALLOWED_RESOLUTIONS = {
+    (1280, 720),
+    (1920, 1080),
+    (3840, 2160),
+}
+
+ALLOWED_FPS = {24, 30, 60}
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -40,17 +51,96 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = GlobalSettings
         fields = [
-            'default_voice_id', 'tts_speed', 'zoom_intensity',
+            'default_voice_id', 'tts_speed',
+            'subtitle_font_family', 'subtitle_font_size',
+            'subtitle_font_color', 'subtitle_position',
             'subtitle_font', 'subtitle_color',
+            'render_width', 'render_height', 'render_fps',
+            'ken_burns_zoom', 'transition_duration', 'zoom_intensity',
+            'custom_font_file',
+            'created_at', 'updated_at',
         ]
+        read_only_fields = ['custom_font_file', 'created_at', 'updated_at']
 
-    def validate_subtitle_color(self, value):
-        """Validate subtitle_color is a valid hex color (#RGB or #RRGGBB)."""
+    # ── Field-level validators ──────────────────────────────────────
+
+    def validate_subtitle_font_color(self, value):
+        """Must be a 7-char hex colour string (#RRGGBB)."""
         if value and not HEX_COLOR_REGEX.match(value):
             raise serializers.ValidationError(
                 'Enter a valid hex color (e.g., #FFFFFF).'
             )
         return value
+
+    def validate_subtitle_color(self, value):
+        """Legacy field — same hex validation."""
+        if value and not HEX_COLOR_REGEX.match(value):
+            raise serializers.ValidationError(
+                'Enter a valid hex color (e.g., #FFFFFF).'
+            )
+        return value
+
+    def validate_subtitle_font_size(self, value):
+        if value < 12 or value > 120:
+            raise serializers.ValidationError(
+                'Font size must be between 12 and 120.'
+            )
+        return value
+
+    def validate_subtitle_position(self, value):
+        allowed = {'bottom', 'center', 'top'}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Position must be one of: {", ".join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_ken_burns_zoom(self, value):
+        if value < 1.0 or value > 2.0:
+            raise serializers.ValidationError(
+                'Ken Burns zoom must be between 1.0 and 2.0.'
+            )
+        return value
+
+    def validate_transition_duration(self, value):
+        if value < 0.0 or value > 2.0:
+            raise serializers.ValidationError(
+                'Transition duration must be between 0.0 and 2.0 seconds.'
+            )
+        return value
+
+    def validate_render_fps(self, value):
+        if value not in ALLOWED_FPS:
+            raise serializers.ValidationError(
+                f'FPS must be one of: {", ".join(str(f) for f in sorted(ALLOWED_FPS))}.'
+            )
+        return value
+
+    # ── Cross-field validation ──────────────────────────────────────
+
+    def validate(self, attrs):
+        """Validate that render_width × render_height form an allowed preset."""
+        width = attrs.get('render_width')
+        height = attrs.get('render_height')
+
+        # Only validate if at least one dimension is being updated
+        if width is not None or height is not None:
+            instance = self.instance
+            effective_w = width if width is not None else (instance.render_width if instance else 1920)
+            effective_h = height if height is not None else (instance.render_height if instance else 1080)
+
+            if (effective_w, effective_h) not in ALLOWED_RESOLUTIONS:
+                labels = ', '.join(
+                    f'{w}×{h}' for w, h in sorted(ALLOWED_RESOLUTIONS)
+                )
+                raise serializers.ValidationError({
+                    'render_resolution': (
+                        f'Resolution {effective_w}×{effective_h} is not allowed. '
+                        f'Allowed presets: {labels}.'
+                    )
+                })
+
+        return attrs
 
 
 class ProjectDetailSerializer(serializers.ModelSerializer):

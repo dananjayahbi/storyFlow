@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import type { Segment, UpdateSegmentPayload, AudioGenerationState } from '@/lib/types';
 import { useProjectStore } from '@/lib/stores';
 import { Card } from '@/components/ui/card';
@@ -16,7 +16,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions } from 'lucide-react';
 import { SegmentTextEditor } from './SegmentTextEditor';
 import { ImageUploader } from './ImageUploader';
 import { ImagePromptDisplay } from './ImagePromptDisplay';
@@ -26,6 +26,9 @@ import { AudioStatusBadge } from './AudioStatusBadge';
 
 /** Stable reference for the default (idle) audio status — avoids new object on each render. */
 const DEFAULT_AUDIO_STATUS: AudioGenerationState = { status: 'idle' };
+
+/** Approximate character count threshold for showing "Show more" toggle. */
+const TEXT_TRUNCATION_THRESHOLD = 150;
 
 interface SegmentCardProps {
   segment: Segment;
@@ -49,6 +52,13 @@ function SegmentCardComponent({
   );
 
   const isGenerating = generationStatus.status === 'generating';
+  const isFailed = generationStatus.status === 'failed';
+
+  // Local UI state
+  const [isTextExpanded, setIsTextExpanded] = useState(false);
+  const [isSubtitlePreviewOpen, setIsSubtitlePreviewOpen] = useState(false);
+
+  const isLongText = segment.text_content.length > TEXT_TRUNCATION_THRESHOLD;
 
   // Stable callback refs — prevent unnecessary child re-renders
   const handleLockToggle = useCallback(() => {
@@ -59,11 +69,25 @@ function SegmentCardComponent({
     generateAudio(segment.id);
   }, [generateAudio, segment.id]);
 
+  // Split text_content into word chunks for subtitle preview
+  const subtitleChunks = segment.text_content
+    ? segment.text_content.split(/\s+/).filter(Boolean)
+    : [];
+
+  // Determine border color class based on state
+  const borderClass = isFailed
+    ? 'border-destructive/50'
+    : isGenerating
+      ? 'border-amber-400'
+      : segment.is_locked
+        ? 'border-amber-300'
+        : '';
+
   return (
-    <Card className={`p-4 space-y-3 ${
-      segment.is_locked ? 'border-amber-300' : ''
-    } ${isGenerating ? 'animate-pulse border-amber-400' : ''}`}>
-      {/* 3a. Header Row */}
+    <Card className={`p-4 space-y-3 transition-all duration-200 ease-in-out hover:shadow-md ${
+      borderClass
+    } ${isGenerating ? 'animate-pulse' : ''}`}>
+      {/* Header Row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Badge variant="secondary">
@@ -79,7 +103,7 @@ function SegmentCardComponent({
           {/* Lock toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" onClick={handleLockToggle}>
+              <Button variant="ghost" size="icon" onClick={handleLockToggle} disabled={isGenerating}>
                 {segment.is_locked ? (
                   <Lock className="h-4 w-4" />
                 ) : (
@@ -94,7 +118,7 @@ function SegmentCardComponent({
           {/* Delete button with confirmation */}
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="text-destructive">
+              <Button variant="ghost" size="icon" className="text-destructive" disabled={isGenerating}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             </AlertDialogTrigger>
@@ -139,23 +163,58 @@ function SegmentCardComponent({
         </div>
       </div>
 
-      {/* 3b. Text Content Area */}
-      <SegmentTextEditor
-        segmentId={segment.id}
-        initialContent={segment.text_content}
-        isLocked={segment.is_locked}
-        onSave={onUpdate}
-      />
+      {/* Text Content Area with truncation */}
+      <div>
+        <div className={isLongText && !isTextExpanded ? 'max-h-[4.5rem] overflow-hidden' : ''}>
+          <SegmentTextEditor
+            segmentId={segment.id}
+            initialContent={segment.text_content}
+            isLocked={segment.is_locked || isGenerating}
+            onSave={onUpdate}
+          />
+        </div>
+        {isLongText && (
+          <button
+            className="mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors duration-200"
+            onClick={() => setIsTextExpanded(!isTextExpanded)}
+          >
+            {isTextExpanded ? (
+              <span className="flex items-center gap-1"><ChevronUp className="h-3 w-3" /> Show less</span>
+            ) : (
+              <span className="flex items-center gap-1"><ChevronDown className="h-3 w-3" /> Show more</span>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Inline Error Display */}
+      {isFailed && (
+        <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 px-3 py-2 rounded transition-all duration-200">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          <span className="flex-1">
+            {generationStatus.status === 'failed' ? generationStatus.error : 'An error occurred'}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleGenerateAudio}
+            disabled={segment.is_locked}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
 
       <Separator />
 
-      {/* 3c. Image + Prompt Row */}
+      {/* Image + Prompt Row */}
       <div className="flex flex-col md:flex-row gap-4">
         <div className="md:w-2/5">
           <ImageUploader
             segmentId={segment.id}
             currentImage={segment.image_file}
-            isLocked={segment.is_locked}
+            isLocked={segment.is_locked || isGenerating}
             onUpload={onUploadImage}
             onRemove={onRemoveImage}
           />
@@ -165,7 +224,39 @@ function SegmentCardComponent({
         </div>
       </div>
 
-      {/* 3e. Audio Section */}
+      {/* Subtitle Preview Toggle */}
+      <div>
+        <button
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors duration-200"
+          onClick={() => setIsSubtitlePreviewOpen(!isSubtitlePreviewOpen)}
+        >
+          <Captions className="h-3 w-3" />
+          <span>Subtitle Preview</span>
+          {isSubtitlePreviewOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+        <div
+          className={`overflow-hidden transition-all duration-200 ease-in-out ${
+            isSubtitlePreviewOpen ? 'max-h-40 mt-2' : 'max-h-0'
+          }`}
+        >
+          {subtitleChunks.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {subtitleChunks.map((word, i) => (
+                <span
+                  key={i}
+                  className="inline-block rounded bg-muted px-1.5 py-0.5 text-xs font-mono"
+                >
+                  {word}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground italic">No subtitles generated</p>
+          )}
+        </div>
+      </div>
+
+      {/* Audio Section */}
       <div className="overflow-hidden">
       {segment.audio_file && !isGenerating ? (
         <div className="space-y-2">
@@ -174,7 +265,7 @@ function SegmentCardComponent({
             duration={segment.audio_duration ?? 0}
           />
           {isStale && (
-            <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 rounded">
+            <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 px-3 py-1.5 rounded transition-all duration-200">
               <AlertTriangle className="h-4 w-4 flex-shrink-0" />
               <span>Text changed — audio may be out of sync.</span>
               <button

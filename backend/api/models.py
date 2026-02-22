@@ -61,12 +61,57 @@ class Segment(models.Model):
         ordering = ['sequence_index']
 
 
+SUBTITLE_POSITION_CHOICES = [
+    ('bottom', 'Bottom'),
+    ('center', 'Center'),
+    ('top', 'Top'),
+]
+
+
 class GlobalSettings(models.Model):
+    """Singleton application-wide configuration record (pk always == 1)."""
+
+    # ── TTS defaults ──
     default_voice_id = models.CharField(max_length=100, default='af_bella')
     tts_speed = models.FloatField(default=1.0)
-    zoom_intensity = models.FloatField(default=1.3)
+
+    # ── Subtitle styling ──
+    subtitle_font_family = models.CharField(max_length=200, default='Arial')
+    subtitle_font_size = models.PositiveIntegerField(default=48)
+    subtitle_font_color = models.CharField(max_length=7, default='#FFFFFF')
+    subtitle_position = models.CharField(
+        max_length=10,
+        choices=SUBTITLE_POSITION_CHOICES,
+        default='bottom',
+    )
+    # Legacy fields kept for backward compatibility
     subtitle_font = models.CharField(max_length=255, blank=True, default='')
     subtitle_color = models.CharField(max_length=7, default='#FFFFFF')
+
+    # ── Render parameters ──
+    render_width = models.PositiveIntegerField(default=1920)
+    render_height = models.PositiveIntegerField(default=1080)
+    render_fps = models.PositiveIntegerField(default=30)
+
+    # ── Ken Burns & transitions ──
+    ken_burns_zoom = models.FloatField(default=1.2)
+    transition_duration = models.FloatField(default=0.5)
+    zoom_intensity = models.FloatField(default=1.3)  # legacy
+
+    # ── Custom font file ──
+    custom_font_file = models.FileField(
+        upload_to='fonts/', null=True, blank=True,
+    )
+
+    # ── Timestamps ──
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # ── Singleton enforcement ──
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
 
     @classmethod
     def load(cls):
