@@ -324,10 +324,10 @@ class VoiceListingTests(APITestCase):
             self.assertIn('language', voice, msg=f'Missing language for {voice}')
 
     def test_voice_count(self):
-        """Number of voices matches expected Kokoro voice count (7)."""
+        """Number of voices matches expected Kokoro voice count (26)."""
         response = self.client.get(VOICES_URL)
         data = response.json()
-        self.assertEqual(len(data), 7)
+        self.assertEqual(len(data), 26)
 
 
 @override_settings(MEDIA_ROOT=TEMP_MEDIA_ROOT)

@@ -25,7 +25,7 @@ export function ImageUploader({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const imageUrl = currentImage
-    ? `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}${currentImage}`
+    ? (currentImage.startsWith('http') ? currentImage : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'}${currentImage}`)
     : null;
 
   const handleFile = async (file: File) => {

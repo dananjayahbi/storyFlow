@@ -3,16 +3,10 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { testTTS, getVoices } from '@/lib/api';
+import { AVAILABLE_VOICES, type Voice } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ArrowLeft, Volume2, Loader2, Play, Square } from 'lucide-react';
-
-interface Voice {
-  id: string;
-  name: string;
-  gender: string;
-}
 
 export default function SettingsPage() {
   // TTS Tester state
@@ -31,16 +25,7 @@ export default function SettingsPage() {
     getVoices()
       .then((data) => setVoices(data))
       .catch(() => {
-        // Fallback voices
-        setVoices([
-          { id: 'af_bella', name: 'Bella', gender: 'Female' },
-          { id: 'af_sarah', name: 'Sarah', gender: 'Female' },
-          { id: 'af_nicole', name: 'Nicole', gender: 'Female' },
-          { id: 'am_adam', name: 'Adam', gender: 'Male' },
-          { id: 'am_michael', name: 'Michael', gender: 'Male' },
-          { id: 'bf_emma', name: 'Emma', gender: 'Female' },
-          { id: 'bm_george', name: 'George', gender: 'Male' },
-        ]);
+        setVoices(AVAILABLE_VOICES);
       });
   }, []);
 
@@ -168,7 +153,7 @@ export default function SettingsPage() {
             >
               {voices.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.name} ({v.gender})
+                  {v.name} ({v.gender}{v.accent ? `, ${v.accent}` : ''})
                 </option>
               ))}
             </select>

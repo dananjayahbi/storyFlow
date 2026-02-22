@@ -25,7 +25,11 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
   // Cache-busting URL to force re-fetch after regeneration
   const [cacheBuster, setCacheBuster] = useState(() => Date.now());
 
-  const effectiveUrl = `${audioUrl}?t=${cacheBuster}`;
+  // audioUrl may be a relative path ("/media/...") served by Django or an absolute URL.
+  // Prepend the backend base URL only if it's not already absolute (same pattern as ImageUploader).
+  const backendBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+  const resolvedUrl = audioUrl.startsWith('http') ? audioUrl : `${backendBase}${audioUrl}`;
+  const effectiveUrl = `${resolvedUrl}?t=${cacheBuster}`;
 
   // ── Reset when audioUrl changes (e.g. after regeneration) ──
   useEffect(() => {
@@ -62,10 +66,7 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
       audio.removeEventListener('ended', onEnded);
       audio.removeEventListener('error', onError);
-      // Cleanup on unmount
       audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
     };
   }, [effectiveUrl]);
 

@@ -156,7 +156,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
                     if result["success"]:
                         audio_url = construct_audio_url(project_id, seg_id)
-                        seg.audio_file.name = audio_url.lstrip("/")
+                        seg.audio_file.name = f"projects/{project_id}/audio/{seg_id}.wav"
                         seg.audio_duration = result["duration"]
                         seg.save(update_fields=["audio_file", "audio_duration"])
 
@@ -536,9 +536,8 @@ class SegmentViewSet(viewsets.ModelViewSet):
             )
 
             if result["success"]:
-                audio_url = construct_audio_url(project_id, segment_id)
                 seg = Segment.objects.get(pk=segment_id)
-                seg.audio_file.name = audio_url.lstrip("/")
+                seg.audio_file.name = f"projects/{project_id}/audio/{segment_id}.wav"
                 seg.audio_duration = result["duration"]
                 seg.save(update_fields=["audio_file", "audio_duration"])
             else:
@@ -833,13 +832,32 @@ def global_settings_view(request):
 # This is the canonical source — the frontend falls back to a
 # hardcoded copy if this endpoint is unreachable.
 VOICE_METADATA = {
-    'af_bella':   {'id': 'af_bella',   'name': 'Bella',   'gender': 'Female', 'language': 'en-US'},
-    'af_sarah':   {'id': 'af_sarah',   'name': 'Sarah',   'gender': 'Female', 'language': 'en-US'},
-    'af_nicole':  {'id': 'af_nicole',  'name': 'Nicole',  'gender': 'Female', 'language': 'en-US'},
-    'am_adam':    {'id': 'am_adam',    'name': 'Adam',    'gender': 'Male',   'language': 'en-US'},
-    'am_michael': {'id': 'am_michael', 'name': 'Michael', 'gender': 'Male',   'language': 'en-US'},
-    'bf_emma':    {'id': 'bf_emma',    'name': 'Emma',    'gender': 'Female', 'accent': 'British', 'language': 'en-GB'},
-    'bm_george':  {'id': 'bm_george',  'name': 'George',  'gender': 'Male',   'accent': 'British', 'language': 'en-GB'},
+    'af_bella':    {'id': 'af_bella',    'name': 'Bella',    'gender': 'Female', 'language': 'en-US'},
+    'af_sarah':    {'id': 'af_sarah',    'name': 'Sarah',    'gender': 'Female', 'language': 'en-US'},
+    'af_nicole':   {'id': 'af_nicole',   'name': 'Nicole',   'gender': 'Female', 'language': 'en-US'},
+    'af_sky':      {'id': 'af_sky',      'name': 'Sky',      'gender': 'Female', 'language': 'en-US'},
+    'af_alloy':    {'id': 'af_alloy',    'name': 'Alloy',    'gender': 'Female', 'language': 'en-US'},
+    'af_aoede':    {'id': 'af_aoede',    'name': 'Aoede',    'gender': 'Female', 'language': 'en-US'},
+    'af_jessica':  {'id': 'af_jessica',  'name': 'Jessica',  'gender': 'Female', 'language': 'en-US'},
+    'af_kore':     {'id': 'af_kore',     'name': 'Kore',     'gender': 'Female', 'language': 'en-US'},
+    'af_nova':     {'id': 'af_nova',     'name': 'Nova',     'gender': 'Female', 'language': 'en-US'},
+    'af_river':    {'id': 'af_river',    'name': 'River',    'gender': 'Female', 'language': 'en-US'},
+    'am_adam':     {'id': 'am_adam',     'name': 'Adam',     'gender': 'Male',   'language': 'en-US'},
+    'am_michael':  {'id': 'am_michael',  'name': 'Michael',  'gender': 'Male',   'language': 'en-US'},
+    'am_echo':     {'id': 'am_echo',     'name': 'Echo',     'gender': 'Male',   'language': 'en-US'},
+    'am_eric':     {'id': 'am_eric',     'name': 'Eric',     'gender': 'Male',   'language': 'en-US'},
+    'am_fenrir':   {'id': 'am_fenrir',   'name': 'Fenrir',   'gender': 'Male',   'language': 'en-US'},
+    'am_liam':     {'id': 'am_liam',     'name': 'Liam',     'gender': 'Male',   'language': 'en-US'},
+    'am_onyx':     {'id': 'am_onyx',     'name': 'Onyx',     'gender': 'Male',   'language': 'en-US'},
+    'am_puck':     {'id': 'am_puck',     'name': 'Puck',     'gender': 'Male',   'language': 'en-US'},
+    'bf_emma':     {'id': 'bf_emma',     'name': 'Emma',     'gender': 'Female', 'accent': 'British', 'language': 'en-GB'},
+    'bf_alice':    {'id': 'bf_alice',    'name': 'Alice',    'gender': 'Female', 'accent': 'British', 'language': 'en-GB'},
+    'bf_isabella': {'id': 'bf_isabella', 'name': 'Isabella', 'gender': 'Female', 'accent': 'British', 'language': 'en-GB'},
+    'bf_lily':     {'id': 'bf_lily',     'name': 'Lily',     'gender': 'Female', 'accent': 'British', 'language': 'en-GB'},
+    'bm_george':   {'id': 'bm_george',   'name': 'George',   'gender': 'Male',   'accent': 'British', 'language': 'en-GB'},
+    'bm_daniel':   {'id': 'bm_daniel',   'name': 'Daniel',   'gender': 'Male',   'accent': 'British', 'language': 'en-GB'},
+    'bm_fable':    {'id': 'bm_fable',    'name': 'Fable',    'gender': 'Male',   'accent': 'British', 'language': 'en-GB'},
+    'bm_lewis':    {'id': 'bm_lewis',    'name': 'Lewis',    'gender': 'Male',   'accent': 'British', 'language': 'en-GB'},
 }
 
 
@@ -962,7 +980,7 @@ def tts_test_view(request):
         )
 
     settings_obj = GlobalSettings.load()
-    voice = request.data.get('voice', settings_obj.tts_voice)
+    voice = request.data.get('voice', settings_obj.default_voice_id)
     speed = float(request.data.get('speed', settings_obj.tts_speed))
 
     # Generate audio to a temporary file
@@ -975,7 +993,7 @@ def tts_test_view(request):
         result = tts_generate(
             text=text,
             output_path=output_path,
-            voice=voice,
+            voice_id=voice,
             speed=speed,
         )
 

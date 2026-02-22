@@ -2,8 +2,8 @@
 Unit tests for the TTS engine: Model Loader, TTS Wrapper, and Voice ID Validation.
 
 All tests run WITHOUT the Kokoro model file present (except the
-skip-guarded integration test). Mocking onnxruntime.InferenceSession
-is the key strategy for testing without the model.
+skip-guarded integration test). Mocking the kokoro-onnx Kokoro
+instance is the key strategy for testing without the model.
 """
 
 import os
@@ -25,6 +25,7 @@ from core_engine.tts_wrapper import (
     VALID_VOICE_IDS,
     generate_audio,
     validate_voice_id,
+    _reset_kokoro_instance,
 )
 
 
@@ -156,37 +157,29 @@ class TestGenerateAudio(TestCase):
     """Tests for the generate_audio() function."""
 
     def setUp(self):
-        """Create temp directory and reset singleton."""
+        """Create temp directory and reset kokoro singleton."""
         self.temp_dir = tempfile.mkdtemp()
-        KokoroModelLoader._session = None
+        _reset_kokoro_instance()
 
     def tearDown(self):
-        """Clean up temp directory and reset singleton."""
+        """Clean up temp directory and reset kokoro singleton."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
-        KokoroModelLoader._session = None
+        _reset_kokoro_instance()
 
-    def _mock_session(self):
-        """Create a mock ONNX session that returns synthetic audio."""
-        mock_session = MagicMock()
-
-        # Mock get_inputs to return a simple structure
-        mock_input = MagicMock()
-        mock_input.name = "tokens"
-        mock_input.shape = [1, None]
-        mock_input.type = "tensor(int64)"
-        mock_session.get_inputs.return_value = [mock_input]
-
-        # Mock run to return 1 second of synthetic audio
+    def _mock_kokoro(self):
+        """Create a mock Kokoro instance that returns synthetic audio."""
+        mock_kokoro = MagicMock()
+        mock_kokoro.get_voices.return_value = sorted(VALID_VOICE_IDS)
+        # Return 1 second of synthetic audio at 24kHz
         audio = np.random.randn(24000).astype(np.float32) * 0.5
-        mock_session.run.return_value = [audio]
-
-        return mock_session
+        mock_kokoro.create.return_value = (audio, 24000)
+        return mock_kokoro
 
     @override_settings(MEDIA_ROOT=None)
-    def test_successful_generation(self):
+    @patch("core_engine.tts_wrapper._get_kokoro_instance")
+    def test_successful_generation(self, mock_get_kokoro):
         """generate_audio() returns success dict with valid output."""
-        mock_session = self._mock_session()
-        KokoroModelLoader._session = mock_session
+        mock_get_kokoro.return_value = self._mock_kokoro()
 
         output_path = os.path.join(self.temp_dir, "test.wav")
         result = generate_audio(
@@ -204,10 +197,10 @@ class TestGenerateAudio(TestCase):
         self.assertTrue(os.path.exists(output_path))
 
     @override_settings(MEDIA_ROOT=None)
-    def test_valid_wav_output(self):
+    @patch("core_engine.tts_wrapper._get_kokoro_instance")
+    def test_valid_wav_output(self, mock_get_kokoro):
         """Output file is a valid WAV with correct sample rate."""
-        mock_session = self._mock_session()
-        KokoroModelLoader._session = mock_session
+        mock_get_kokoro.return_value = self._mock_kokoro()
 
         output_path = os.path.join(self.temp_dir, "test.wav")
         result = generate_audio(
@@ -239,8 +232,8 @@ class TestGenerateAudio(TestCase):
         self.assertFalse(result["success"])
         self.assertIn("path", result["error"].lower())
 
-    @patch("core_engine.model_loader.os.path.exists", return_value=False)
-    def test_missing_model_returns_error_dict(self, mock_exists):
+    @patch("core_engine.tts_wrapper._get_kokoro_instance", return_value=None)
+    def test_missing_model_returns_error_dict(self, mock_get_kokoro):
         """Missing model returns error dict, never raises."""
         result = generate_audio(
             text="Hello world",
@@ -251,10 +244,10 @@ class TestGenerateAudio(TestCase):
         self.assertIsInstance(result["error"], str)
 
     @override_settings(MEDIA_ROOT=None)
-    def test_overwrite_behavior(self):
+    @patch("core_engine.tts_wrapper._get_kokoro_instance")
+    def test_overwrite_behavior(self, mock_get_kokoro):
         """Regenerating for same path overwrites the file."""
-        mock_session = self._mock_session()
-        KokoroModelLoader._session = mock_session
+        mock_get_kokoro.return_value = self._mock_kokoro()
 
         output_path = os.path.join(self.temp_dir, "overwrite.wav")
 
@@ -272,10 +265,9 @@ class TestGenerateAudio(TestCase):
 
         self.assertGreaterEqual(mtime2, mtime1)
 
-    def test_speed_clamping_low(self):
+    @patch("core_engine.tts_wrapper._get_kokoro_instance", return_value=None)
+    def test_speed_clamping_low(self, mock_get_kokoro):
         """Speed below minimum is clamped (no error)."""
-        # Speed clamping happens before model access, so the error
-        # will be about the missing model, not about speed
         result = generate_audio(
             text="Hello",
             speed=0.1,
@@ -284,7 +276,8 @@ class TestGenerateAudio(TestCase):
         # Should not crash — returns error dict (model missing)
         self.assertIn("success", result)
 
-    def test_speed_clamping_high(self):
+    @patch("core_engine.tts_wrapper._get_kokoro_instance", return_value=None)
+    def test_speed_clamping_high(self, mock_get_kokoro):
         """Speed above maximum is clamped (no error)."""
         result = generate_audio(
             text="Hello",
