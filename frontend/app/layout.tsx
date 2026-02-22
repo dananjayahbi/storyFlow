@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { ToastProvider } from '@/components/ToastProvider';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { KeyboardShortcutProvider } from '@/components/KeyboardShortcutProvider';
+import { AppShell } from '@/components/AppShell';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -21,19 +22,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <header className="border-b bg-background">
-          <div className="w-full px-4 py-4">
-            <h1 className="text-2xl font-bold">StoryFlow</h1>
-          </div>
-        </header>
-        <main className="w-full px-4 py-8">
-          <TooltipProvider>
-            <ErrorBoundary>
+        <TooltipProvider>
+          <ErrorBoundary>
+            <AppShell>
               {children}
-            </ErrorBoundary>
-            <KeyboardShortcutProvider />
-          </TooltipProvider>
-        </main>
+            </AppShell>
+          </ErrorBoundary>
+          <KeyboardShortcutProvider />
+        </TooltipProvider>
         <ToastProvider />
       </body>
     </html>

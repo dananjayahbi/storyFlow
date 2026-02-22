@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { getProjects } from '@/lib/api';
 import { Project } from '@/lib/types';
 import { ProjectCard } from '@/components/ProjectCard';
@@ -11,7 +10,7 @@ import ImportDialog from '@/components/ImportDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { EmptyState } from '@/components/EmptyState';
-import { FolderPlus, Search, X, ArrowUpDown, Settings } from 'lucide-react';
+import { FolderPlus, Search, X, ArrowUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Sort modes (Step 2) ──
@@ -126,28 +125,29 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div>
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="text-3xl font-bold">Projects</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold tracking-tight">Projects</h2>
         </div>
-        <p className="text-destructive">{error}</p>
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
+          <p className="text-sm text-destructive">{error}</p>
+        </div>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="text-3xl font-bold">Projects</h2>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Projects</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage your narrative video projects
+          </p>
+        </div>
         <div className="flex gap-2">
           <CreateProjectDialog onProjectCreated={handleProjectCreated} />
-          <Button variant="outline" onClick={() => setShowImportDialog(true)}>
+          <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)}>
             Import Story
-          </Button>
-          <Button variant="outline" asChild>
-            <Link href="/settings">
-              <Settings className="h-4 w-4 mr-1" />
-              Settings
-            </Link>
           </Button>
         </div>
       </div>

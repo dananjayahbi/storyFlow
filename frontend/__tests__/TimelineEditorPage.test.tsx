@@ -96,19 +96,18 @@ describe('TimelineEditorPage', () => {
 
     renderPage();
 
-    // Header
+    // Header — project title in top bar (also appears in sidebar)
     await waitFor(() => {
-      expect(
-        screen.getByText(/StoryFlow — Test Story/)
-      ).toBeInTheDocument();
+      const matches = screen.getAllByText('Test Story');
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
     // Sidebar info
     expect(screen.getByText('DRAFT')).toBeInTheDocument();
 
-    // Back link
+    // Navigation link — sidebar has Dashboard link
     expect(
-      screen.getByRole('link', { name: /back/i })
+      screen.getByRole('link', { name: /dashboard/i })
     ).toBeInTheDocument();
 
     // Timeline content (segment text)

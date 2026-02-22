@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import Link from 'next/link';
 import { testTTS, getVoices } from '@/lib/api';
 import { AVAILABLE_VOICES, type Voice } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Volume2, Loader2, Play, Square } from 'lucide-react';
+import { Slider } from '@/components/ui/slider';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Volume2, Loader2, Play, Square } from 'lucide-react';
 
 export default function SettingsPage() {
   // TTS Tester state
@@ -112,44 +113,41 @@ export default function SettingsPage() {
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/">
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Back to Dashboard
-            </Link>
-          </Button>
-          <h2 className="text-3xl font-bold">Settings</h2>
-        </div>
+    <div className="max-w-3xl">
+      {/* Page header */}
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure and test TTS audio before generating for your story segments.
+        </p>
       </div>
 
-      {/* TTS Tester Section */}
-      <div className="border rounded-lg p-6 max-w-3xl">
-        <div className="flex items-center gap-2 mb-4">
-          <Volume2 className="h-5 w-5" />
-          <h3 className="text-xl font-semibold">TTS Audio Tester</h3>
-        </div>
-        <p className="text-sm text-muted-foreground mb-4">
-          Test the text-to-speech engine by entering text below and generating audio.
-          Use this to verify audio quality before generating for your story segments.
-        </p>
-
-        <Separator className="my-4" />
-
-        <div className="space-y-4">
+      {/* TTS Tester Card */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+              <Volume2 className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">TTS Audio Tester</CardTitle>
+              <CardDescription>
+                Test voice settings with custom text before applying to your project.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
           {/* Voice selector */}
-          <div>
-            <label htmlFor="tts-voice" className="text-sm font-medium block mb-1">
+          <div className="space-y-2">
+            <label htmlFor="tts-voice" className="text-sm font-medium">
               Voice
             </label>
             <select
               id="tts-voice"
               value={ttsVoice}
               onChange={(e) => setTtsVoice(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               {voices.map((v) => (
                 <option key={v.id} value={v.id}>
@@ -159,30 +157,32 @@ export default function SettingsPage() {
             </select>
           </div>
 
-          {/* Speed control */}
-          <div>
-            <label htmlFor="tts-speed" className="text-sm font-medium block mb-1">
-              Speed: {ttsSpeed.toFixed(1)}x
-            </label>
-            <div className="flex items-center gap-3">
+          {/* Speed control — using Slider */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Speed</label>
+              <span className="text-sm font-medium tabular-nums text-muted-foreground">
+                {ttsSpeed.toFixed(1)}x
+              </span>
+            </div>
+            <Slider
+              value={[ttsSpeed]}
+              min={0.5}
+              max={2.0}
+              step={0.1}
+              onValueChange={(values) => setTtsSpeed(values[0])}
+            />
+            <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">0.5x</span>
-              <input
-                id="tts-speed"
-                type="range"
-                min="0.5"
-                max="2.0"
-                step="0.1"
-                value={ttsSpeed}
-                onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
-                className="flex-1"
-              />
               <span className="text-xs text-muted-foreground">2.0x</span>
             </div>
           </div>
 
+          <Separator />
+
           {/* Text input */}
-          <div>
-            <label htmlFor="tts-text" className="text-sm font-medium block mb-1">
+          <div className="space-y-2">
+            <label htmlFor="tts-text" className="text-sm font-medium">
               Text to Speak
             </label>
             <textarea
@@ -191,14 +191,14 @@ export default function SettingsPage() {
               onChange={(e) => setTtsText(e.target.value)}
               rows={5}
               placeholder="Enter text to convert to speech..."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="flex min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
             />
-            <p className="text-xs text-muted-foreground text-right mt-1">
+            <p className="text-xs text-muted-foreground text-right">
               {ttsText.length} characters
             </p>
           </div>
 
-          {/* Generate button */}
+          {/* Actions */}
           <div className="flex items-center gap-3">
             <Button
               onClick={handleGenerateAudio}
@@ -239,19 +239,19 @@ export default function SettingsPage() {
 
           {/* Audio player */}
           {audioUrl && (
-            <div className="mt-2">
+            <div className="rounded-md bg-muted/50 p-3">
               <audio controls src={audioUrl} className="w-full" />
             </div>
           )}
 
           {/* Error display */}
           {ttsError && (
-            <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
               {ttsError}
             </div>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
