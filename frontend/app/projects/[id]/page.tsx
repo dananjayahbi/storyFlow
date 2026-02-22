@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useProjectStore } from '@/lib/stores';
 import { Timeline } from '@/components/Timeline';
+import { GlobalSettingsPanel } from '@/components/GlobalSettingsPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -106,34 +107,42 @@ export default function TimelineEditorPage() {
 
       {/* Main content */}
       <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
-        {/* Sidebar — horizontal on mobile/tablet, vertical on desktop */}
-        <aside className="lg:w-64 lg:border-r border-b lg:border-b-0 p-4 flex-shrink-0">
-          <div className="flex flex-row lg:flex-col gap-4 lg:gap-4 flex-wrap">
-            <div className="min-w-0">
-              <p className="text-sm text-muted-foreground">Project</p>
-              <p className="font-medium truncate">{project.title}</p>
-            </div>
-            <Separator className="hidden lg:block" />
-            <div>
-              <p className="text-sm text-muted-foreground">Status</p>
-              <Badge variant="secondary" className="mt-1">
-                {project.status}
-              </Badge>
-            </div>
-            <Separator className="hidden lg:block" />
-            <div>
-              <p className="text-sm text-muted-foreground">Segments</p>
-              <p className="font-medium">{segments.length}</p>
-            </div>
-            <Separator className="hidden lg:block" />
-            <div>
-              <p className="text-sm text-muted-foreground">Created</p>
-              <p className="font-medium">
-                {new Date(project.created_at).toLocaleDateString()}
-              </p>
+        {/* Left sidebar — project info + settings */}
+        <div className="lg:border-r border-b lg:border-b-0 flex-shrink-0 lg:w-64 overflow-y-auto">
+          {/* Project info */}
+          <div className="p-4">
+            <div className="flex flex-row lg:flex-col gap-4 lg:gap-4 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-sm text-muted-foreground">Project</p>
+                <p className="font-medium truncate">{project.title}</p>
+              </div>
+              <Separator className="hidden lg:block" />
+              <div>
+                <p className="text-sm text-muted-foreground">Status</p>
+                <Badge variant="secondary" className="mt-1">
+                  {project.status}
+                </Badge>
+              </div>
+              <Separator className="hidden lg:block" />
+              <div>
+                <p className="text-sm text-muted-foreground">Segments</p>
+                <p className="font-medium">{segments.length}</p>
+              </div>
+              <Separator className="hidden lg:block" />
+              <div>
+                <p className="text-sm text-muted-foreground">Created</p>
+                <p className="font-medium">
+                  {new Date(project.created_at).toLocaleDateString()}
+                </p>
+              </div>
             </div>
           </div>
-        </aside>
+
+          <Separator />
+
+          {/* Global Settings Panel */}
+          <GlobalSettingsPanel />
+        </div>
 
         {/* Center panel */}
         <main className="flex-1 overflow-auto">

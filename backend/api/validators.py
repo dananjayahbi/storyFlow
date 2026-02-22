@@ -1,9 +1,17 @@
 from rest_framework.exceptions import ValidationError
 
 import os
+import re
 
 ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+
+# ── Font upload constants (Task 05.03.03) ──
+ALLOWED_FONT_EXTENSIONS = ['.ttf', '.otf']
+MAX_FONT_SIZE = 10 * 1024 * 1024  # 10MB
+
+# ── Hex color validation (Task 05.03.03) ──
+HEX_COLOR_REGEX = re.compile(r'^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$')
 
 
 def validate_project_for_render(project):
@@ -188,3 +196,29 @@ def validate_import_data(data: dict) -> dict:
         raise ValidationError(errors)
 
     return data
+
+
+def validate_font_upload(file):
+    """Validate an uploaded font file (.ttf or .otf).
+
+    Checks:
+      1. File extension is .ttf or .otf.
+      2. File size ≤ 10 MB.
+
+    Returns the validated file with pointer reset to 0.
+    """
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in ALLOWED_FONT_EXTENSIONS:
+        raise ValidationError({
+            'error': 'Invalid font file',
+            'details': 'Only .ttf and .otf files are accepted.',
+        })
+
+    if file.size > MAX_FONT_SIZE:
+        raise ValidationError({
+            'error': 'File too large',
+            'details': f'Font file must be under 10 MB. Got: {file.size / (1024*1024):.1f}MB',
+        })
+
+    file.seek(0)
+    return file

@@ -32,6 +32,7 @@ try:
         AudioFileClip,
         CompositeVideoClip,
         concatenate_videoclips,
+        vfx,
     )
 except ImportError:
     # MoviePy 2.x — direct imports from moviepy
@@ -39,11 +40,159 @@ except ImportError:
         AudioFileClip,
         CompositeVideoClip,
         concatenate_videoclips,
+        vfx,
     )
+
+# ---------------------------------------------------------------------------
+# Transition constants
+# ---------------------------------------------------------------------------
+# Fixed crossfade duration for v1.0.  This value is intentionally NOT
+# user-configurable and must NOT be exposed in GlobalSettings or the
+# settings UI.  0.5 s is the standard perceptible-but-not-sluggish value
+# recommended by mainstream video-editing guides.
+TRANSITION_DURATION: float = 0.5
 
 
 # Type alias for the progress callback
 ProgressCallback = Optional[Callable[[int, int, str], None]]
+
+
+# ---------------------------------------------------------------------------
+# Crossfade utility
+# ---------------------------------------------------------------------------
+
+def apply_crossfade_transitions(
+    clips: list,
+    transition_duration: float = TRANSITION_DURATION,
+) -> list:
+    """Apply crossfade effects to a list of video clips based on position.
+
+    * **First clip** — ``CrossFadeOut`` only (video starts at full opacity).
+    * **Middle clips** — both ``CrossFadeIn`` and ``CrossFadeOut``.
+    * **Last clip** — ``CrossFadeIn`` only (video ends at full opacity).
+
+    This function only *prepares* the clips with crossfade effects — it does
+    **not** concatenate them.  Concatenation with negative padding is handled
+    separately in Task 05.02.02.
+
+    Args:
+        clips: Ordered list of MoviePy video clips.
+        transition_duration: Duration (seconds) of each crossfade effect.
+            Defaults to :data:`TRANSITION_DURATION`.
+
+    Returns:
+        A **new** list of clips with the appropriate crossfade effects
+        applied.  The original *clips* list is not mutated.
+    """
+    # Guard clause — crossfade is meaningless for 0 or 1 clips.
+    if len(clips) <= 1:
+        return list(clips)
+
+    logger.info(
+        "Applying crossfade transitions to %d clips (duration=%.2fs)",
+        len(clips),
+        transition_duration,
+    )
+
+    # Debug: report each clip's duration before crossfade application.
+    for idx, clip in enumerate(clips):
+        clip_dur = getattr(clip, "duration", None)
+        logger.debug("  Clip %d duration before crossfade: %s s", idx, clip_dur)
+
+        # Defensive warning — clip shorter than the transition duration.
+        if clip_dur is not None and clip_dur < transition_duration:
+            logger.warning(
+                "Clip %d duration (%.2fs) is shorter than the transition "
+                "duration (%.2fs). The crossfade will consume the entire "
+                "clip, which may produce unexpected visuals.",
+                idx,
+                clip_dur,
+                transition_duration,
+            )
+
+    result: list = []
+    last_idx = len(clips) - 1
+
+    for idx, clip in enumerate(clips):
+        has_predecessor = idx > 0
+        has_successor = idx < last_idx
+
+        effects: list = []
+        if has_predecessor:
+            effects.append(vfx.CrossFadeIn(transition_duration))
+        if has_successor:
+            effects.append(vfx.CrossFadeOut(transition_duration))
+
+        if effects:
+            clip = clip.with_effects(effects)
+
+        result.append(clip)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Duration calculation utility
+# ---------------------------------------------------------------------------
+
+def calculate_total_duration_with_transitions(
+    clip_durations: list[float],
+    transition_duration: float = TRANSITION_DURATION,
+) -> float:
+    """Calculate the expected total video duration accounting for crossfade overlaps.
+
+    Formula::
+
+        total = sum(clip_durations) − (N − 1) × transition_duration
+
+    where *N* is the number of clips.  Each pair of adjacent clips shares
+    one overlap of *transition_duration* seconds, shortening the total
+    output by that amount.
+
+    This is a **pure function** — no side effects, no I/O, no external
+    dependencies.
+
+    Worked examples (transition_duration = 0.5):
+
+    * 1 clip  of 5.0 s → 5.0 s  (zero overlaps)
+    * 2 clips of 5.0 s → 9.5 s  (one overlap)
+    * 3 clips of 5.0 s → 14.0 s (two overlaps)
+    * 5 clips of 3.0 s → 13.0 s (four overlaps)
+
+    Args:
+        clip_durations: Ordered list of individual clip durations (seconds).
+        transition_duration: Duration of each crossfade transition.
+            Defaults to :data:`TRANSITION_DURATION`.
+
+    Returns:
+        Expected total duration in seconds.  May be negative in extreme
+        edge cases (many very short clips) — no clamping is applied.
+    """
+    if not clip_durations:
+        return 0.0
+
+    if len(clip_durations) == 1:
+        return clip_durations[0]
+
+    # Warn about clips shorter than the transition duration.
+    short_clips = [
+        (i, d) for i, d in enumerate(clip_durations)
+        if d < transition_duration
+    ]
+    if short_clips:
+        logger.warning(
+            "%d clip(s) have duration shorter than transition duration "
+            "(%.2fs): %s",
+            len(short_clips),
+            transition_duration,
+            ", ".join(
+                f"clip {i} ({d:.2f}s)" for i, d in short_clips
+            ),
+        )
+
+    num_transitions = len(clip_durations) - 1
+    total = sum(clip_durations) - num_transitions * transition_duration
+    return total
 
 
 def render_project(
@@ -194,14 +343,17 @@ def render_project(
     # C4. Check ImageMagick availability (once, before loop)
     # ------------------------------------------------------------------
     imagemagick_available = render_utils.check_imagemagick()
-    if not imagemagick_available:
-        logger.warning(
-            "ImageMagick not available — subtitle overlay will be skipped "
-            "for all segments."
-        )
 
     # Warnings accumulator for the result dict
     warnings: list[str] = []
+
+    if not imagemagick_available:
+        im_warn = (
+            "ImageMagick not available — subtitle overlay will be skipped "
+            "for all segments."
+        )
+        logger.warning(im_warn)
+        warnings.append(im_warn)
 
     # ------------------------------------------------------------------
     # D. Query segments in order
@@ -408,34 +560,154 @@ def render_project(
                 )
 
         # --------------------------------------------------------------
-        # H. Concatenate all clips
+        # H. Concatenate all clips (transition-aware)
         # --------------------------------------------------------------
         # Validate clips list is not empty (all segments may have been
         # skipped due to zero-duration audio)
         if not clips:
-            raise ValueError("No segments to render")
+            raise ValueError(
+                "No clips available for rendering. All segments may have "
+                "been skipped due to zero-duration audio or missing files. "
+                "This should have been caught by pre-render validation."
+            )
 
-        logger.info("Concatenating %d clip(s)...", len(clips))
-        composite_clip = concatenate_videoclips(clips, method="compose")
+        # Preserve original durations for logging before crossfade.
+        original_durations = [c.duration for c in clips]
 
-        # Validate concatenation result
+        if len(clips) > 1:
+            # --- Multi-clip: apply crossfade transitions, then
+            # concatenate with negative padding for overlap. ---
+            #
+            # AUDIO CROSSFADE BEHAVIOUR (Task 05.02.04)
+            # ------------------------------------------
+            # MoviePy's CrossFadeIn / CrossFadeOut effects modify BOTH
+            # the video opacity AND the audio volume simultaneously:
+            #
+            #   • CrossFadeOut(d) ramps audio volume 1.0 → 0.0 over the
+            #     last *d* seconds of the outgoing clip.
+            #   • CrossFadeIn(d) ramps audio volume 0.0 → 1.0 over the
+            #     first *d* seconds of the incoming clip.
+            #
+            # During the 0.5 s overlap created by negative padding, both
+            # audio streams play at the same time.  The outgoing audio
+            # fades out while the incoming audio fades in, producing a
+            # smooth cross-mix whose total level stays approximately
+            # constant (the two linear ramps sum to ~1.0 at every point).
+            #
+            # No manual AudioClip manipulation is required — this
+            # automatic behaviour produces a natural-sounding transition
+            # for TTS narration, where segment boundaries usually fall in
+            # natural speech pauses.
+            #
+            # ALTERNATIVES NOT IMPLEMENTED (v1.0 design decision):
+            #
+            #   A) Independent audio fading (audio_fadein / audio_fadeout
+            #      with different curves or durations).  Adds complexity
+            #      without clear benefit for narration content.
+            #
+            #   B) Full-volume audio during visual crossfade (strip audio
+            #      before crossfade, reattach after).  Would produce a
+            #      harsh, abrupt audio cut rather than a smooth cross-mix.
+            #
+            # SUBTITLE–TRANSITION INTERACTION (Task 05.02.06)
+            # -----------------------------------------------
+            # Subtitles are composited INTO each clip (via
+            # CompositeVideoClip) in SubPhase 05.01 *before* crossfade
+            # effects are applied here.  The crossfade opacity therefore
+            # affects the ENTIRE composite — Ken Burns visuals and
+            # subtitle text fade together as a single unit.
+            #
+            # During the 0.5 s overlap, both the outgoing clip's subtitle
+            # and the incoming clip's subtitle are partially visible at
+            # reduced opacity.  This brief blended state is standard
+            # video-editing behaviour and is visually acceptable for v1.0
+            # because:
+            #   • The overlap is only 0.5 s — too short for viewers to
+            #     focus on the blended text.
+            #   • Both subtitles occupy the same screen position, so the
+            #     blend appears as one subtitle morphing into another.
+            #   • Content boundaries (end-of-sentence → start-of-sentence)
+            #     make the transition feel coherent.
+            #
+            # Subtitle timing (start / duration of each TextClip) is
+            # unaffected by crossfade — only opacity is modified.
+            #
+            # POTENTIAL FUTURE IMPROVEMENTS (not implemented in v1.0):
+            #   A) Truncate outgoing subtitles 0.5 s before clip end.
+            #   B) Delay incoming subtitles 0.5 s after clip start.
+            #   C) Add semi-transparent background behind subtitle text
+            #      for readability during partial-opacity blending.
+            # All deferred due to added complexity with minimal benefit.
+
+            # Progress: transition phase
+            if on_progress:
+                on_progress(
+                    total_segments,
+                    total_segments + 1,
+                    "Applying crossfade transitions...",
+                )
+
+            clips = apply_crossfade_transitions(clips, TRANSITION_DURATION)
+
+            logger.info(
+                "Concatenating %d clip(s) with crossfade "
+                "(padding=%.2fs)...",
+                len(clips),
+                -TRANSITION_DURATION,
+            )
+            composite_clip = concatenate_videoclips(
+                clips,
+                method="compose",
+                padding=-TRANSITION_DURATION,
+            )
+        else:
+            # --- Single-clip: no transitions, no concatenation. ---
+            # A single segment renders as-is — no crossfadein/crossfadeout,
+            # no fadein/fadeout, no concatenation overhead.  All previously
+            # applied effects (Ken Burns, subtitle overlay, audio) are
+            # preserved exactly as they were baked into the clip.
+            logger.info(
+                "Project has a single segment — skipping crossfade "
+                "transitions and concatenation.  The clip will be "
+                "exported directly with all existing effects intact."
+            )
+            composite_clip = clips[0]
+
+        # Validate concatenation / single-clip result
         if composite_clip.duration is None or composite_clip.duration <= 0:
             raise ValueError(
                 "Concatenation produced a clip with zero or negative duration."
             )
 
+        # Log expected duration accounting for overlaps.
+        num_overlaps = max(len(original_durations) - 1, 0)
+        naive_sum = sum(original_durations)
+        expected_duration = calculate_total_duration_with_transitions(
+            original_durations, TRANSITION_DURATION,
+        )
         logger.info(
-            "Concatenation complete: %d clip(s), total duration %.2fs",
-            len(clips), composite_clip.duration,
+            "Concatenation complete: %d clip(s), %d crossfade "
+            "transition(s) (%.2fs each).  Naive sum %.2fs, "
+            "adjusted expected duration %.2fs, actual duration %.2fs",
+            len(original_durations),
+            num_overlaps,
+            TRANSITION_DURATION if num_overlaps else 0.0,
+            naive_sum,
+            expected_duration,
+            composite_clip.duration,
         )
 
         # --------------------------------------------------------------
         # I. Progress: exporting
         # --------------------------------------------------------------
         if on_progress:
+            export_total = (
+                total_segments + 1 if len(original_durations) > 1
+                else total_segments
+            )
             on_progress(
-                total_segments,
-                total_segments,
+                export_total,
+                export_total,
                 "Exporting final MP4...",
             )
 
@@ -475,6 +747,17 @@ def render_project(
 
         total_duration = composite_clip.duration
 
+        # Duration validation: compare actual vs expected.
+        duration_diff = abs(total_duration - expected_duration)
+        if duration_diff > 0.2:
+            logger.warning(
+                "Duration mismatch: expected %.2fs, actual %.2fs "
+                "(diff %.2fs exceeds 0.2s tolerance).",
+                expected_duration,
+                total_duration,
+                duration_diff,
+            )
+
         # --------------------------------------------------------------
         # M. Get output file size
         # --------------------------------------------------------------
@@ -495,6 +778,8 @@ def render_project(
         result = {
             "output_path": output_path,
             "duration": total_duration,
+            "expected_duration": expected_duration,
+            "num_transitions": num_overlaps,
             "file_size": file_size,
             "warnings": warnings,
         }

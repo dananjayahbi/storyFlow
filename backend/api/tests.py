@@ -1463,15 +1463,16 @@ class VideoRendererTests(TestCase):
         self.assertGreater(result["file_size"], 0)
 
     def test_render_multiple_segments(self):
-        """Multi-segment render: duration ≈ sum of audio durations."""
-        from core_engine.video_renderer import render_project
+        """Multi-segment render: duration ≈ sum minus crossfade overlaps."""
+        from core_engine.video_renderer import render_project, TRANSITION_DURATION
         result = render_project(str(self.project.id))
 
         self.assertTrue(os.path.exists(result["output_path"]))
         self.assertGreater(result["file_size"], 0)
 
-        # Total duration should be approximately 3 seconds (3 × 1s audio)
-        expected_duration = 3.0
+        # 3 segments × 1s audio minus 2 crossfade overlaps × 0.5s = 2.0s
+        num_overlaps = len(self.segments) - 1
+        expected_duration = 3.0 - num_overlaps * TRANSITION_DURATION
         self.assertAlmostEqual(
             result["duration"], expected_duration, delta=0.5
         )
@@ -2033,8 +2034,10 @@ class KenBurnsIntegrationTests(TestCase):
         self.assertTrue(os.path.exists(output_path))
         self.assertGreater(result["file_size"], 0)
 
-        # 3 segments × 1 second each ≈ 3.0 seconds (±0.5 tolerance)
-        self.assertAlmostEqual(result["duration"], 3.0, delta=0.5)
+        # 3 segments × 1s minus 2 crossfade overlaps × 0.5s = 2.0s
+        from core_engine.video_renderer import TRANSITION_DURATION
+        expected = 3.0 - 2 * TRANSITION_DURATION
+        self.assertAlmostEqual(result["duration"], expected, delta=0.5)
 
     def test_render_with_zoom_1_0(self):
         """Render succeeds with zoom_intensity 1.0 (no zoom)."""
@@ -2390,3 +2393,40 @@ class RenderPipelineTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['status'], 'FAILED')
         self.assertIsNone(response.data['output_url'])
+
+    # ── Render Transition Metadata Test (Task 05.02.08, Step 14) ──
+
+    def test_render_result_transition_metadata(self):
+        """render_project result includes expected_duration, num_transitions,
+        and warnings — all exposed correctly for the API layer."""
+        from core_engine.video_renderer import (
+            render_project,
+            TRANSITION_DURATION,
+            calculate_total_duration_with_transitions,
+        )
+
+        result = render_project(str(self.project.id))
+
+        # ── Result dict contains transition metadata ──
+        self.assertIn("expected_duration", result)
+        self.assertIn("num_transitions", result)
+        self.assertIn("warnings", result)
+
+        # 3 segments → 2 transitions
+        self.assertEqual(result["num_transitions"], 2)
+
+        # expected_duration matches formula: 3×1s − 2×0.5s = 2.0s
+        expected = calculate_total_duration_with_transitions(
+            [1.0, 1.0, 1.0]
+        )
+        self.assertAlmostEqual(
+            result["expected_duration"], expected, delta=0.01
+        )
+
+        # Actual duration is close to expected
+        self.assertAlmostEqual(
+            result["duration"], expected, delta=0.5
+        )
+
+        # warnings is a list (possibly empty if ImageMagick is available)
+        self.assertIsInstance(result["warnings"], list)

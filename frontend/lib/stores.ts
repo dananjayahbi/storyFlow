@@ -14,6 +14,10 @@ import {
   pollTaskStatus,
   startRender as apiStartRender,
   getRenderStatus as apiGetRenderStatus,
+  getSettings as apiGetSettings,
+  updateSettings as apiUpdateSettings,
+  getVoices as apiGetVoices,
+  uploadFont as apiUploadFont,
 } from './api';
 import type {
   ProjectDetail,
@@ -23,7 +27,9 @@ import type {
   BulkGenerationProgress,
   RenderStatus,
   RenderProgress,
+  GlobalSettings,
 } from './types';
+import { type Voice, AVAILABLE_VOICES } from './constants';
 
 interface ProjectStore {
   // State
@@ -580,5 +586,118 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
 
   clearBulkProgress: () => {
     set({ bulkGenerationProgress: null });
+  },
+}));
+
+// ===================================================================
+// Settings Store (Task 05.03.01 + 05.03.02 + 05.03.03)
+// ===================================================================
+
+interface SettingsStore {
+  /** Current global settings (null until fetched). */
+  globalSettings: GlobalSettings | null;
+
+  /** True while the initial GET is in-flight. */
+  isSettingsLoading: boolean;
+
+  /** Error message if fetch or update failed. */
+  settingsError: string | null;
+
+  /** Fetch settings from GET /api/settings/. */
+  fetchSettings: () => Promise<void>;
+
+  /** Partial-update settings via PATCH /api/settings/. */
+  updateSettings: (data: Partial<GlobalSettings>) => Promise<void>;
+
+  /** List of available Kokoro TTS voices. */
+  availableVoices: Voice[];
+
+  /** True while the voices list is being fetched. */
+  isVoicesLoading: boolean;
+
+  /** Fetch voices from GET /api/settings/voices/, falls back to hardcoded list. */
+  fetchVoices: () => Promise<void>;
+
+  /** True while a font file is being uploaded. */
+  isFontUploading: boolean;
+
+  /** Upload a custom subtitle font via POST /api/settings/font/upload/. */
+  uploadFont: (file: File) => Promise<void>;
+}
+
+export const useSettingsStore = create<SettingsStore>()((set, get) => ({
+  globalSettings: null,
+  isSettingsLoading: false,
+  settingsError: null,
+  availableVoices: [],
+  isVoicesLoading: false,
+  isFontUploading: false,
+
+  fetchSettings: async () => {
+    set({ isSettingsLoading: true, settingsError: null });
+    try {
+      const settings = await apiGetSettings();
+      set({ globalSettings: settings, isSettingsLoading: false });
+    } catch {
+      set({
+        settingsError: 'Failed to load settings',
+        isSettingsLoading: false,
+      });
+    }
+  },
+
+  updateSettings: async (data) => {
+    const previous = get().globalSettings;
+
+    // Optimistic update
+    if (previous) {
+      set({ globalSettings: { ...previous, ...data } });
+    }
+
+    try {
+      const updated = await apiUpdateSettings(data);
+      set({ globalSettings: updated, settingsError: null });
+    } catch {
+      // Rollback on failure
+      set({
+        globalSettings: previous,
+        settingsError: 'Failed to save settings',
+      });
+      throw new Error('Failed to save settings');
+    }
+  },
+
+  fetchVoices: async () => {
+    set({ isVoicesLoading: true });
+    try {
+      const voices = await apiGetVoices();
+      set({ availableVoices: voices, isVoicesLoading: false });
+    } catch {
+      // Fall back to hardcoded list on API failure
+      console.warn(
+        '[useSettingsStore] Failed to fetch voices from API — using fallback list'
+      );
+      set({ availableVoices: AVAILABLE_VOICES, isVoicesLoading: false });
+    }
+  },
+
+  uploadFont: async (file) => {
+    set({ isFontUploading: true });
+    try {
+      const result = await apiUploadFont(file);
+      // Update the globalSettings with the new font path
+      const prev = get().globalSettings;
+      if (prev) {
+        set({
+          globalSettings: { ...prev, subtitle_font: result.subtitle_font },
+          isFontUploading: false,
+        });
+      } else {
+        set({ isFontUploading: false });
+      }
+    } catch {
+      set({ isFontUploading: false });
+      throw new Error('Failed to upload font');
+    }
   },
 }));

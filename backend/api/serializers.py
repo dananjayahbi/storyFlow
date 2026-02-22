@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from .models import Project, Segment, GlobalSettings
 from .parsers import JSONParser, TextParser, ParseError
-from .validators import validate_import_data
+from .validators import validate_import_data, HEX_COLOR_REGEX
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -43,6 +43,14 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'default_voice_id', 'tts_speed', 'zoom_intensity',
             'subtitle_font', 'subtitle_color',
         ]
+
+    def validate_subtitle_color(self, value):
+        """Validate subtitle_color is a valid hex color (#RGB or #RRGGBB)."""
+        if value and not HEX_COLOR_REGEX.match(value):
+            raise serializers.ValidationError(
+                'Enter a valid hex color (e.g., #FFFFFF).'
+            )
+        return value
 
 
 class ProjectDetailSerializer(serializers.ModelSerializer):

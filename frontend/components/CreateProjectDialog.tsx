@@ -45,7 +45,7 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>Create Project</Button>
+        <Button data-create-project-trigger>Create Project</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

@@ -11,7 +11,9 @@ import {
   BulkTaskResponse,
   GenerateAllAudioOptions,
   TaskStatusResponse,
+  GlobalSettings,
 } from './types';
+import { Voice } from './constants';
 
 const api = axios.create({
   baseURL: 'http://localhost:8000',
@@ -174,6 +176,40 @@ export async function getRenderStatus(
   projectId: string
 ): Promise<import('./types').RenderStatusResponse> {
   const { data } = await api.get(`/api/projects/${projectId}/status/`);
+  return data;
+}
+
+// ── Global Settings ──
+
+export async function getSettings(): Promise<GlobalSettings> {
+  const { data } = await api.get<GlobalSettings>('/api/settings/');
+  return data;
+}
+
+export async function updateSettings(
+  data: Partial<GlobalSettings>
+): Promise<GlobalSettings> {
+  const response = await api.patch<GlobalSettings>('/api/settings/', data);
+  return response.data;
+}
+
+// ── Available Voices (Task 05.03.02) ──
+
+export async function getVoices(): Promise<Voice[]> {
+  const { data } = await api.get<Voice[]>('/api/settings/voices/');
+  return data;
+}
+
+// ── Font Upload (Task 05.03.03) ──
+
+export async function uploadFont(
+  file: File
+): Promise<{ subtitle_font: string; message: string }> {
+  const formData = new FormData();
+  formData.append('font', file);
+  const { data } = await api.post('/api/settings/font/upload/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
   return data;
 }
 

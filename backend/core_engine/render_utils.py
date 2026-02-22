@@ -11,6 +11,8 @@ This module is the central hub for all rendering helper functions
 used throughout Phase 04 — The Vision.
 """
 
+import functools
+import glob
 import logging
 import os
 import platform
@@ -326,115 +328,231 @@ def cleanup_temp_files(temp_dir: str) -> None:
 # ImageMagick availability check
 # ---------------------------------------------------------------------------
 
-_imagemagick_available: Optional[bool] = None
 
-
+@functools.lru_cache(maxsize=1)
 def check_imagemagick() -> bool:
     """
     Check whether ImageMagick is available on the system.
 
-    Looks for the ``magick`` command (ImageMagick 7) or ``convert``
-    (ImageMagick 6 and earlier).  The result is cached so subsequent
-    calls are essentially free.
+    Checks in order:
+    1. ImageMagick 7 — the ``magick`` binary on PATH.
+    2. ImageMagick 6 — the ``convert`` binary, verified via
+       ``convert --version`` to distinguish it from the Windows
+       system utility ``convert.exe`` (FAT32→NTFS converter).
+    3. Windows fallback — common install directories such as
+       ``C:\\Program Files\\ImageMagick-7.*``.
+
+    The result is cached with :pyfunc:`functools.lru_cache` so that
+    repeated calls within the same process are essentially free.
 
     Returns:
         bool: ``True`` if ImageMagick is detected, ``False`` otherwise.
     """
-    global _imagemagick_available
+    # --- Step 2: ImageMagick 7 ("magick" binary) --------------------------
+    if shutil.which("magick") is not None:
+        logger.info("ImageMagick 7 detected via 'magick' command.")
+        return True
 
-    if _imagemagick_available is not None:
-        return _imagemagick_available
+    # --- Step 3: ImageMagick 6 ("convert" binary) -------------------------
+    convert_path = shutil.which("convert")
+    if convert_path is not None:
+        try:
+            result = subprocess.run(
+                [convert_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if "ImageMagick" in result.stdout:
+                logger.info(
+                    "ImageMagick 6 detected via 'convert' command at %s.",
+                    convert_path,
+                )
+                return True
+            else:
+                logger.debug(
+                    "'convert' found at %s but is not ImageMagick "
+                    "(likely Windows system utility).",
+                    convert_path,
+                )
+        except subprocess.TimeoutExpired:
+            logger.debug(
+                "'convert --version' timed out (5 s limit) at %s.",
+                convert_path,
+            )
+        except (FileNotFoundError, OSError) as exc:
+            logger.debug(
+                "Failed to run 'convert --version' at %s: %s",
+                convert_path,
+                exc,
+            )
 
-    # Try ImageMagick 7 first, then legacy v6 ``convert``
-    for cmd in ("magick", "convert"):
-        if shutil.which(cmd) is not None:
-            logger.info("ImageMagick detected via '%s' command.", cmd)
-            _imagemagick_available = True
-            return True
+    # --- Step 7: Windows common-install-path fallback ---------------------
+    if platform.system() == "Windows":
+        program_files = os.environ.get(
+            "ProgramFiles", r"C:\Program Files"
+        )
+        pattern = os.path.join(program_files, "ImageMagick-*")
+        matches = sorted(glob.glob(pattern), reverse=True)  # newest first
+        for match_dir in matches:
+            magick_exe = os.path.join(match_dir, "magick.exe")
+            if os.path.isfile(magick_exe):
+                logger.info(
+                    "ImageMagick found at non-PATH location: %s",
+                    magick_exe,
+                )
+                # Inform MoviePy where to find the binary
+                try:
+                    from moviepy.config import change_settings
+                    change_settings({"IMAGEMAGICK_BINARY": magick_exe})
+                    logger.info(
+                        "Set IMAGEMAGICK_BINARY to %s", magick_exe
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Could not configure MoviePy IMAGEMAGICK_BINARY: %s",
+                        exc,
+                    )
+                return True
 
+    # --- Step 4: Nothing found --------------------------------------------
     logger.warning(
         "ImageMagick not found on the system. "
         "Subtitle overlay will be skipped."
     )
-    _imagemagick_available = False
     return False
 
 
 def reset_imagemagick_cache() -> None:
     """Reset the cached ImageMagick availability flag (useful for tests)."""
-    global _imagemagick_available
-    _imagemagick_available = None
+    check_imagemagick.cache_clear()
+    logger.debug("ImageMagick availability cache has been reset.")
 
 
 # ---------------------------------------------------------------------------
 # Font path resolution
 # ---------------------------------------------------------------------------
 
+# Bundled default font — equivalent to
+# os.path.join(django_settings.BASE_DIR, "fonts", "default.ttf")
+DEFAULT_FONT_PATH: str = str(
+    Path(__file__).resolve().parent.parent / "fonts" / "default.ttf"
+)
 
-def get_font_path(font_name: Optional[str] = None) -> Optional[str]:
+_VALID_FONT_EXTENSIONS: frozenset[str] = frozenset({".ttf", ".otf"})
+
+
+def validate_font_file(font_path: str) -> bool:
     """
-    Resolve a font name to a filesystem path usable by MoviePy TextClip.
+    Check whether *font_path* points to a valid font file.
 
-    Strategy:
-    1. If *font_name* is an existing file path, return it directly.
-    2. On Windows look under ``C:/Windows/Fonts`` for common extensions.
-    3. On Linux/macOS run ``fc-match`` to locate the font.
-    4. If nothing is found, return ``None`` and let MoviePy use its
-       built-in default.
+    A file is considered valid if it exists on disk **and** has a
+    ``.ttf`` or ``.otf`` extension (case-insensitive).  This helper
+    is used by the font-upload endpoint (SubPhase 05.03) and by
+    :func:`get_font_path`.
 
     Args:
-        font_name: A font family name (e.g. ``"Arial"``) or an
-            absolute/relative path to a ``.ttf`` / ``.otf`` file.
-            Pass ``None`` or ``""`` to get the system default.
+        font_path: Filesystem path to check.
 
     Returns:
-        str | None: Absolute path to the resolved font file, or
-        ``None`` if the font could not be located.
+        bool: ``True`` when the file exists and has a recognised font
+        extension, ``False`` otherwise.
     """
-    if not font_name:
-        return None
+    if not font_path:
+        return False
+    path = Path(font_path)
+    return path.is_file() and path.suffix.lower() in _VALID_FONT_EXTENSIONS
 
-    # Already an existing file path?
-    if os.path.isfile(font_name):
-        logger.debug("Font path provided directly: %s", font_name)
-        return font_name
 
-    # Windows: search the system Fonts directory
-    if platform.system() == "Windows":
-        fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-        for ext in (".ttf", ".otf", ".ttc"):
-            candidate = fonts_dir / f"{font_name}{ext}"
-            if candidate.exists():
-                logger.debug("Found font at %s", candidate)
-                return str(candidate)
-            # Also try lower-case version
-            candidate_lower = fonts_dir / f"{font_name.lower()}{ext}"
-            if candidate_lower.exists():
-                logger.debug("Found font at %s", candidate_lower)
-                return str(candidate_lower)
+def get_font_path(font_path: Optional[str] = None) -> str:
+    """
+    Resolve a configured font path to a guaranteed-valid font file.
 
-    # Linux / macOS: use fc-match
-    if shutil.which("fc-match"):
-        try:
-            result = subprocess.run(
-                ["fc-match", "--format=%{file}", font_name],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                resolved = result.stdout.strip()
-                if os.path.isfile(resolved):
-                    logger.debug(
-                        "fc-match resolved '%s' → %s", font_name, resolved
-                    )
-                    return resolved
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            logger.debug("fc-match failed for '%s': %s", font_name, exc)
+    Validation steps (in order):
 
-    logger.warning(
-        "Could not resolve font '%s' to a file path. "
-        "MoviePy will fall back to its default font.",
-        font_name,
-    )
-    return None
+    1. If *font_path* is ``None``, empty, or whitespace-only, fall
+       back to :data:`DEFAULT_FONT_PATH`.
+    2. If the path is relative, resolve it against Django's
+       ``BASE_DIR``.
+    3. If the resolved path does not exist on disk, fall back to
+       :data:`DEFAULT_FONT_PATH`.
+    4. If the file extension is not ``.ttf`` or ``.otf``
+       (case-insensitive), fall back to :data:`DEFAULT_FONT_PATH`.
+    5. Otherwise return the resolved absolute path.
+
+    This function **always** returns a usable font path — it never
+    returns ``None`` or an empty string.
+
+    Args:
+        font_path: The value from ``GlobalSettings.subtitle_font``,
+            or ``None`` / ``""`` to use the bundled default.
+
+    Returns:
+        str: Absolute path to a validated font file.
+    """
+    # Step 1 — empty / None / whitespace → default
+    if not font_path or not font_path.strip():
+        logger.info(
+            "No font configured — using bundled default: %s",
+            DEFAULT_FONT_PATH,
+        )
+        return DEFAULT_FONT_PATH
+
+    resolved = font_path.strip()
+
+    # Step 2 — resolve relative paths against BASE_DIR
+    if not os.path.isabs(resolved):
+        from django.conf import settings as django_settings  # deferred
+        resolved = os.path.join(str(django_settings.BASE_DIR), resolved)
+
+    # Step 3 — existence check
+    if not os.path.exists(resolved):
+        logger.warning(
+            "Configured font path does not exist: '%s'. "
+            "Falling back to bundled default: %s",
+            resolved,
+            DEFAULT_FONT_PATH,
+        )
+        return DEFAULT_FONT_PATH
+
+    # Step 4 — extension check
+    ext = Path(resolved).suffix.lower()
+    if ext not in _VALID_FONT_EXTENSIONS:
+        logger.warning(
+            "Configured font has unsupported extension '%s': '%s'. "
+            "Only .ttf and .otf are supported. "
+            "Falling back to bundled default: %s",
+            ext,
+            resolved,
+            DEFAULT_FONT_PATH,
+        )
+        return DEFAULT_FONT_PATH
+
+    # Step 5 — all checks passed
+    logger.debug("Font path validated: %s", resolved)
+    return resolved
+
+
+def verify_default_font() -> bool:
+    """
+    Verify that the bundled default font exists at
+    :data:`DEFAULT_FONT_PATH`.
+
+    Intended to be called at application startup (e.g. in an
+    ``AppConfig.ready()`` hook) to catch deployment issues early.
+
+    Returns:
+        bool: ``True`` if the default font file exists, ``False``
+        otherwise.
+    """
+    exists = os.path.isfile(DEFAULT_FONT_PATH)
+    if not exists:
+        logger.error(
+            "Bundled default font is MISSING: %s  — "
+            "subtitle rendering will fail unless a custom font is "
+            "configured in GlobalSettings.",
+            DEFAULT_FONT_PATH,
+        )
+    else:
+        logger.debug("Default font verified: %s", DEFAULT_FONT_PATH)
+    return exists

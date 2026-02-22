@@ -66,9 +66,9 @@ describe('Timeline', () => {
       />
     );
 
-    expect(screen.getByText('No segments yet.')).toBeInTheDocument();
+    expect(screen.getByText('No segments')).toBeInTheDocument();
     expect(
-      screen.getByText('Import a story to get started.')
+      screen.getByText('Import a story to create segments.')
     ).toBeInTheDocument();
   });
 

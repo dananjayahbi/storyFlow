@@ -8,6 +8,8 @@ import { ProjectCard } from '@/components/ProjectCard';
 import { CreateProjectDialog } from '@/components/CreateProjectDialog';
 import ImportDialog from '@/components/ImportDialog';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/EmptyState';
+import { FolderPlus } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function DashboardPage() {
@@ -75,12 +77,17 @@ export default function DashboardPage() {
       />
 
       {projects.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-muted-foreground text-lg mb-4">
-            No projects yet. Create your first project!
-          </p>
-          <CreateProjectDialog onProjectCreated={handleProjectCreated} />
-        </div>
+        <EmptyState
+          icon={FolderPlus}
+          title="No projects yet"
+          description="Create your first story to get started!"
+          actionLabel="+ New Project"
+          onAction={() => {
+            // Trigger CreateProjectDialog by clicking its trigger button
+            const trigger = document.querySelector<HTMLButtonElement>('[data-create-project-trigger]');
+            trigger?.click();
+          }}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {projects.map((project) => (

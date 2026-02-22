@@ -12,12 +12,12 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import Project, Segment, GlobalSettings, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
-from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer
+from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer
 from .parsers import ParseError
 from .tasks import get_task_manager, render_task_function
-from .validators import validate_image_upload, validate_project_for_render
+from .validators import validate_image_upload, validate_project_for_render, validate_font_upload
 from core_engine.model_loader import KokoroModelLoader
-from core_engine.tts_wrapper import construct_audio_path
+from core_engine.tts_wrapper import construct_audio_path, VALID_VOICE_IDS
 from core_engine import render_utils
 
 logger = logging.getLogger(__name__)
@@ -684,3 +684,128 @@ def task_status_view(request, task_id):
         },
         status=status.HTTP_200_OK,
     )
+
+
+# ===================================================================
+# Global Settings Endpoint (Task 05.03.01)
+# ===================================================================
+
+@api_view(['GET', 'PATCH'])
+def global_settings_view(request):
+    """Retrieve or update the singleton GlobalSettings instance.
+
+    GET  → Returns the current settings (creates defaults if no row exists).
+    PATCH → Partial-update of any settings fields.
+    """
+    settings_obj = GlobalSettings.load()
+
+    if request.method == 'GET':
+        serializer = GlobalSettingsSerializer(settings_obj)
+        return Response(serializer.data)
+
+    # PATCH
+    serializer = GlobalSettingsSerializer(
+        settings_obj, data=request.data, partial=True
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
+# ===================================================================
+# Available Voices Endpoint (Task 05.03.02)
+# ===================================================================
+
+# Voice metadata: maps voice IDs to user-friendly names and genders.
+# This is the canonical source — the frontend falls back to a
+# hardcoded copy if this endpoint is unreachable.
+VOICE_METADATA = {
+    'af_bella':   {'id': 'af_bella',   'name': 'Bella',   'gender': 'Female'},
+    'af_sarah':   {'id': 'af_sarah',   'name': 'Sarah',   'gender': 'Female'},
+    'af_nicole':  {'id': 'af_nicole',  'name': 'Nicole',  'gender': 'Female'},
+    'am_adam':    {'id': 'am_adam',    'name': 'Adam',    'gender': 'Male'},
+    'am_michael': {'id': 'am_michael', 'name': 'Michael', 'gender': 'Male'},
+    'bf_emma':    {'id': 'bf_emma',    'name': 'Emma',    'gender': 'Female', 'accent': 'British'},
+    'bm_george':  {'id': 'bm_george',  'name': 'George',  'gender': 'Male',   'accent': 'British'},
+}
+
+
+@api_view(['GET'])
+def available_voices_view(request):
+    """Return the list of available Kokoro TTS voices.
+
+    Scans the voice directory for .pt files and enriches each entry
+    with metadata (name, gender).  Falls back to the full
+    VALID_VOICE_IDS list if no .pt files are found on disk.
+    """
+    voices_dir = os.path.join(settings.BASE_DIR, '..', 'models', 'voices')
+    discovered_ids: set[str] = set()
+
+    if os.path.isdir(voices_dir):
+        for fname in os.listdir(voices_dir):
+            if fname.endswith('.pt'):
+                voice_id = fname[:-3]  # strip .pt
+                if voice_id in VALID_VOICE_IDS:
+                    discovered_ids.add(voice_id)
+
+    # Fall back to the full set if no .pt files were found
+    if not discovered_ids:
+        discovered_ids = set(VALID_VOICE_IDS)
+
+    voices = []
+    for vid in sorted(discovered_ids):
+        meta = VOICE_METADATA.get(vid)
+        if meta:
+            voices.append(meta)
+        else:
+            # Unknown voice file — use the raw ID
+            voices.append({'id': vid, 'name': vid, 'gender': 'Unknown'})
+
+    return Response(voices)
+
+
+# ===================================================================
+# Font Upload Endpoint (Task 05.03.03)
+# ===================================================================
+
+@api_view(['POST'])
+def upload_font_view(request):
+    """Upload a custom subtitle font (.ttf or .otf).
+
+    Accepts a multipart/form-data POST with a 'font' file field.
+    Saves the file to MEDIA_ROOT/fonts/ and updates the GlobalSettings
+    subtitle_font field with the saved path.
+    """
+    font_file = request.FILES.get('font')
+    if not font_file:
+        return Response(
+            {'error': 'No font file provided.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate extension and size
+    validate_font_upload(font_file)
+
+    # Ensure fonts directory exists
+    fonts_dir = os.path.join(settings.MEDIA_ROOT, 'fonts')
+    os.makedirs(fonts_dir, exist_ok=True)
+
+    # Save the file (overwrite if same name)
+    safe_name = os.path.basename(font_file.name)
+    dest_path = os.path.join(fonts_dir, safe_name)
+
+    with open(dest_path, 'wb') as f:
+        for chunk in font_file.chunks():
+            f.write(chunk)
+
+    # Update GlobalSettings with the font path
+    settings_obj = GlobalSettings.load()
+    settings_obj.subtitle_font = dest_path
+    settings_obj.save()
+
+    logger.info("Custom font uploaded: %s", dest_path)
+
+    return Response({
+        'subtitle_font': dest_path,
+        'message': 'Font uploaded successfully.',
+    })

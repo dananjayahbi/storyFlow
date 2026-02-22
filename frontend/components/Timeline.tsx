@@ -3,6 +3,8 @@
 import type { Segment, UpdateSegmentPayload } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SegmentCard } from './SegmentCard';
+import { EmptyState } from '@/components/EmptyState';
+import { FileText } from 'lucide-react';
 
 interface TimelineProps {
   segments: Segment[];
@@ -17,12 +19,11 @@ export function Timeline({
 }: TimelineProps) {
   if (segments.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <p className="text-lg text-muted-foreground">No segments yet.</p>
-        <p className="text-sm text-muted-foreground">
-          Import a story to get started.
-        </p>
-      </div>
+      <EmptyState
+        icon={FileText}
+        title="No segments"
+        description="Import a story to create segments."
+      />
     );
   }
 

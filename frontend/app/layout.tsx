@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { Toaster } from '@/components/ui/sonner';
+import { ToastProvider } from '@/components/ToastProvider';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -26,10 +27,12 @@ export default function RootLayout({
         </header>
         <main className="container mx-auto px-4 py-8">
           <TooltipProvider>
-            {children}
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
           </TooltipProvider>
         </main>
-        <Toaster />
+        <ToastProvider />
       </body>
     </html>
   );
