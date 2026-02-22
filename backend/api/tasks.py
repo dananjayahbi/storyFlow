@@ -320,3 +320,80 @@ class TaskManager:
 def get_task_manager() -> TaskManager:
     """Return the TaskManager singleton instance."""
     return TaskManager()
+
+
+# --------------------------------------------------------------------------
+# Background render task function
+# --------------------------------------------------------------------------
+
+
+def render_task_function(project_id: str, task_id: str) -> None:
+    """Background task that renders a project's video.
+
+    Bridges the TaskManager infrastructure (Phase 03) with the video
+    renderer (SubPhases 04.01–04.02).  Runs on the TaskManager's
+    ``ThreadPoolExecutor``, calls ``render_project`` with a progress
+    callback that feeds real-time updates into TaskManager, and
+    transitions the ``Project`` status to COMPLETED or FAILED.
+
+    Args:
+        project_id: UUID string of the project to render.
+        task_id:    TaskManager-assigned identifier (``render_{project_id}``).
+
+    Note:
+        Imports are deferred to avoid circular dependencies.
+        The Project is **always** re-queried from the database — a
+        model instance must never be shared across threads.
+    """
+    # Step 2 — deferred imports
+    from core_engine.video_renderer import render_project  # noqa: E402
+    from api.models import Project, STATUS_COMPLETED, STATUS_FAILED  # noqa: E402
+
+    tm = get_task_manager()
+
+    # Step 3 — progress callback
+    def on_progress(current, total, phase):
+        """Feed per-segment progress into the TaskManager registry."""
+        tm.update_task_progress(
+            task_id,
+            current=current,
+            total=total,
+            description=phase,
+        )
+
+    try:
+        # Step 4 — blocking render call
+        result = render_project(project_id, on_progress=on_progress)
+
+        # Step 5 — success: update Project model
+        project = Project.objects.get(id=project_id)
+        project.status = STATUS_COMPLETED
+        project.output_path = result.get("output_path", "")
+        project.save(update_fields=["status", "output_path"])
+
+        # Store result data in TaskManager progress for the status endpoint
+        tm.update_task_progress(
+            task_id,
+            current=result.get("total_segments", 0),
+            total=result.get("total_segments", 0),
+            description="Export complete",
+            output_path=result.get("output_path", ""),
+            duration=result.get("duration", 0),
+            file_size=result.get("file_size", 0),
+        )
+
+    except Exception as exc:
+        # Step 6 — failure: log error, set FAILED status
+        logger.error(
+            "Render failed for project %s: %s", project_id, exc,
+            exc_info=True,
+        )
+        try:
+            project = Project.objects.get(id=project_id)
+            project.status = STATUS_FAILED
+            project.save(update_fields=["status"])
+        except Exception:
+            pass  # prevent cascading if DB is also inaccessible
+
+        # Re-raise so the TaskManager wrapper marks the task as FAILED
+        raise

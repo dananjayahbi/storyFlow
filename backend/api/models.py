@@ -1,12 +1,20 @@
 import uuid
 from django.db import models
 
+STATUS_DRAFT = "DRAFT"
+STATUS_PROCESSING = "PROCESSING"
+STATUS_COMPLETED = "COMPLETED"
+STATUS_FAILED = "FAILED"
+
 STATUS_CHOICES = [
-    ('DRAFT', 'Draft'),
-    ('PROCESSING', 'Processing'),
-    ('COMPLETED', 'Completed'),
-    ('FAILED', 'Failed'),
+    (STATUS_DRAFT, 'Draft'),
+    (STATUS_PROCESSING, 'Processing'),
+    (STATUS_COMPLETED, 'Completed'),
+    (STATUS_FAILED, 'Failed'),
 ]
+
+# States from which a new render can be started.
+RENDERABLE_STATUSES = {STATUS_DRAFT, STATUS_COMPLETED, STATUS_FAILED}
 
 
 class Project(models.Model):
@@ -14,7 +22,7 @@ class Project(models.Model):
     title = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='DRAFT')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     resolution_width = models.IntegerField(default=1920)
     resolution_height = models.IntegerField(default=1080)
     framerate = models.IntegerField(default=30)

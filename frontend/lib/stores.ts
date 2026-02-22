@@ -12,6 +12,8 @@ import {
   generateAllAudio as apiGenerateAllAudio,
   getTaskStatus,
   pollTaskStatus,
+  startRender as apiStartRender,
+  getRenderStatus as apiGetRenderStatus,
 } from './api';
 import type {
   ProjectDetail,
@@ -19,6 +21,8 @@ import type {
   UpdateSegmentPayload,
   AudioGenerationState,
   BulkGenerationProgress,
+  RenderStatus,
+  RenderProgress,
 } from './types';
 
 interface ProjectStore {
@@ -39,6 +43,20 @@ interface ProjectStore {
 
   /** Session-only Set of segment IDs whose text was edited after audio generation. */
   staleAudioSegments: Set<string>;
+
+  // ── Render Pipeline State ──
+
+  /** TaskManager task ID from the render endpoint. */
+  renderTaskId: string | null;
+
+  /** Current render status for the active project. */
+  renderStatus: RenderStatus;
+
+  /** Progress data during rendering. */
+  renderProgress: RenderProgress | null;
+
+  /** Backend-provided URL for the rendered video. */
+  outputUrl: string | null;
 
   // Actions
   fetchProject: (id: string) => Promise<void>;
@@ -72,11 +90,28 @@ interface ProjectStore {
   /** Clear the stale audio flag for a segment. */
   clearAudioStale: (segmentId: string) => void;
 
+  // ── Render Pipeline Actions ──
+
+  /** Trigger video rendering via the backend. */
+  startRender: () => Promise<void>;
+
+  /** Poll render status and update progress. */
+  pollRenderStatus: () => void;
+
+  /** Reset all render-related state and cancel polling. */
+  resetRenderState: () => void;
+
+  /** Download the rendered video file. */
+  downloadVideo: () => void;
+
   reset: () => void;
 }
 
 // Module-level variable for cancellable bulk polling
 let bulkPollingTimer: ReturnType<typeof setInterval> | null = null;
+
+// Module-level variable for cancellable render polling
+let renderPollingTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useProjectStore = create<ProjectStore>()((set, get) => ({
   project: null,
@@ -87,6 +122,10 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
   audioGenerationStatus: {} as Record<string, AudioGenerationState>,
   bulkGenerationProgress: null,
   staleAudioSegments: new Set<string>(),
+  renderTaskId: null,
+  renderStatus: 'idle' as RenderStatus,
+  renderProgress: null,
+  outputUrl: null,
 
   fetchProject: async (id) => {
     set({ isLoading: true, error: null });
@@ -94,6 +133,18 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       const project = await getProject(id);
       const segments = await getSegments(id);
       set({ project, segments, isLoading: false });
+
+      // Detect render state from project status
+      if (project.status === 'PROCESSING') {
+        set({ renderStatus: 'rendering' as RenderStatus });
+        get().pollRenderStatus();
+      } else if (project.status === 'COMPLETED' && project.output_path) {
+        const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8000';
+        set({
+          renderStatus: 'completed' as RenderStatus,
+          outputUrl: `/media/${project.output_path}`,
+        });
+      }
     } catch {
       set({ error: 'Failed to load project', isLoading: false });
     }
@@ -182,10 +233,134 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     }
   },
 
+  // ── Render Pipeline Actions ──
+
+  startRender: async () => {
+    const { project } = get();
+    if (!project) return;
+
+    set({ renderStatus: 'validating' as RenderStatus, renderProgress: null, outputUrl: null, renderTaskId: null });
+
+    try {
+      const result = await apiStartRender(project.id);
+      set({
+        renderStatus: 'rendering' as RenderStatus,
+        renderTaskId: result.task_id,
+      });
+
+      // Begin polling for progress
+      get().pollRenderStatus();
+    } catch (err: unknown) {
+      // Axios errors carry a response object
+      const axiosErr = err as { response?: { status?: number; data?: Record<string, unknown> } };
+      const status = axiosErr?.response?.status;
+
+      if (status === 400) {
+        // Validation error — set back to idle and surface error
+        const errorData = axiosErr?.response?.data;
+        const message = errorData?.message || errorData?.error || 'Validation failed';
+        set({ renderStatus: 'idle' as RenderStatus, error: String(message) });
+      } else if (status === 409) {
+        // Already rendering — set to rendering and start polling
+        set({ renderStatus: 'rendering' as RenderStatus });
+        get().pollRenderStatus();
+      } else {
+        const message = err instanceof Error ? err.message : 'Failed to start render';
+        set({ renderStatus: 'failed' as RenderStatus, error: message });
+      }
+    }
+  },
+
+  pollRenderStatus: () => {
+    const { project } = get();
+    if (!project) return;
+
+    const poll = async () => {
+      const { renderStatus } = get();
+      if (renderStatus !== 'rendering') return;
+
+      try {
+        const status = await apiGetRenderStatus(project.id);
+
+        if (status.status === 'COMPLETED') {
+          set({
+            renderStatus: 'completed' as RenderStatus,
+            renderProgress: status.progress,
+            outputUrl: status.output_url,
+          });
+          renderPollingTimer = null;
+          return;
+        }
+
+        if (status.status === 'FAILED') {
+          set({
+            renderStatus: 'failed' as RenderStatus,
+            renderProgress: status.progress,
+            outputUrl: null,
+          });
+          renderPollingTimer = null;
+          return;
+        }
+
+        // Still processing — update progress and poll again
+        set({ renderProgress: status.progress });
+        renderPollingTimer = setTimeout(poll, 3000);
+      } catch {
+        // Transient error — try again
+        renderPollingTimer = setTimeout(poll, 3000);
+      }
+    };
+
+    // Start polling after a short delay to let the backend begin
+    renderPollingTimer = setTimeout(poll, 1000);
+  },
+
+  resetRenderState: () => {
+    if (renderPollingTimer) {
+      clearTimeout(renderPollingTimer);
+      renderPollingTimer = null;
+    }
+    set({
+      renderTaskId: null,
+      renderStatus: 'idle' as RenderStatus,
+      renderProgress: null,
+      outputUrl: null,
+    });
+  },
+
+  downloadVideo: () => {
+    const { outputUrl } = get();
+    if (!outputUrl) return;
+
+    // Cross-origin download via fetch → blob → object URL
+    const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8000';
+    const fullUrl = `${backendBase}${outputUrl}`;
+
+    fetch(fullUrl)
+      .then((res) => res.blob())
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'final.mp4';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => {
+        set({ error: 'Failed to download video' });
+      });
+  },
+
   reset: () => {
     if (bulkPollingTimer) {
       clearInterval(bulkPollingTimer);
       bulkPollingTimer = null;
+    }
+    if (renderPollingTimer) {
+      clearTimeout(renderPollingTimer);
+      renderPollingTimer = null;
     }
     set({
       project: null, segments: [], isLoading: false, error: null,
@@ -193,6 +368,10 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       audioGenerationStatus: {},
       bulkGenerationProgress: null,
       staleAudioSegments: new Set<string>(),
+      renderTaskId: null,
+      renderStatus: 'idle' as RenderStatus,
+      renderProgress: null,
+      outputUrl: null,
     });
   },
 

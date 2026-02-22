@@ -161,4 +161,20 @@ export async function pollTaskStatus(
   });
 }
 
+// ── Render Pipeline ──
+
+export async function startRender(
+  projectId: string
+): Promise<{ task_id: string; project_id: string; status: string; total_segments: number; message: string }> {
+  const { data } = await api.post(`/api/projects/${projectId}/render/`);
+  return data;
+}
+
+export async function getRenderStatus(
+  projectId: string
+): Promise<import('./types').RenderStatusResponse> {
+  const { data } = await api.get(`/api/projects/${projectId}/status/`);
+  return data;
+}
+
 export default api;

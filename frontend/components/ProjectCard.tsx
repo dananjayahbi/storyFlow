@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
@@ -10,18 +9,12 @@ import {
 import { Trash2 } from 'lucide-react';
 import { deleteProject } from '@/lib/api';
 import { Project } from '@/lib/types';
+import RenderStatusBadge from '@/components/RenderStatusBadge';
 
 interface ProjectCardProps {
   project: Project;
   onDelete: (id: string) => void;
 }
-
-const statusVariant: Record<Project['status'], 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  DRAFT: 'secondary',
-  PROCESSING: 'outline',
-  COMPLETED: 'default',
-  FAILED: 'destructive',
-};
 
 export function ProjectCard({ project, onDelete }: ProjectCardProps) {
   const hasSegments = project.segment_count > 0;
@@ -41,9 +34,7 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg">{project.title}</CardTitle>
             <div className="flex items-center gap-1">
-              <Badge variant={statusVariant[project.status]}>
-                {project.status}
-              </Badge>
+              <RenderStatusBadge status={project.status} />
               <div onClick={(e) => e.preventDefault()}>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -79,7 +70,7 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
             {project.segment_count} segment{project.segment_count !== 1 ? 's' : ''}
           </p>
         </CardContent>
-        <CardFooter>
+        <CardFooter className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             Created {new Date(project.created_at).toLocaleDateString('en-US', {
               year: 'numeric',
@@ -87,6 +78,11 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
               day: 'numeric',
             })}
           </p>
+          {project.status === 'COMPLETED' && (
+            <Button variant="outline" size="sm" className="text-xs" asChild>
+              <span>🎬 Watch</span>
+            </Button>
+          )}
         </CardFooter>
       </Card>
     </Link>

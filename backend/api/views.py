@@ -11,13 +11,14 @@ from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Project, Segment, GlobalSettings
+from .models import Project, Segment, GlobalSettings, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
 from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer
 from .parsers import ParseError
-from .tasks import get_task_manager
-from .validators import validate_image_upload
+from .tasks import get_task_manager, render_task_function
+from .validators import validate_image_upload, validate_project_for_render
 from core_engine.model_loader import KokoroModelLoader
 from core_engine.tts_wrapper import construct_audio_path
+from core_engine import render_utils
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,147 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     f'Skipped: {skipped_locked} locked, {skipped_existing} existing, '
                     f'{skipped_empty} empty.'
                 ),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=['get'], url_path='status')
+    def render_status(self, request, pk=None):
+        """Return the current render status for a project.
+
+        Designed for frequent polling (every ~3 s). All data comes from
+        the in-memory TaskManager registry or a single DB read — no
+        expensive queries.
+
+        Returns:
+            200 OK — JSON with project_id, status, progress, and output_url.
+        """
+        # Step 2 — base response
+        project = self.get_object()
+        project_id = str(project.id)
+        total_segments = Segment.objects.filter(project=project).count()
+
+        data = {
+            'project_id': project_id,
+            'status': project.status,
+            'progress': None,
+            'output_url': None,
+        }
+
+        # Step 3 — PROCESSING: real-time progress from TaskManager
+        if project.status == STATUS_PROCESSING:
+            task_id = f"render_{project_id}"
+            task_state = get_task_manager().get_task_status(task_id)
+            if task_state and task_state.get('progress'):
+                prog = task_state['progress']
+                data['progress'] = {
+                    'current_segment': prog.get('current', 0),
+                    'total_segments': prog.get('total', total_segments),
+                    'percentage': int(prog.get('percentage', 0)),
+                    'current_phase': prog.get('description', 'Rendering…'),
+                }
+
+        # Step 4 — COMPLETED: output URL + 100 % progress
+        elif project.status == STATUS_COMPLETED:
+            if project.output_path:
+                data['output_url'] = f"/media/{project.output_path}"
+            data['progress'] = {
+                'current_segment': total_segments,
+                'total_segments': total_segments,
+                'percentage': 100,
+                'current_phase': 'Export complete',
+            }
+
+        # Step 5 — FAILED: last known progress, no output_url
+        elif project.status == STATUS_FAILED:
+            task_id = f"render_{project_id}"
+            task_state = get_task_manager().get_task_status(task_id)
+            if task_state and task_state.get('progress'):
+                prog = task_state['progress']
+                data['progress'] = {
+                    'current_segment': prog.get('current', 0),
+                    'total_segments': prog.get('total', total_segments),
+                    'percentage': int(prog.get('percentage', 0)),
+                    'current_phase': prog.get('description', 'Failed'),
+                }
+
+        # Step 6 — Return 200
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='render')
+    def render(self, request, pk=None):
+        """Trigger video rendering for a project.
+
+        Validates the project is ready (all segments have images and
+        audio), checks FFmpeg availability, sets project status to
+        PROCESSING, spawns a background render task, and returns 202
+        Accepted with the task ID.
+
+        Returns:
+            202 Accepted — rendering started successfully.
+            400 Bad Request — segments missing image or audio files.
+            409 Conflict — project is already being rendered.
+            500 Internal Server Error — FFmpeg not available.
+        """
+        # Step 2: Retrieve the project (404 handled by DRF)
+        project = self.get_object()
+
+        # Step 3: Pre-render validation
+        validation_error = validate_project_for_render(project)
+        if validation_error is not None:
+            return Response(validation_error, status=status.HTTP_400_BAD_REQUEST)
+
+        # Step 4: Check project status — only PROCESSING is blocked
+        if project.status == STATUS_PROCESSING:
+            return Response(
+                {
+                    'error': 'Project is already being rendered.',
+                    'project_id': str(project.id),
+                    'status': project.status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Step 5: Check FFmpeg availability
+        if not render_utils.check_ffmpeg():
+            return Response(
+                {
+                    'error': (
+                        'FFmpeg is required for video rendering but was '
+                        'not found on the system PATH. Please install '
+                        'FFmpeg and try again.'
+                    ),
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Step 6: Set status to PROCESSING
+        project.status = STATUS_PROCESSING
+        project.save(update_fields=['status'])
+
+        # Step 7: Spawn background task
+        project_id = str(project.id)
+        task_id = f"render_{project_id}"
+
+        task_manager = get_task_manager()
+
+        # Use the standalone render_task_function from tasks.py
+        # (wraps render_project with progress callback and status updates)
+        def task_wrapper():
+            render_task_function(project_id, task_id)
+
+        task_manager.submit_task(task_wrapper, task_id=task_id)
+
+        # Step 8: Return 202 Accepted
+        total_segments = Segment.objects.filter(project=project).count()
+
+        return Response(
+            {
+                'task_id': task_id,
+                'project_id': project_id,
+                'status': STATUS_PROCESSING,
+                'total_segments': total_segments,
+                'message': 'Video rendering started.',
             },
             status=status.HTTP_202_ACCEPTED,
         )

@@ -1,8 +1,72 @@
 from rest_framework.exceptions import ValidationError
 
+import os
 
 ALLOWED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
 MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+
+
+def validate_project_for_render(project):
+    """Validate that a project is ready for video rendering.
+
+    Checks that the project has at least one segment and that every
+    segment has both an image file and an audio file assigned **and**
+    present on disk.  Collects all errors in a single pass (no
+    short-circuiting) so the caller can report everything at once.
+
+    Args:
+        project: A ``Project`` model instance.
+
+    Returns:
+        ``None`` if the project is ready to render, or a ``dict`` with:
+        - ``missing_images``: list of segment ID strings lacking images.
+        - ``missing_audio``: list of segment ID strings lacking audio.
+        - ``message``: human-readable summary of the validation errors.
+    """
+    from api.models import Segment  # noqa: E402
+
+    segments = Segment.objects.filter(project=project).order_by("sequence_index")
+
+    if not segments.exists():
+        return {
+            "missing_images": [],
+            "missing_audio": [],
+            "message": "Project has no segments to render.",
+        }
+
+    missing_images = []
+    missing_audio = []
+
+    for seg in segments:
+        # Check image file
+        if not seg.image_file:
+            missing_images.append(str(seg.id))
+        elif not os.path.exists(seg.image_file.path):
+            missing_images.append(str(seg.id))
+
+        # Check audio file
+        if not seg.audio_file:
+            missing_audio.append(str(seg.id))
+        elif not os.path.exists(seg.audio_file.path):
+            missing_audio.append(str(seg.id))
+
+    if missing_images or missing_audio:
+        parts = []
+        if missing_images:
+            parts.append(
+                f"{len(missing_images)} segment(s) missing image files"
+            )
+        if missing_audio:
+            parts.append(
+                f"{len(missing_audio)} segment(s) missing audio files"
+            )
+        return {
+            "missing_images": missing_images,
+            "missing_audio": missing_audio,
+            "message": "; ".join(parts) + ".",
+        }
+
+    return None
 
 
 def validate_image_upload(file):

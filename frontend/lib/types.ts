@@ -131,3 +131,24 @@ export interface BulkGenerationProgress {
   completed_segments: CompletedSegmentAudio[];
   errors: TaskError[];
 }
+
+// ── Render Pipeline ──
+
+/** Render pipeline status for the project. */
+export type RenderStatus = 'idle' | 'validating' | 'rendering' | 'completed' | 'failed';
+
+/** Progress data returned by GET /api/projects/{id}/status/. */
+export interface RenderProgress {
+  current_segment: number;
+  total_segments: number;
+  percentage: number;
+  current_phase: string;
+}
+
+/** Response from GET /api/projects/{id}/status/. */
+export interface RenderStatusResponse {
+  project_id: string;
+  status: 'DRAFT' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  progress: RenderProgress | null;
+  output_url: string | null;
+}
