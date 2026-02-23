@@ -12,6 +12,7 @@ import {
   GenerateAllAudioOptions,
   TaskStatusResponse,
   GlobalSettings,
+  GalleryItem,
 } from './types';
 import { Voice } from './constants';
 
@@ -256,6 +257,23 @@ export async function testTTS(
     { responseType: 'blob' }
   );
   return response.data;
+}
+
+// ── Gallery ──
+
+export async function getGalleryItems(): Promise<GalleryItem[]> {
+  const { data } = await api.get<GalleryItem[]>('/api/gallery/');
+  return data;
+}
+
+export function getStreamUrl(projectId: string): string {
+  const base = api.defaults.baseURL || 'http://localhost:8000';
+  return `${base}/api/gallery/${projectId}/stream/`;
+}
+
+export function getDownloadUrl(projectId: string): string {
+  const base = api.defaults.baseURL || 'http://localhost:8000';
+  return `${base}/api/gallery/${projectId}/download/`;
 }
 
 export default api;

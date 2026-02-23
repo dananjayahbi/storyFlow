@@ -15,5 +15,8 @@ urlpatterns = [
     path('settings/voices/', views.available_voices_view, name='available-voices'),
     path('settings/font/upload/', views.upload_font_view, name='upload-font'),
     path('settings/tts-test/', views.tts_test_view, name='tts-test'),
+    path('gallery/', views.gallery_list_view, name='gallery-list'),
+    path('gallery/<str:project_id>/stream/', views.gallery_stream_view, name='gallery-stream'),
+    path('gallery/<str:project_id>/download/', views.gallery_download_view, name='gallery-download'),
     path('', include(router.urls)),
 ]

@@ -6,6 +6,7 @@ import uuid as uuid_mod
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import models, transaction
+from django.http import FileResponse, StreamingHttpResponse
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
@@ -1116,3 +1117,183 @@ def tts_test_view(request):
             {'error': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+# ── Gallery API ──
+
+
+def _resolve_video_path(project):
+    """Resolve the absolute path to a project's rendered video.
+
+    Checks:
+    1. The stored output_path (may be absolute)
+    2. The conventional path: <MEDIA_ROOT>/projects/<id>/output/final.mp4
+    Returns the path if it exists on disk, or None.
+    """
+    # Try stored path first
+    if project.output_path:
+        p = project.output_path
+        if os.path.isfile(p):
+            return p
+        # Maybe it was stored as a relative path
+        full = os.path.join(settings.MEDIA_ROOT, p)
+        if os.path.isfile(full):
+            return full
+
+    # Fall back to conventional path
+    conventional = os.path.join(
+        settings.MEDIA_ROOT, 'projects', str(project.id), 'output', 'final.mp4'
+    )
+    if os.path.isfile(conventional):
+        return conventional
+
+    return None
+
+
+@api_view(['GET'])
+def gallery_list_view(request):
+    """List all completed projects that have rendered videos.
+
+    Returns a JSON array of gallery items with project metadata and video info.
+    Only projects with status COMPLETED and an existing video file are included.
+
+    GET /api/gallery/
+    """
+    projects = Project.objects.filter(status=STATUS_COMPLETED).order_by('-updated_at')
+    items = []
+
+    for project in projects:
+        video_path = _resolve_video_path(project)
+        if not video_path:
+            continue
+
+        # Get file metadata
+        try:
+            file_size = os.path.getsize(video_path)
+        except OSError:
+            file_size = 0
+
+        segment_count = Segment.objects.filter(project=project).count()
+
+        items.append({
+            'id': str(project.id),
+            'title': project.title,
+            'created_at': project.created_at.isoformat(),
+            'updated_at': project.updated_at.isoformat(),
+            'resolution_width': project.resolution_width,
+            'resolution_height': project.resolution_height,
+            'framerate': project.framerate,
+            'segment_count': segment_count,
+            'file_size': file_size,
+            'stream_url': f'/api/gallery/{project.id}/stream/',
+            'download_url': f'/api/gallery/{project.id}/download/',
+        })
+
+    return Response(items)
+
+
+@api_view(['GET'])
+def gallery_stream_view(request, project_id):
+    """Stream a rendered video for in-browser playback.
+
+    Supports HTTP Range requests for seeking/progressive playback.
+
+    GET /api/gallery/<project_id>/stream/
+    """
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {'error': 'Project not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    video_path = _resolve_video_path(project)
+    if not video_path:
+        return Response(
+            {'error': 'Video file not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    file_size = os.path.getsize(video_path)
+    content_type = 'video/mp4'
+
+    # Handle Range requests for video seeking
+    range_header = request.META.get('HTTP_RANGE')
+    if range_header:
+        try:
+            range_spec = range_header.strip().replace('bytes=', '')
+            range_parts = range_spec.split('-')
+            start = int(range_parts[0]) if range_parts[0] else 0
+            end = int(range_parts[1]) if range_parts[1] else file_size - 1
+            end = min(end, file_size - 1)
+            length = end - start + 1
+
+            def file_range_iterator(path, start, length, chunk_size=8192):
+                with open(path, 'rb') as f:
+                    f.seek(start)
+                    remaining = length
+                    while remaining > 0:
+                        read_size = min(chunk_size, remaining)
+                        data = f.read(read_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+
+            response = StreamingHttpResponse(
+                file_range_iterator(video_path, start, length),
+                status=206,
+                content_type=content_type,
+            )
+            response['Content-Length'] = str(length)
+            response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            response['Accept-Ranges'] = 'bytes'
+            return response
+        except (ValueError, IndexError):
+            pass  # Fall through to full file response
+
+    # Full file response
+    response = FileResponse(
+        open(video_path, 'rb'),
+        content_type=content_type,
+    )
+    response['Content-Length'] = str(file_size)
+    response['Accept-Ranges'] = 'bytes'
+    response['Content-Disposition'] = f'inline; filename="{project.title}.mp4"'
+    return response
+
+
+@api_view(['GET'])
+def gallery_download_view(request, project_id):
+    """Download a rendered video as an attachment.
+
+    GET /api/gallery/<project_id>/download/
+    """
+    try:
+        project = Project.objects.get(id=project_id)
+    except Project.DoesNotExist:
+        return Response(
+            {'error': 'Project not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    video_path = _resolve_video_path(project)
+    if not video_path:
+        return Response(
+            {'error': 'Video file not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Sanitize filename for Content-Disposition
+    safe_title = project.title.replace('"', "'").replace('\n', ' ').strip()
+    if not safe_title:
+        safe_title = str(project.id)
+
+    response = FileResponse(
+        open(video_path, 'rb'),
+        content_type='video/mp4',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{safe_title}.mp4"'
+    response['Content-Length'] = str(os.path.getsize(video_path))
+    return response

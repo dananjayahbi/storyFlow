@@ -154,3 +154,20 @@ export interface RenderStatusResponse {
   progress: RenderProgress | null;
   output_url: string | null;
 }
+
+// ── Gallery ──
+
+/** A rendered video item returned by the Gallery API. */
+export interface GalleryItem {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  resolution_width: number;
+  resolution_height: number;
+  framerate: number;
+  segment_count: number;
+  file_size: number;
+  stream_url: string;
+  download_url: string;
+}

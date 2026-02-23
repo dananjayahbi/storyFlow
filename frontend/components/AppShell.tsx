@@ -8,6 +8,7 @@ import {
   Film,
   FolderOpen,
   Layers,
+  MonitorPlay,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -50,6 +51,12 @@ const NAV_ITEMS = [
     href: '/bulk-create',
     icon: Layers,
     match: (path: string) => path === '/bulk-create',
+  },
+  {
+    label: 'Gallery',
+    href: '/gallery',
+    icon: MonitorPlay,
+    match: (path: string) => path === '/gallery',
   },
   {
     label: 'Settings',
