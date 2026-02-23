@@ -7,6 +7,7 @@ import {
   Settings,
   Film,
   FolderOpen,
+  Layers,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -43,6 +44,12 @@ const NAV_ITEMS = [
     href: '/projects',
     icon: FolderOpen,
     match: (path: string) => path === '/projects',
+  },
+  {
+    label: 'Bulk Create',
+    href: '/bulk-create',
+    icon: Layers,
+    match: (path: string) => path === '/bulk-create',
   },
   {
     label: 'Settings',
