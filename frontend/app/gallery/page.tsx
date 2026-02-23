@@ -16,7 +16,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
@@ -29,6 +28,13 @@ import {
   MonitorPlay,
   X,
   ExternalLink,
+  Volume2,
+  VolumeX,
+  Pause,
+  SkipBack,
+  SkipForward,
+  Repeat,
+  PictureInPicture2,
 } from 'lucide-react';
 
 // ── Utilities ──
@@ -72,7 +78,16 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
+
+  // ── Video player state ──
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isLooping, setIsLooping] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
 
   const fetchGallery = useCallback(async () => {
     setLoading(true);
@@ -101,6 +116,96 @@ export default function GalleryPage() {
     a.click();
     document.body.removeChild(a);
   }, []);
+
+  // ── Player controls ──
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) { v.play(); } else { v.pause(); }
+  }, []);
+
+  const skip = useCallback((seconds: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + seconds));
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    setIsMuted(v.muted);
+  }, []);
+
+  const handleVolumeChange = useCallback((val: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.volume = val;
+    setVolume(val);
+    if (val > 0 && v.muted) { v.muted = false; setIsMuted(false); }
+  }, []);
+
+  const toggleLoop = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.loop = !v.loop;
+    setIsLooping(v.loop);
+  }, []);
+
+  const cyclePlaybackRate = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const rates = [0.5, 0.75, 1, 1.25, 1.5, 2];
+    const currentIdx = rates.indexOf(playbackRate);
+    const nextIdx = (currentIdx + 1) % rates.length;
+    const newRate = rates[nextIdx];
+    v.playbackRate = newRate;
+    setPlaybackRate(newRate);
+  }, [playbackRate]);
+
+  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const v = videoRef.current;
+    if (!v || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = x / rect.width;
+    v.currentTime = pct * duration;
+  }, [duration]);
+
+  const togglePiP = useCallback(async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await v.requestPictureInPicture();
+      }
+    } catch { /* PiP not supported */ }
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.requestFullscreen) { v.requestFullscreen(); }
+  }, []);
+
+  const handleClosePlayer = useCallback(() => {
+    const v = videoRef.current;
+    if (v) { v.pause(); v.src = ''; }
+    setSelectedItem(null);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    setPlaybackRate(1);
+  }, []);
+
+  function formatTime(seconds: number): string {
+    if (!isFinite(seconds) || seconds < 0) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
 
   return (
     <div className="space-y-6">
@@ -241,63 +346,217 @@ export default function GalleryPage() {
       )}
 
       {/* Video Player Dialog */}
-      <Dialog open={!!selectedItem} onOpenChange={(open) => !open && setSelectedItem(null)}>
-        <DialogContent className="max-w-4xl w-full p-0 gap-0 overflow-hidden">
-          <DialogHeader className="p-4 pb-2">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="truncate pr-4">
-                {selectedItem?.title}
-              </DialogTitle>
-              <div className="flex items-center gap-1 shrink-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8"
-                      onClick={() => selectedItem && handleDownload(selectedItem)}
-                    >
-                      <Download className="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Download</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8"
-                      asChild
-                    >
-                      <Link href={`/projects/${selectedItem?.id}`}>
-                        <ExternalLink className="size-4" />
-                      </Link>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Open Project</TooltipContent>
-                </Tooltip>
-              </div>
+      <Dialog open={!!selectedItem} onOpenChange={(open) => { if (!open) handleClosePlayer(); }}>
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-[95vw] max-w-[95vw] w-[95vw] max-h-[95vh] p-0 gap-0 overflow-hidden"
+        >
+          {/* Custom header with proper button layout */}
+          <div className="flex items-center justify-between px-4 py-3 border-b">
+            <DialogTitle className="truncate text-base font-semibold pr-4">
+              {selectedItem?.title}
+            </DialogTitle>
+            <div className="flex items-center gap-1 shrink-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    onClick={() => selectedItem && handleDownload(selectedItem)}
+                  >
+                    <Download className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Download</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="size-8" asChild>
+                    <Link href={`/projects/${selectedItem?.id}`}>
+                      <ExternalLink className="size-4" />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Open Project</TooltipContent>
+              </Tooltip>
+              <div className="w-px h-5 bg-border mx-1" />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    onClick={handleClosePlayer}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Close</TooltipContent>
+              </Tooltip>
             </div>
-          </DialogHeader>
+          </div>
 
-          {/* Video player */}
+          {/* Video player area */}
           {selectedItem && (
-            <div className="bg-black">
+            <div
+              className="relative bg-black cursor-pointer"
+              onClick={togglePlay}
+            >
               <video
                 ref={videoRef}
                 src={getStreamUrl(selectedItem.id)}
-                className="w-full max-h-[70vh] object-contain"
-                controls
+                className="w-full object-contain"
+                style={{ maxHeight: '80vh' }}
                 autoPlay
                 playsInline
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => {
+                  setDuration(e.currentTarget.duration);
+                  setVolume(e.currentTarget.volume);
+                  setIsMuted(e.currentTarget.muted);
+                }}
+                onEnded={() => setIsPlaying(false)}
               />
+              {/* Center play/pause overlay (brief flash on click) */}
+              {!isPlaying && currentTime > 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="bg-black/50 rounded-full p-4">
+                    <Play className="size-10 text-white" />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Custom controls bar */}
+          {selectedItem && (
+            <div className="border-t bg-background">
+              {/* Seek bar */}
+              <div
+                className="h-2 bg-muted cursor-pointer group relative"
+                onClick={handleSeek}
+              >
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : '0%' }}
+                />
+                {/* Seek thumb */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 size-3 bg-primary rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ left: duration > 0 ? `calc(${(currentTime / duration) * 100}% - 6px)` : '0' }}
+                />
+              </div>
+
+              {/* Controls */}
+              <div className="flex items-center justify-between px-3 py-2">
+                {/* Left: play controls */}
+                <div className="flex items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="size-8" onClick={() => skip(-10)}>
+                        <SkipBack className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>-10s</TooltipContent>
+                  </Tooltip>
+
+                  <Button variant="ghost" size="icon" className="size-9" onClick={togglePlay}>
+                    {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
+                  </Button>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="size-8" onClick={() => skip(10)}>
+                        <SkipForward className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>+10s</TooltipContent>
+                  </Tooltip>
+
+                  {/* Volume */}
+                  <div className="flex items-center gap-1 ml-2">
+                    <Button variant="ghost" size="icon" className="size-8" onClick={toggleMute}>
+                      {isMuted || volume === 0 ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                    </Button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={isMuted ? 0 : volume}
+                      onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+                      className="w-20 h-1 accent-primary cursor-pointer"
+                    />
+                  </div>
+
+                  {/* Time display */}
+                  <span className="text-xs text-muted-foreground ml-3 tabular-nums">
+                    {formatTime(currentTime)} / {formatTime(duration)}
+                  </span>
+                </div>
+
+                {/* Right: extra controls */}
+                <div className="flex items-center gap-1">
+                  {/* Playback speed */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-8 px-2 tabular-nums"
+                        onClick={cyclePlaybackRate}
+                      >
+                        {playbackRate}x
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Playback Speed</TooltipContent>
+                  </Tooltip>
+
+                  {/* Loop */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`size-8 ${isLooping ? 'text-primary' : ''}`}
+                        onClick={toggleLoop}
+                      >
+                        <Repeat className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{isLooping ? 'Loop: On' : 'Loop: Off'}</TooltipContent>
+                  </Tooltip>
+
+                  {/* PiP */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="size-8" onClick={togglePiP}>
+                        <PictureInPicture2 className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Picture in Picture</TooltipContent>
+                  </Tooltip>
+
+                  {/* Fullscreen */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="size-8" onClick={toggleFullscreen}>
+                        <Maximize2 className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Fullscreen</TooltipContent>
+                  </Tooltip>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Metadata footer */}
           {selectedItem && (
-            <div className="p-4 pt-2 flex items-center gap-4 text-xs text-muted-foreground border-t">
+            <div className="px-4 py-2 flex items-center gap-4 text-xs text-muted-foreground border-t">
               <span>{selectedItem.resolution_width}×{selectedItem.resolution_height}</span>
               <span>{selectedItem.framerate} fps</span>
               <span>{selectedItem.segment_count} segments</span>
