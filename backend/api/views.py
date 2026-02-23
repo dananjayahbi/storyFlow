@@ -219,14 +219,31 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if project.status == STATUS_PROCESSING:
             task_id = f"render_{project_id}"
             task_state = get_task_manager().get_task_status(task_id)
-            if task_state and task_state.get('progress'):
-                prog = task_state['progress']
-                data['progress'] = {
-                    'current_segment': prog.get('current', 0),
-                    'total_segments': prog.get('total', total_segments),
-                    'percentage': int(prog.get('percentage', 0)),
-                    'current_phase': prog.get('description', 'Rendering…'),
-                }
+            if task_state:
+                # If the task has been cancelled, report FAILED immediately
+                if task_state.get('cancel_requested') or task_state.get('status') == 'CANCELLED':
+                    data['status'] = STATUS_FAILED
+                    prog = task_state.get('progress', {})
+                    data['progress'] = {
+                        'current_segment': prog.get('current', 0),
+                        'total_segments': prog.get('total', total_segments),
+                        'percentage': int(prog.get('percentage', 0)),
+                        'current_phase': 'Cancelled by user',
+                    }
+                elif task_state.get('progress'):
+                    prog = task_state['progress']
+                    # Percentage is pre-scaled by on_progress():
+                    #   0–80 % → segment processing
+                    #  80–99 % → export phase
+                    # During the export phase, show total_segments from
+                    # the DB instead of the raw progress total (100).
+                    is_export = prog.get('is_export_phase', False)
+                    data['progress'] = {
+                        'current_segment': total_segments if is_export else prog.get('current', 0),
+                        'total_segments': total_segments,
+                        'percentage': int(prog.get('percentage', 0)),
+                        'current_phase': prog.get('description', 'Rendering…'),
+                    }
 
         # Step 4 — COMPLETED: output URL + 100 % progress
         elif project.status == STATUS_COMPLETED:
@@ -331,6 +348,49 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 'message': 'Video rendering started.',
             },
             status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='cancel-render')
+    def cancel_render(self, request, pk=None):
+        """Cancel an in-progress render for a project.
+
+        Sets the cooperative cancellation flag in TaskManager so the
+        render task aborts between segments.  The project status is
+        set back to FAILED to indicate an incomplete render.
+
+        Returns:
+            200 OK — cancellation requested.
+            409 Conflict — project is not currently rendering.
+        """
+        project = self.get_object()
+        project_id = str(project.id)
+
+        if project.status != STATUS_PROCESSING:
+            return Response(
+                {
+                    'error': 'Project is not currently rendering.',
+                    'project_id': project_id,
+                    'status': project.status,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        task_id = f"render_{project_id}"
+        task_manager = get_task_manager()
+        cancelled = task_manager.cancel_task(task_id)
+
+        if not cancelled:
+            # Task not found in registry — reset project status
+            project.status = STATUS_FAILED
+            project.save(update_fields=['status'])
+
+        return Response(
+            {
+                'project_id': project_id,
+                'status': 'CANCELLING',
+                'message': 'Render cancellation requested.',
+            },
+            status=status.HTTP_200_OK,
         )
 
 

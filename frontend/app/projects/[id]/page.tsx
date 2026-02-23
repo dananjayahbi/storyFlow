@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useProjectStore } from '@/lib/stores';
@@ -44,7 +44,7 @@ export default function TimelineEditorPage() {
     bulkGenerationProgress, generateAllAudio, cancelGeneration,
     // Render pipeline
     renderStatus, renderProgress, outputUrl,
-    startRender, resetRenderState, downloadVideo,
+    startRender, resetRenderState, cancelRender, downloadVideo,
   } = useProjectStore();
 
   const isGenerating = !!bulkGenerationProgress &&
@@ -57,6 +57,74 @@ export default function TimelineEditorPage() {
 
   const isRendering = renderStatus === 'rendering' || renderStatus === 'validating';
   const renderPercentage = renderProgress?.percentage ?? 0;
+
+  // ── Smooth progress interpolation ──
+  // Smoothly animate between polled render percentage values instead of
+  // jumping discretely. Uses requestAnimationFrame to increment the
+  // displayed value toward the actual target at ~1% per 50ms.
+  const [smoothRenderPct, setSmoothRenderPct] = useState(0);
+  const smoothRef = useRef<number | null>(null);
+  const targetPctRef = useRef(0);
+
+  useEffect(() => {
+    targetPctRef.current = renderPercentage;
+  }, [renderPercentage]);
+
+  useEffect(() => {
+    if (!isRendering) {
+      setSmoothRenderPct(0);
+      if (smoothRef.current) cancelAnimationFrame(smoothRef.current);
+      return;
+    }
+
+    const tick = () => {
+      setSmoothRenderPct((prev) => {
+        const target = targetPctRef.current;
+        if (prev >= target) return prev;
+        // Advance ~1% per frame, capped at target
+        const step = Math.max(0.3, (target - prev) * 0.08);
+        return Math.min(prev + step, target);
+      });
+      smoothRef.current = requestAnimationFrame(tick);
+    };
+
+    smoothRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (smoothRef.current) cancelAnimationFrame(smoothRef.current);
+    };
+  }, [isRendering]);
+
+  // Also smooth the bulk audio generation percentage
+  const [smoothBulkPct, setSmoothBulkPct] = useState(0);
+  const smoothBulkRef = useRef<number | null>(null);
+  const targetBulkRef = useRef(0);
+
+  useEffect(() => {
+    targetBulkRef.current = bulkPercentage;
+  }, [bulkPercentage]);
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setSmoothBulkPct(0);
+      if (smoothBulkRef.current) cancelAnimationFrame(smoothBulkRef.current);
+      return;
+    }
+
+    const tick = () => {
+      setSmoothBulkPct((prev) => {
+        const target = targetBulkRef.current;
+        if (prev >= target) return prev;
+        const step = Math.max(0.3, (target - prev) * 0.08);
+        return Math.min(prev + step, target);
+      });
+      smoothBulkRef.current = requestAnimationFrame(tick);
+    };
+
+    smoothBulkRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (smoothBulkRef.current) cancelAnimationFrame(smoothBulkRef.current);
+    };
+  }, [isGenerating]);
 
   // Hydrate sidebar state
   useEffect(() => {
@@ -381,18 +449,30 @@ export default function TimelineEditorPage() {
                   </Button>
                 </>
               ) : (
-                <Button
-                  size="sm"
-                  onClick={startRender}
-                  disabled={isRendering || segments.length === 0}
-                >
-                  {isRendering ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Film className="h-4 w-4 mr-2" />
+                <>
+                  <Button
+                    size="sm"
+                    onClick={startRender}
+                    disabled={isRendering || segments.length === 0}
+                  >
+                    {isRendering ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Film className="h-4 w-4 mr-2" />
+                    )}
+                    {isRendering ? 'Rendering…' : 'Export Video'}
+                  </Button>
+                  {isRendering && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={cancelRender}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Cancel
+                    </Button>
                   )}
-                  {isRendering ? 'Rendering…' : 'Export Video'}
-                </Button>
+                </>
               )}
             </div>
             {bulkGenerationProgress && (
@@ -412,9 +492,9 @@ export default function TimelineEditorPage() {
                 ) : (
                   <>
                     <p className="text-sm text-muted-foreground">
-                      Generating audio… {bulkGenerationProgress.completed}/{bulkGenerationProgress.total} segments complete ({bulkPercentage}%)
+                      Generating audio… {bulkGenerationProgress.completed}/{bulkGenerationProgress.total} segments complete ({Math.round(smoothBulkPct)}%)
                     </p>
-                    <Progress value={bulkPercentage} className="w-full" />
+                    <Progress value={Math.round(smoothBulkPct)} className="w-full" />
                   </>
                 )}
               </div>
@@ -423,9 +503,9 @@ export default function TimelineEditorPage() {
             {isRendering && renderProgress && (
               <div className="w-full space-y-1.5 overflow-hidden">
                 <p className="text-sm text-muted-foreground">
-                  Rendering… segment {renderProgress.current_segment}/{renderProgress.total_segments} — {renderProgress.current_phase} ({renderPercentage}%)
+                  Rendering… segment {renderProgress.current_segment}/{renderProgress.total_segments} — {renderProgress.current_phase} ({Math.round(smoothRenderPct)}%)
                 </p>
-                <Progress value={renderPercentage} className="w-full" />
+                <Progress value={Math.round(smoothRenderPct)} className="w-full" />
               </div>
             )}
             {isRendering && !renderProgress && (

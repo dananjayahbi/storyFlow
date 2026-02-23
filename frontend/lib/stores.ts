@@ -17,6 +17,7 @@ import {
   pollTaskStatus,
   startRender as apiStartRender,
   getRenderStatus as apiGetRenderStatus,
+  cancelRender as apiCancelRender,
   getSettings as apiGetSettings,
   updateSettings as apiUpdateSettings,
   getVoices as apiGetVoices,
@@ -112,6 +113,9 @@ interface ProjectStore {
 
   /** Reset all render-related state and cancel polling. */
   resetRenderState: () => void;
+
+  /** Cancel an in-progress render. */
+  cancelRender: () => Promise<void>;
 
   /** Download the rendered video file. */
   downloadVideo: () => void;
@@ -373,6 +377,30 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
   },
 
   resetRenderState: () => {
+    if (renderPollingTimer) {
+      clearTimeout(renderPollingTimer);
+      renderPollingTimer = null;
+    }
+    set({
+      renderTaskId: null,
+      renderStatus: 'idle' as RenderStatus,
+      renderProgress: null,
+      outputUrl: null,
+    });
+  },
+
+  cancelRender: async () => {
+    const { project, renderStatus: rs } = get();
+    if (!project) return;
+    if (rs !== 'rendering' && rs !== 'validating') return;
+
+    try {
+      await apiCancelRender(project.id);
+    } catch {
+      // Ignore errors — we still reset locally
+    }
+
+    // Stop polling and reset
     if (renderPollingTimer) {
       clearTimeout(renderPollingTimer);
       renderPollingTimer = null;

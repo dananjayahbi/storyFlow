@@ -28,6 +28,8 @@ export interface GlobalSettings {
   zoom_intensity: number;
   subtitle_font: string;
   subtitle_color: string;
+  inter_segment_silence: number;
+  subtitles_enabled: boolean;
 }
 
 export interface ProjectDetail extends Omit<Project, 'segment_count'> {

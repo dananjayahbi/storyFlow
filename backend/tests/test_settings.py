@@ -100,6 +100,7 @@ class GlobalSettingsAPITests(APITestCase):
             'render_width', 'render_height', 'render_fps',
             'ken_burns_zoom', 'transition_duration', 'zoom_intensity',
             'custom_font_file',
+            'inter_segment_silence', 'subtitles_enabled',
             'created_at', 'updated_at',
         }
         self.assertEqual(set(data.keys()), expected_fields)

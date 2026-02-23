@@ -98,6 +98,12 @@ class GlobalSettings(models.Model):
     transition_duration = models.FloatField(default=0.5)
     zoom_intensity = models.FloatField(default=1.3)  # legacy
 
+    # ── Audio / timing ──
+    inter_segment_silence = models.FloatField(default=0.3)
+
+    # ── Subtitle toggle ──
+    subtitles_enabled = models.BooleanField(default=True)
+
     # ── Custom font file ──
     custom_font_file = models.FileField(
         upload_to='fonts/', null=True, blank=True,

@@ -15,6 +15,8 @@ import {
   ChevronRight,
   Volume2,
   RefreshCw,
+  Timer,
+  Captions,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -44,8 +46,12 @@ export function GlobalSettingsPanel() {
   // Debounce timer ref for TTS speed slider
   const speedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Debounce timer ref for inter-segment silence slider
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Local slider value for responsive UI (updated immediately, saved after debounce)
   const [localSpeed, setLocalSpeed] = useState<number | null>(null);
+  const [localSilence, setLocalSilence] = useState<number | null>(null);
 
   // Fetch settings on mount
   useEffect(() => {
@@ -56,6 +62,7 @@ export function GlobalSettingsPanel() {
   useEffect(() => {
     if (globalSettings) {
       setLocalSpeed(globalSettings.tts_speed);
+      setLocalSilence(globalSettings.inter_segment_silence);
     }
   }, [globalSettings]);
 
@@ -101,10 +108,27 @@ export function GlobalSettingsPanel() {
     [handleSettingChange]
   );
 
+  // ── Inter-segment silence slider with debounce ──
+  const handleSilenceChange = useCallback(
+    (values: number[]) => {
+      const value = values[0];
+      setLocalSilence(value);
+
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
+      silenceTimerRef.current = setTimeout(() => {
+        handleSettingChange({ inter_segment_silence: value });
+      }, 300);
+    },
+    [handleSettingChange]
+  );
+
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
       if (speedTimerRef.current) clearTimeout(speedTimerRef.current);
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     };
   }, []);
 
@@ -214,6 +238,40 @@ export function GlobalSettingsPanel() {
 
           <Separator />
 
+          {/* ── Timing Settings Section ── */}
+          <section>
+            <div className="flex items-center gap-1.5 mb-3">
+              <Timer className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Timing
+              </h3>
+            </div>
+
+            {/* Inter-segment Silence Slider */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-muted-foreground">
+                  Pause Between Segments
+                </label>
+                <span className="text-xs font-medium tabular-nums">
+                  {(localSilence ?? globalSettings.inter_segment_silence).toFixed(1)}s
+                </span>
+              </div>
+              <Slider
+                value={[localSilence ?? globalSettings.inter_segment_silence]}
+                min={0}
+                max={3.0}
+                step={0.1}
+                onValueChange={handleSilenceChange}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Silence gap between narration segments in the final video
+              </p>
+            </div>
+          </section>
+
+          <Separator />
+
           {/* ── Render Settings Section (Task 05.03.05) ── */}
           <section>
             <RenderSettingsForm
@@ -226,11 +284,34 @@ export function GlobalSettingsPanel() {
 
           {/* ── Subtitle Settings Section (Task 05.03.03) ── */}
           <section>
-            <SubtitleSettingsForm
-              font={globalSettings.subtitle_font}
-              color={globalSettings.subtitle_color}
-              onChange={handleSettingChange}
-            />
+            {/* Subtitles enabled toggle */}
+            <div className="flex items-center gap-1.5 mb-3">
+              <Captions className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex-1">
+                Subtitles
+              </h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs text-muted-foreground">
+                  {globalSettings.subtitles_enabled ? 'On' : 'Off'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={globalSettings.subtitles_enabled}
+                  onChange={(e) =>
+                    handleSettingChange({ subtitles_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-muted-foreground accent-primary cursor-pointer"
+                />
+              </label>
+            </div>
+
+            {globalSettings.subtitles_enabled && (
+              <SubtitleSettingsForm
+                font={globalSettings.subtitle_font}
+                color={globalSettings.subtitle_color}
+                onChange={handleSettingChange}
+              />
+            )}
           </section>
         </div>
       )}

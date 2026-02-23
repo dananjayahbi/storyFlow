@@ -57,6 +57,7 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'subtitle_font', 'subtitle_color',
             'render_width', 'render_height', 'render_fps',
             'ken_burns_zoom', 'transition_duration', 'zoom_intensity',
+            'inter_segment_silence', 'subtitles_enabled',
             'custom_font_file',
             'created_at', 'updated_at',
         ]
@@ -113,6 +114,13 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
         if value not in ALLOWED_FPS:
             raise serializers.ValidationError(
                 f'FPS must be one of: {", ".join(str(f) for f in sorted(ALLOWED_FPS))}.'
+            )
+        return value
+
+    def validate_inter_segment_silence(self, value):
+        if value < 0.0 or value > 5.0:
+            raise serializers.ValidationError(
+                'Inter-segment silence must be between 0.0 and 5.0 seconds.'
             )
         return value
 

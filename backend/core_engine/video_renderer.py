@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
+import proglog
+
 from core_engine import render_utils
 from core_engine.ken_burns import apply_ken_burns
 from core_engine.subtitle_engine import create_subtitles_for_segment
@@ -34,6 +36,7 @@ try:
         concatenate_videoclips,
         vfx,
     )
+    from moviepy.audio.AudioClip import AudioClip as _AudioClipBase  # type: ignore[import-untyped]
 except ImportError:
     # MoviePy 2.x — direct imports from moviepy
     from moviepy import (  # type: ignore[import-untyped]
@@ -42,6 +45,9 @@ except ImportError:
         concatenate_videoclips,
         vfx,
     )
+    from moviepy.audio.AudioClip import AudioClip as _AudioClipBase  # type: ignore[import-untyped]
+
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Transition constants
@@ -52,9 +58,96 @@ except ImportError:
 # recommended by mainstream video-editing guides.
 TRANSITION_DURATION: float = 0.5
 
+# Brief silence gap appended to the end of each segment's audio before
+# concatenation.  This ensures narration from consecutive segments does
+# not run together without a natural pause.  The gap is in addition to
+# the crossfade overlap, giving the listener a moment of breathing room
+# between narration segments.
+INTER_SEGMENT_SILENCE: float = 0.3
+
 
 # Type alias for the progress callback
 ProgressCallback = Optional[Callable[[int, int, str], None]]
+
+
+# ---------------------------------------------------------------------------
+# Silent audio utility
+# ---------------------------------------------------------------------------
+
+def _make_silent_audio(duration: float, fps: int = 44100) -> _AudioClipBase:
+    """Create a silent AudioClip of the given duration.
+
+    Used to pad silence to the end of each segment's audio so that
+    consecutive segments don't run together without a natural pause.
+    """
+    return _AudioClipBase(
+        frame_function=lambda t: np.zeros((1 if np.isscalar(t) else len(t), 2)),
+        duration=duration,
+        fps=fps,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Export progress logger — reports frame-level progress during write_videofile
+# ---------------------------------------------------------------------------
+
+class _ExportProgressLogger(proglog.ProgressBarLogger):
+    """Custom proglog logger that funnels MoviePy export progress into the
+    render pipeline's progress callback.
+
+    ``write_videofile`` iterates every frame through a ``proglog`` bar named
+    ``"t"`` (time-based).  This logger intercepts bar updates and maps them
+    to percentage values, invoking *on_progress* at a throttled rate (at most
+    once per percentage-point change) so the TaskManager registry gets smooth,
+    fine-grained progress during the slowest phase of the render.
+    """
+
+    def __init__(
+        self,
+        on_progress: ProgressCallback,
+        total_segments: int,
+        base_percentage: int = 80,
+    ):
+        super().__init__()
+        self._on_progress = on_progress
+        self._total_segments = total_segments
+        self._base_pct = base_percentage  # percentage at start of export
+        self._last_reported_pct = base_percentage
+
+    def bars_callback(self, bar, attr, value, old_value=None):
+        """Called by proglog whenever a progress bar attribute changes."""
+        if self._on_progress is None:
+            return
+        if attr != "index":
+            return
+
+        # Determine total frames from the bar's total attribute
+        bar_data = self.bars.get(bar)
+        if bar_data is None:
+            return
+        total = bar_data.get("total", 0)
+        if total <= 0:
+            return
+
+        # Map frame index → percentage in [base_pct .. 99]
+        # Cap at 99% during export; the final 100% is only reported by the
+        # task function after the export is confirmed successful.
+        fraction = min(value / total, 1.0)
+        pct = int(self._base_pct + fraction * (99 - self._base_pct))
+        pct = min(pct, 99)
+
+        # Throttle: only report when percentage actually advances
+        if pct <= self._last_reported_pct:
+            return
+        self._last_reported_pct = pct
+
+        # Report with current=pct, total=100 so the TaskManager computes
+        # the correct percentage directly.
+        self._on_progress(
+            pct,
+            100,
+            f"Exporting MP4… {pct}%",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +407,8 @@ def render_project(
     # ------------------------------------------------------------------
     subtitle_font = None
     subtitle_color = "#FFFFFF"
+    subtitles_enabled = True
+    inter_segment_silence = INTER_SEGMENT_SILENCE
 
     if GlobalSettings is not None:
         try:
@@ -325,6 +420,12 @@ def render_project(
                 raw_color = getattr(gs_sub, "subtitle_color", "") or ""
                 if raw_color.strip():
                     subtitle_color = raw_color.strip()
+                # Subtitles toggle
+                subtitles_enabled = getattr(gs_sub, "subtitles_enabled", True)
+                # Inter-segment silence
+                iss_val = getattr(gs_sub, "inter_segment_silence", None)
+                if iss_val is not None and iss_val >= 0:
+                    inter_segment_silence = float(iss_val)
         except Exception as sub_err:
             logger.warning(
                 "Could not read subtitle settings from GlobalSettings: %s. "
@@ -335,8 +436,12 @@ def render_project(
     # Resolve font name to a filesystem path
     resolved_font = render_utils.get_font_path(subtitle_font)
     logger.info(
-        "Subtitle settings — font: %s (resolved: %s), color: %s",
-        subtitle_font, resolved_font, subtitle_color,
+        "Subtitle settings — font: %s (resolved: %s), color: %s, "
+        "enabled: %s",
+        subtitle_font, resolved_font, subtitle_color, subtitles_enabled,
+    )
+    logger.info(
+        "Inter-segment silence: %.2fs", inter_segment_silence,
     )
 
     # ------------------------------------------------------------------
@@ -506,7 +611,7 @@ def render_project(
 
             # Step 3b: Composite subtitles onto Ken Burns clip
             text_content = getattr(segment, "text_content", None) or ""
-            if imagemagick_available and text_content.strip():
+            if subtitles_enabled and imagemagick_available and text_content.strip():
                 try:
                     subtitle_clips = create_subtitles_for_segment(
                         text_content=text_content,
@@ -543,7 +648,34 @@ def render_project(
                 )
 
             # Step 4: Pair Ken Burns clip with audio
-            ken_burns_clip = ken_burns_clip.with_audio(audio_clip)
+            # Add a brief silence gap after each segment's audio so that
+            # narration from consecutive segments doesn't run together.
+            if inter_segment_silence > 0:
+                padded_duration = audio_duration + inter_segment_silence
+                ken_burns_clip = ken_burns_clip.with_duration(padded_duration)
+
+                try:
+                    from moviepy import concatenate_audioclips  # type: ignore[import-untyped]
+                except ImportError:
+                    from moviepy.editor import concatenate_audioclips  # type: ignore[import-untyped]
+
+                silence = _make_silent_audio(
+                    inter_segment_silence,
+                    fps=getattr(audio_clip, "fps", 44100) or 44100,
+                )
+                padded_audio = concatenate_audioclips([audio_clip, silence])
+                ken_burns_clip = ken_burns_clip.with_audio(padded_audio)
+
+                logger.debug(
+                    "  Audio padded: %.2fs + %.2fs silence = %.2fs",
+                    audio_duration, inter_segment_silence, padded_duration,
+                )
+            else:
+                ken_burns_clip = ken_burns_clip.with_duration(audio_duration)
+                ken_burns_clip = ken_burns_clip.with_audio(audio_clip)
+                logger.debug(
+                    "  Audio set: %.2fs (no silence gap)", audio_duration,
+                )
 
             # Step 5: Append and continue
             clips.append(ken_burns_clip)
@@ -551,7 +683,7 @@ def render_project(
             # Progress callback
             if on_progress:
                 subtitle_note = ""
-                if imagemagick_available and text_content.strip():
+                if subtitles_enabled and imagemagick_available and text_content.strip():
                     subtitle_note = " + subtitles composited"
                 on_progress(
                     idx,
@@ -643,8 +775,8 @@ def render_project(
             if on_progress:
                 on_progress(
                     total_segments,
-                    total_segments + 1,
-                    "Applying crossfade transitions...",
+                    total_segments,
+                    "Applying crossfade transitions…",
                 )
 
             clips = apply_crossfade_transitions(clips, TRANSITION_DURATION)
@@ -700,21 +832,31 @@ def render_project(
         # --------------------------------------------------------------
         # I. Progress: exporting
         # --------------------------------------------------------------
+        # Calculate what percentage we're at before export begins.
+        # Segment processing occupies roughly 0–80%, export occupies 80–100%.
         if on_progress:
-            export_total = (
-                total_segments + 1 if len(original_durations) > 1
-                else total_segments
-            )
+            export_base_pct = 80  # segments done, entering export
             on_progress(
-                export_total,
-                export_total,
-                "Exporting final MP4...",
+                export_base_pct,
+                100,
+                f"Exporting MP4… {export_base_pct}%",
             )
 
         # --------------------------------------------------------------
         # J. Export to MP4
         # --------------------------------------------------------------
         logger.info("Exporting to %s ...", output_path)
+
+        # Build a fine-grained export progress logger so the frontend
+        # sees smooth advancement during the most time-consuming phase.
+        export_logger: object = None
+        if on_progress:
+            export_logger = _ExportProgressLogger(
+                on_progress=on_progress,
+                total_segments=total_segments,
+                base_percentage=80,
+            )
+
         try:
             composite_clip.write_videofile(
                 output_path,
@@ -722,7 +864,17 @@ def render_project(
                 audio_codec="aac",
                 bitrate="8000k",
                 fps=fps,
-                logger=None,  # Suppress MoviePy's console progress bar
+                logger=export_logger,  # Fine-grained frame-by-frame progress
+            )
+        except PermissionError as perm_err:
+            # On Windows MoviePy sometimes fails to delete the temp
+            # audio file (``finalTEMP_MPY_wvf_snd.mp4``) because another
+            # process still holds a lock.  The actual video export has
+            # already completed successfully if we reach this point, so
+            # we log a warning and continue.
+            logger.warning(
+                "Temp-file cleanup failed (non-fatal, Windows lock): %s",
+                perm_err,
             )
         except (IOError, RuntimeError) as export_err:
             logger.error("Export failed: %s", export_err)

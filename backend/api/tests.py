@@ -1464,15 +1464,15 @@ class VideoRendererTests(TestCase):
 
     def test_render_multiple_segments(self):
         """Multi-segment render: duration ≈ sum minus crossfade overlaps."""
-        from core_engine.video_renderer import render_project, TRANSITION_DURATION
+        from core_engine.video_renderer import render_project, TRANSITION_DURATION, INTER_SEGMENT_SILENCE
         result = render_project(str(self.project.id))
 
         self.assertTrue(os.path.exists(result["output_path"]))
         self.assertGreater(result["file_size"], 0)
 
-        # 3 segments × 1s audio minus 2 crossfade overlaps × 0.5s = 2.0s
+        # 3 segments × (1s audio + 0.3s silence) minus 2 crossfade overlaps × 0.5s = 2.9s
         num_overlaps = len(self.segments) - 1
-        expected_duration = 3.0 - num_overlaps * TRANSITION_DURATION
+        expected_duration = 3 * (1.0 + INTER_SEGMENT_SILENCE) - num_overlaps * TRANSITION_DURATION
         self.assertAlmostEqual(
             result["duration"], expected_duration, delta=0.5
         )
@@ -2034,9 +2034,9 @@ class KenBurnsIntegrationTests(TestCase):
         self.assertTrue(os.path.exists(output_path))
         self.assertGreater(result["file_size"], 0)
 
-        # 3 segments × 1s minus 2 crossfade overlaps × 0.5s = 2.0s
-        from core_engine.video_renderer import TRANSITION_DURATION
-        expected = 3.0 - 2 * TRANSITION_DURATION
+        # 3 segments × (1s + 0.3s silence) minus 2 crossfade overlaps × 0.5s = 2.9s
+        from core_engine.video_renderer import TRANSITION_DURATION, INTER_SEGMENT_SILENCE
+        expected = 3 * (1.0 + INTER_SEGMENT_SILENCE) - 2 * TRANSITION_DURATION
         self.assertAlmostEqual(result["duration"], expected, delta=0.5)
 
     def test_render_with_zoom_1_0(self):
@@ -2402,6 +2402,7 @@ class RenderPipelineTests(APITestCase):
         from core_engine.video_renderer import (
             render_project,
             TRANSITION_DURATION,
+            INTER_SEGMENT_SILENCE,
             calculate_total_duration_with_transitions,
         )
 
@@ -2415,9 +2416,9 @@ class RenderPipelineTests(APITestCase):
         # 3 segments → 2 transitions
         self.assertEqual(result["num_transitions"], 2)
 
-        # expected_duration matches formula: 3×1s − 2×0.5s = 2.0s
+        # expected_duration matches formula: 3×1.3s − 2×0.5s = 2.9s
         expected = calculate_total_duration_with_transitions(
-            [1.0, 1.0, 1.0]
+            [1.0 + INTER_SEGMENT_SILENCE] * 3
         )
         self.assertAlmostEqual(
             result["expected_duration"], expected, delta=0.01

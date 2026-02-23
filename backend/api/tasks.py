@@ -38,6 +38,7 @@ TASK_PENDING = "PENDING"
 TASK_PROCESSING = "PROCESSING"
 TASK_COMPLETED = "COMPLETED"
 TASK_FAILED = "FAILED"
+TASK_CANCELLED = "CANCELLED"
 
 
 # --------------------------------------------------------------------------
@@ -235,15 +236,23 @@ class TaskManager:
         """
         Update the progress sub-dict for *task_id*.
 
-        Computes percentage as an integer (0–100). Extra keyword
-        arguments (e.g. ``current_segment_id``) are merged in.
+        Computes percentage as an integer (0–100). If a
+        ``percentage_override`` keyword argument is supplied it replaces
+        the computed value (useful when scaling sub-ranges).
+        Extra keyword arguments (e.g. ``current_segment_id``) are
+        merged in.
         """
         with self._tasks_lock:
             task = self._tasks.get(task_id)
             if task is None:
                 return
 
-            percentage = int((current / total) * 100) if total > 0 else 0
+            override = kwargs.pop("percentage_override", None)
+            percentage = (
+                override
+                if override is not None
+                else int((current / total) * 100) if total > 0 else 0
+            )
 
             task["progress"] = {
                 "current": current,
@@ -336,6 +345,10 @@ def render_task_function(project_id: str, task_id: str) -> None:
     callback that feeds real-time updates into TaskManager, and
     transitions the ``Project`` status to COMPLETED or FAILED.
 
+    Supports **cooperative cancellation**: the progress callback checks
+    ``is_cancelled()`` between segments and raises ``RenderCancelled``
+    to abort cleanly.
+
     Args:
         project_id: UUID string of the project to render.
         task_id:    TaskManager-assigned identifier (``render_{project_id}``).
@@ -351,15 +364,51 @@ def render_task_function(project_id: str, task_id: str) -> None:
 
     tm = get_task_manager()
 
-    # Step 3 — progress callback
+    class RenderCancelled(Exception):
+        """Raised when cooperative cancellation is detected."""
+
+    # Step 3 — progress callback (with cancellation check)
     def on_progress(current, total, phase):
-        """Feed per-segment progress into the TaskManager registry."""
-        tm.update_task_progress(
-            task_id,
-            current=current,
-            total=total,
-            description=phase,
-        )
+        """Feed per-segment progress into the TaskManager registry.
+
+        The overall render percentage is split into two ranges:
+        - **Segment processing** (0–80 %): ``current`` / ``total``
+          represent the segment index and count; the stored percentage
+          is scaled to 0–80 via ``percentage_override``.
+        - **Export phase** (80–99 %): the video renderer already sends
+          a pre-scaled percentage (via ``_ExportProgressLogger``);
+          this callback passes it through with ``percentage_override``.
+
+        Also checks whether cancellation has been requested and raises
+        ``RenderCancelled`` if so, allowing the render loop to abort
+        between segments.
+        """
+        if tm.is_cancelled(task_id):
+            raise RenderCancelled("Render cancelled by user")
+
+        # During export, current/total represent percentage directly (e.g., 85/100).
+        # Store the percentage as-is but keep segment counts in the progress dict.
+        is_export_phase = phase.startswith("Exporting") or phase.startswith("Applying crossfade")
+        if is_export_phase:
+            pct = int((current / total) * 100) if total > 0 else 0
+            tm.update_task_progress(
+                task_id,
+                current=current,  # percentage value
+                total=total,      # 100
+                description=phase,
+                is_export_phase=True,
+                percentage_override=pct,
+            )
+        else:
+            # Scale segment progress into the 0–80 % range
+            seg_pct = int((current / total) * 80) if total > 0 else 0
+            tm.update_task_progress(
+                task_id,
+                current=current,
+                total=total,
+                description=phase,
+                percentage_override=seg_pct,
+            )
 
     try:
         # Step 4 — blocking render call
@@ -381,6 +430,23 @@ def render_task_function(project_id: str, task_id: str) -> None:
             duration=result.get("duration", 0),
             file_size=result.get("file_size", 0),
         )
+
+    except RenderCancelled:
+        # Step 5b — cancelled: clean up gracefully
+        logger.info("Render cancelled for project %s", project_id)
+        try:
+            project = Project.objects.get(id=project_id)
+            project.status = STATUS_FAILED
+            project.save(update_fields=["status"])
+        except Exception:
+            pass
+        # Mark the task as CANCELLED in TaskManager
+        with tm._tasks_lock:
+            task = tm._tasks.get(task_id)
+            if task:
+                task["status"] = TASK_CANCELLED
+                task["completed_at"] = __import__("time").time()
+                task["progress"]["description"] = "Cancelled by user"
 
     except Exception as exc:
         # Step 6 — failure: log error, set FAILED status

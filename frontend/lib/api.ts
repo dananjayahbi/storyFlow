@@ -202,6 +202,13 @@ export async function getRenderStatus(
   return data;
 }
 
+export async function cancelRender(
+  projectId: string
+): Promise<{ project_id: string; status: string; message: string }> {
+  const { data } = await api.post(`/api/projects/${projectId}/cancel-render/`);
+  return data;
+}
+
 // ── Global Settings ──
 
 export async function getSettings(): Promise<GlobalSettings> {
