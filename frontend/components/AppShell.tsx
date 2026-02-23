@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Settings,
   Film,
+  FolderOpen,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
@@ -36,6 +37,12 @@ const NAV_ITEMS = [
     href: '/',
     icon: LayoutDashboard,
     match: (path: string) => path === '/',
+  },
+  {
+    label: 'Projects',
+    href: '/projects',
+    icon: FolderOpen,
+    match: (path: string) => path === '/projects',
   },
   {
     label: 'Settings',

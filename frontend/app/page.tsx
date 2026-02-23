@@ -1,133 +1,147 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { getProjects } from '@/lib/api';
 import { Project } from '@/lib/types';
-import { ProjectCard } from '@/components/ProjectCard';
-import { CreateProjectDialog } from '@/components/CreateProjectDialog';
-import ImportDialog from '@/components/ImportDialog';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { EmptyState } from '@/components/EmptyState';
-import { FolderPlus, Search, X, ArrowUpDown } from 'lucide-react';
-import { toast } from 'sonner';
+import {
+  FolderOpen,
+  Film,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  ArrowRight,
+  Loader2,
+} from 'lucide-react';
 
-// ── Sort modes (Step 2) ──
+// ── Relative time utility ──
 
-type SortMode = 'date-desc' | 'date-asc' | 'title-asc' | 'title-desc';
+function formatRelativeTime(dateString: string): string {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  const diffMin = Math.floor(diffSec / 60);
+  const diffHr = Math.floor(diffMin / 60);
+  const diffDay = Math.floor(diffHr / 24);
 
-const SORT_LABELS: Record<SortMode, string> = {
-  'date-desc': 'Newest first',
-  'date-asc': 'Oldest first',
-  'title-asc': 'Title A–Z',
-  'title-desc': 'Title Z–A',
-};
+  if (diffSec < 60) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  if (diffHr < 24) return `${diffHr}h ago`;
+  if (diffDay === 1) return 'Yesterday';
+  if (diffDay < 30) return `${diffDay}d ago`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `${diffMonth}mo ago`;
+  const diffYear = Math.floor(diffDay / 365);
+  return `${diffYear}y ago`;
+}
 
-const SORT_CYCLE: SortMode[] = ['date-desc', 'date-asc', 'title-asc', 'title-desc'];
+// ── Status badge ──
 
-// ── Skeleton card (Step 4) ──
+function deriveBadge(status: Project['status']) {
+  switch (status) {
+    case 'COMPLETED':
+      return { label: 'Rendered', className: 'bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30' };
+    case 'FAILED':
+      return { label: 'Error', className: 'bg-destructive/15 text-destructive border-destructive/30' };
+    case 'PROCESSING':
+      return { label: 'In Progress', className: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30' };
+    default:
+      return { label: 'Draft', className: 'bg-muted text-muted-foreground border-border' };
+  }
+}
 
-function SkeletonCard() {
+// ── Stat card component ──
+
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  description?: string;
+  icon: React.ElementType;
+  iconClassName?: string;
+}
+
+function StatCard({ title, value, description, icon: Icon, iconClassName }: StatCardProps) {
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
-      {/* Thumbnail placeholder */}
-      <div className="aspect-video bg-muted animate-pulse" />
-      <div className="p-4 space-y-3">
-        <div className="h-5 w-3/4 bg-muted animate-pulse rounded" />
-        <div className="h-4 w-1/3 bg-muted animate-pulse rounded" />
-        <div className="flex items-center justify-between pt-2">
-          <div className="h-3 w-1/2 bg-muted animate-pulse rounded" />
-          <div className="h-5 w-14 bg-muted animate-pulse rounded-full" />
-        </div>
-      </div>
-    </div>
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <p className="text-sm font-medium text-muted-foreground">{title}</p>
+        <Icon className={`h-4 w-4 text-muted-foreground ${iconClassName ?? ''}`} />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-1">{description}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Skeleton stat card ──
+
+function SkeletonStatCard() {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+        <div className="h-4 w-4 bg-muted animate-pulse rounded" />
+      </CardHeader>
+      <CardContent>
+        <div className="h-8 w-16 bg-muted animate-pulse rounded" />
+        <div className="h-3 w-32 bg-muted animate-pulse rounded mt-2" />
+      </CardContent>
+    </Card>
   );
 }
 
 export default function DashboardPage() {
-  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showImportDialog, setShowImportDialog] = useState(false);
-
-  // Sort & search state
-  const [sortMode, setSortMode] = useState<SortMode>('date-desc');
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const fetchProjects = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getProjects();
-      setProjects(data.results);
-    } catch (err) {
-      setError('Failed to load projects. Is the backend server running?');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   useEffect(() => {
-    fetchProjects();
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await getProjects();
+        setProjects(data.results);
+      } catch (err) {
+        setError('Failed to load dashboard data.');
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const handleProjectCreated = () => {
-    fetchProjects();
-  };
+  // ── Computed stats ──
 
-  const handleProjectDelete = (id: string) => {
-    setProjects((prev) => prev.filter((p) => String(p.id) !== id));
-    toast('Project deleted', {
-      description: 'Project and all media removed.',
-    });
-  };
+  const stats = useMemo(() => {
+    const total = projects.length;
+    const drafts = projects.filter((p) => p.status === 'DRAFT').length;
+    const rendered = projects.filter((p) => p.status === 'COMPLETED').length;
+    const failed = projects.filter((p) => p.status === 'FAILED').length;
+    const processing = projects.filter((p) => p.status === 'PROCESSING').length;
+    const totalSegments = projects.reduce((sum, p) => sum + (p.segment_count || 0), 0);
 
-  // Cycle through sort modes
-  const handleSortCycle = () => {
-    setSortMode((prev) => {
-      const idx = SORT_CYCLE.indexOf(prev);
-      return SORT_CYCLE[(idx + 1) % SORT_CYCLE.length];
-    });
-  };
+    return { total, drafts, rendered, failed, processing, totalSegments };
+  }, [projects]);
 
-  // Filter and sort (Steps 2 & 3)
-  const filteredProjects = useMemo(() => {
-    let list = [...projects];
-
-    // Case-insensitive title search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter((p) => p.title.toLowerCase().includes(q));
-    }
-
-    // Sort
-    list.sort((a, b) => {
-      switch (sortMode) {
-        case 'date-desc':
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-        case 'date-asc':
-          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-        case 'title-asc':
-          return a.title.localeCompare(b.title);
-        case 'title-desc':
-          return b.title.localeCompare(a.title);
-        default:
-          return 0;
-      }
-    });
-
-    return list;
-  }, [projects, sortMode, searchQuery]);
+  const recentProjects = useMemo(() => {
+    return [...projects]
+      .sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime())
+      .slice(0, 5);
+  }, [projects]);
 
   if (error) {
     return (
       <div>
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold tracking-tight">Projects</h2>
-        </div>
+        <h2 className="text-2xl font-bold tracking-tight mb-4">Dashboard</h2>
         <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
           <p className="text-sm text-destructive">{error}</p>
         </div>
@@ -137,98 +151,126 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+      <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">Projects</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage your narrative video projects
+            Overview of your StoryFlow workspace
           </p>
         </div>
-        <div className="flex gap-2">
-          <CreateProjectDialog onProjectCreated={handleProjectCreated} />
-          <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)}>
-            Import Story
-          </Button>
-        </div>
+        <Button asChild size="sm" variant="outline">
+          <Link href="/projects">
+            View All Projects
+            <ArrowRight className="ml-2 h-3.5 w-3.5" />
+          </Link>
+        </Button>
       </div>
 
-      <ImportDialog
-        open={showImportDialog}
-        onOpenChange={setShowImportDialog}
-        onSuccess={(project) => {
-          router.push(`/projects/${project.id}`);
-        }}
-      />
-
-      {/* Sort & Search Controls (Steps 2 & 3) */}
-      {!loading && projects.length > 0 && (
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-6">
-          {/* Search bar */}
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search projects..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-8"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-sm hover:bg-muted transition-colors"
-                aria-label="Clear search"
-              >
-                <X className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
-            )}
-          </div>
-
-          {/* Sort toggle */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleSortCycle}
-            className="gap-1.5 whitespace-nowrap"
-          >
-            <ArrowUpDown className="h-3.5 w-3.5" />
-            {SORT_LABELS[sortMode]}
-          </Button>
-        </div>
-      )}
-
-      {/* Loading Skeletons (Step 4) */}
+      {/* ── Stat Cards ── */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <SkeletonCard key={i} />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <SkeletonStatCard key={i} />
           ))}
         </div>
-      ) : projects.length === 0 ? (
-        <EmptyState
-          icon={FolderPlus}
-          title="No projects yet"
-          description="Create your first story to get started!"
-          actionLabel="+ New Project"
-          onAction={() => {
-            const trigger = document.querySelector<HTMLButtonElement>('[data-create-project-trigger]');
-            trigger?.click();
-          }}
-        />
-      ) : filteredProjects.length === 0 ? (
-        <EmptyState
-          icon={Search}
-          title="No matching projects"
-          description={`No projects match "${searchQuery}". Try a different search term.`}
-          actionLabel="Clear search"
-          onAction={() => setSearchQuery('')}
-        />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredProjects.map((project) => (
-            <ProjectCard key={project.id} project={project} onDelete={handleProjectDelete} />
-          ))}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+          <StatCard
+            title="Total Projects"
+            value={stats.total}
+            description={`${stats.totalSegments} total segments`}
+            icon={FolderOpen}
+          />
+          <StatCard
+            title="Drafts"
+            value={stats.drafts}
+            description="Awaiting content"
+            icon={FileText}
+          />
+          <StatCard
+            title="Rendered"
+            value={stats.rendered}
+            description="Ready to watch"
+            icon={CheckCircle2}
+            iconClassName="text-green-500"
+          />
+          <StatCard
+            title="In Progress"
+            value={stats.processing}
+            description="Currently rendering"
+            icon={Loader2}
+            iconClassName="text-amber-500"
+          />
+          <StatCard
+            title="Failed"
+            value={stats.failed}
+            description="Need attention"
+            icon={AlertCircle}
+            iconClassName="text-destructive"
+          />
         </div>
       )}
+
+      {/* ── Recent Projects ── */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold tracking-tight">Recent Activity</h3>
+        </div>
+
+        {loading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 rounded-lg border p-4">
+                <div className="h-10 w-10 bg-muted animate-pulse rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-48 bg-muted animate-pulse rounded" />
+                  <div className="h-3 w-24 bg-muted animate-pulse rounded" />
+                </div>
+                <div className="h-5 w-16 bg-muted animate-pulse rounded-full" />
+              </div>
+            ))}
+          </div>
+        ) : recentProjects.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <Film className="h-10 w-10 mx-auto mb-3 opacity-40" />
+            <p className="text-sm">No projects yet. Create one to get started!</p>
+            <Button asChild size="sm" className="mt-4">
+              <Link href="/projects">Go to Projects</Link>
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {recentProjects.map((project) => {
+              const badge = deriveBadge(project.status);
+              return (
+                <Link
+                  key={project.id}
+                  href={`/projects/${project.id}`}
+                  className="flex items-center gap-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-muted shrink-0">
+                    <Film className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{project.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {project.segment_count} segment{project.segment_count !== 1 ? 's' : ''} ·{' '}
+                      <Clock className="inline h-3 w-3 -mt-0.5" />{' '}
+                      {formatRelativeTime(project.updated_at || project.created_at)}
+                    </p>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={`text-[11px] px-2 py-0.5 shrink-0 ${badge.className}`}
+                  >
+                    {badge.label}
+                  </Badge>
+                </Link>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
