@@ -271,17 +271,25 @@ def generate_subtitle_clips(
     # ── Step 4–7: Create TextClips ──────────────────────────────────
     clips: list[TextClip] = []
 
-    # Vertical padding (px per side) added to every subtitle frame so
-    # that the stroke outline is never cropped at the top or bottom.
-    # ``method="caption"`` draws text starting at y=0 inside the clip
-    # image, so the top-side stroke always gets cut unless we pad the
-    # raw pixel array after rendering.
+    # Vertical margin (px per side) passed to TextClip's ``margin=``
+    # parameter so the rendered image is allocated with extra rows
+    # BEFORE Pillow rasterises the text.  This prevents the stroke
+    # outline on descenders (g, y, p, q, j) from being clipped by
+    # the tight bounding box that ``method="caption"`` computes.
     pad_px = max(DEFAULT_STROKE_WIDTH * 4, effective_font_size // 4, 12)
 
     for chunk, (start_time, duration) in zip(chunks, timings):
         try:
-            # Render the text with auto-calculated height
-            raw_clip = TextClip(
+            # ── KEY FIX: use margin= so the TextClip image is
+            #    allocated with extra rows BEFORE Pillow rasterises
+            #    the text.  Without this, method="caption" computes
+            #    a bounding box whose bottom pixel row coincides
+            #    exactly with the stroke extent on descenders
+            #    (g, y, p, q, j), causing the bottom 1-2 px of the
+            #    stroke to be clipped.  Post-render numpy padding
+            #    cannot recover those lost pixels — the damage is
+            #    already baked into the rasterised frame.
+            clip = TextClip(
                 text=chunk,
                 font_size=effective_font_size,
                 font=font,
@@ -291,80 +299,26 @@ def generate_subtitle_clips(
                 method="caption",
                 size=(text_width, None),
                 text_align="center",
+                margin=(0, pad_px),
             )
 
-            # ── Pad the raw image with transparent rows so the
-            #    stroke is never clipped at top or bottom. ────────
-            import numpy as np
-            from moviepy import ImageClip
-
-            frame_rgb = raw_clip.get_frame(0)          # (H, W, 3)
-            h_orig, w_orig = frame_rgb.shape[:2]
-
-            # Build top & bottom padding strips (black = transparent
-            # once the mask is applied).
-            top_pad = np.zeros((pad_px, w_orig, 3), dtype=frame_rgb.dtype)
-            bot_pad = np.zeros((pad_px, w_orig, 3), dtype=frame_rgb.dtype)
-            padded_rgb = np.vstack([top_pad, frame_rgb, bot_pad])
-
-            # Pad the alpha mask in exactly the same way
-            if raw_clip.mask is not None:
-                mask_frame = raw_clip.mask.get_frame(0)  # (H, W)
-                if mask_frame.ndim == 3:
-                    mask_frame = mask_frame[:, :, 0]
-                top_mask = np.zeros((pad_px, w_orig), dtype=mask_frame.dtype)
-                bot_mask = np.zeros((pad_px, w_orig), dtype=mask_frame.dtype)
-                padded_mask = np.vstack([top_mask, mask_frame, bot_mask])
-                mask_clip = ImageClip(padded_mask, is_mask=True)
-            else:
-                mask_clip = None
-
-            raw_clip.close()
-
-            # Create the final padded clip
-            clip = ImageClip(padded_rgb)
-            if mask_clip is not None:
-                clip = clip.with_mask(mask_clip)
-
             # ── Position: anchor from bottom/center/top ─────────────
-            clip_height = padded_rgb.shape[0]  # includes padding
+            clip_height = clip.size[1]  # includes margin
 
             # Maximum allowed clip height: 40 % of frame to avoid
             # text overflowing the visible area.
             max_clip_h = int(height * 0.40)
             if clip_height > max_clip_h and clip_height > 0:
-                # Downscale the subtitle image to fit within bounds
                 scale_factor = max_clip_h / clip_height
-                new_h = max_clip_h
-                new_w = int(w_orig * scale_factor)
-                from PIL import Image as _PILImage
-                pil_rgb = _PILImage.fromarray(padded_rgb)
-                pil_rgb = pil_rgb.resize((new_w, new_h), _PILImage.LANCZOS)
-                padded_rgb = np.array(pil_rgb)
-                if mask_clip is not None:
-                    # Also rescale the alpha mask
-                    pil_mask = _PILImage.fromarray(
-                        (padded_mask * 255).astype(np.uint8)
-                        if padded_mask.max() <= 1.0
-                        else padded_mask.astype(np.uint8)
-                    )
-                    pil_mask = pil_mask.resize(
-                        (new_w, new_h), _PILImage.LANCZOS
-                    )
-                    padded_mask = np.array(pil_mask).astype(float) / 255.0
-                    mask_clip = ImageClip(padded_mask, is_mask=True)
-                clip = ImageClip(padded_rgb)
-                if mask_clip is not None:
-                    clip = clip.with_mask(mask_clip)
-                clip_height = new_h
+                clip = clip.resized(scale_factor)
+                clip_height = clip.size[1]
                 logger.debug(
-                    "  Subtitle clip downscaled by %.2f to fit "
-                    "(%d→%dpx height)",
-                    scale_factor, int(clip_height / scale_factor), new_h,
+                    "  Subtitle clip downscaled by %.2f (%dpx height)",
+                    scale_factor, clip_height,
                 )
 
             # Vertical margin (percentage of frame height)
-            vert_margin = int(height * 0.08)  # 8 % margin
+            vert_margin = int(height * SUBTITLE_VERT_MARGIN_RATIO)
 
             if position == "top":
                 y_pos = vert_margin
@@ -374,8 +328,7 @@ def generate_subtitle_clips(
                 y_pos = height - clip_height - vert_margin
 
             # Safety: clamp so subtitle stays fully inside the frame
-            y_pos = max(y_pos, 0)
-            y_pos = min(y_pos, height - clip_height)
+            y_pos = max(0, min(y_pos, height - clip_height))
 
             # Set position and timing (MoviePy 2.x immutable API)
             clip = (
@@ -389,7 +342,7 @@ def generate_subtitle_clips(
 
             logger.debug(
                 "Subtitle clip: '%.30s%s' @ %.2fs for %.2fs  "
-                "(font=%dpx, y=%d, pos=%s, pad=%dpx)",
+                "(font=%dpx, y=%d, pos=%s, margin=%dpx)",
                 chunk,
                 "…" if len(chunk) > 30 else "",
                 start_time,
