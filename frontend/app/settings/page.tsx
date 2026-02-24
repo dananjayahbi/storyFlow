@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon, Trash2, Upload } from 'lucide-react';
 import { useSettingsStore } from '@/store/settingsStore';
 import { toast } from 'sonner';
+import { SettingsSkeleton } from '@/components/skeletons';
 
 export default function SettingsPage() {
   // TTS Tester state
@@ -148,6 +149,13 @@ export default function SettingsPage() {
     audio.play();
     setIsPlaying(true);
   };
+
+  // Show skeleton while initial settings are loading
+  const isInitialLoading = !settings && !voices.length;
+
+  if (isInitialLoading) {
+    return <SettingsSkeleton />;
+  }
 
   return (
     <div className="max-w-3xl">

@@ -17,6 +17,7 @@ import {
   ArrowRight,
   Loader2,
 } from 'lucide-react';
+import { DashboardSkeleton } from '@/components/skeletons';
 
 // ── Relative time utility ──
 
@@ -82,22 +83,7 @@ function StatCard({ title, value, description, icon: Icon, iconClassName }: Stat
   );
 }
 
-// ── Skeleton stat card ──
-
-function SkeletonStatCard() {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-        <div className="h-4 w-4 bg-muted animate-pulse rounded" />
-      </CardHeader>
-      <CardContent>
-        <div className="h-8 w-16 bg-muted animate-pulse rounded" />
-        <div className="h-3 w-32 bg-muted animate-pulse rounded mt-2" />
-      </CardContent>
-    </Card>
-  );
-}
+// ── Skeleton stat card (kept for reference; route-level loading.tsx now provides DashboardSkeleton) ──
 
 export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -149,6 +135,10 @@ export default function DashboardPage() {
     );
   }
 
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -167,49 +157,41 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Stat Cards ── */}
-      {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <SkeletonStatCard key={i} />
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-          <StatCard
-            title="Total Projects"
-            value={stats.total}
-            description={`${stats.totalSegments} total segments`}
-            icon={FolderOpen}
-          />
-          <StatCard
-            title="Drafts"
-            value={stats.drafts}
-            description="Awaiting content"
-            icon={FileText}
-          />
-          <StatCard
-            title="Rendered"
-            value={stats.rendered}
-            description="Ready to watch"
-            icon={CheckCircle2}
-            iconClassName="text-green-500"
-          />
-          <StatCard
-            title="In Progress"
-            value={stats.processing}
-            description="Currently rendering"
-            icon={Loader2}
-            iconClassName="text-amber-500"
-          />
-          <StatCard
-            title="Failed"
-            value={stats.failed}
-            description="Need attention"
-            icon={AlertCircle}
-            iconClassName="text-destructive"
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+        <StatCard
+          title="Total Projects"
+          value={stats.total}
+          description={`${stats.totalSegments} total segments`}
+          icon={FolderOpen}
+        />
+        <StatCard
+          title="Drafts"
+          value={stats.drafts}
+          description="Awaiting content"
+          icon={FileText}
+        />
+        <StatCard
+          title="Rendered"
+          value={stats.rendered}
+          description="Ready to watch"
+          icon={CheckCircle2}
+          iconClassName="text-green-500"
+        />
+        <StatCard
+          title="In Progress"
+          value={stats.processing}
+          description="Currently rendering"
+          icon={Loader2}
+          iconClassName="text-amber-500"
+        />
+        <StatCard
+          title="Failed"
+          value={stats.failed}
+          description="Need attention"
+          icon={AlertCircle}
+          iconClassName="text-destructive"
+        />
+      </div>
 
       {/* ── Recent Projects ── */}
       <div>
@@ -217,20 +199,7 @@ export default function DashboardPage() {
           <h3 className="text-lg font-semibold tracking-tight">Recent Activity</h3>
         </div>
 
-        {loading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 rounded-lg border p-4">
-                <div className="h-10 w-10 bg-muted animate-pulse rounded-lg" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 w-48 bg-muted animate-pulse rounded" />
-                  <div className="h-3 w-24 bg-muted animate-pulse rounded" />
-                </div>
-                <div className="h-5 w-16 bg-muted animate-pulse rounded-full" />
-              </div>
-            ))}
-          </div>
-        ) : recentProjects.length === 0 ? (
+        {recentProjects.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <Film className="h-10 w-10 mx-auto mb-3 opacity-40" />
             <p className="text-sm">No projects yet. Create one to get started!</p>

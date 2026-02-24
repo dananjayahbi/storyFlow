@@ -32,7 +32,7 @@ interface SubtitleSettingsFormProps {
     subtitle_font?: string;
     subtitle_color?: string;
     subtitle_font_size?: number;
-    subtitle_position?: string;
+    subtitle_position?: 'bottom' | 'center' | 'top';
   }) => Promise<void>;
 }
 

@@ -30,6 +30,7 @@ import {
 import { EmptyState } from '@/components/EmptyState';
 import { FolderPlus, Search, X, ArrowUpDown, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ProjectsSkeleton } from '@/components/skeletons';
 
 // ── Sort modes ──
 
@@ -44,19 +45,7 @@ const SORT_LABELS: Record<SortMode, string> = {
 
 const SORT_CYCLE: SortMode[] = ['date-desc', 'date-asc', 'title-asc', 'title-desc'];
 
-// ── Skeleton row ──
-
-function SkeletonRow() {
-  return (
-    <TableRow>
-      <TableCell><div className="h-4 w-40 bg-muted animate-pulse rounded" /></TableCell>
-      <TableCell><div className="h-5 w-14 bg-muted animate-pulse rounded-full" /></TableCell>
-      <TableCell><div className="h-4 w-8 bg-muted animate-pulse rounded" /></TableCell>
-      <TableCell><div className="h-4 w-24 bg-muted animate-pulse rounded" /></TableCell>
-      <TableCell><div className="h-7 w-7 bg-muted animate-pulse rounded" /></TableCell>
-    </TableRow>
-  );
-}
+// ── Skeleton row (kept for reference; ProjectsSkeleton now used for full-page loading) ──
 
 // ── Relative time utility ──
 
@@ -263,24 +252,7 @@ export default function ProjectsPage() {
 
       {/* Loading Skeletons */}
       {loading ? (
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Segments</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead className="w-12.5"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <SkeletonRow key={i} />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <ProjectsSkeleton />
       ) : projects.length === 0 ? (
         <EmptyState
           icon={FolderPlus}

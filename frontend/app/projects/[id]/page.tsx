@@ -149,8 +149,8 @@ export default function TimelineEditorPage() {
     };
   }, [id, fetchProject, cancelGeneration, resetRenderState, reset]);
 
-  // Loading state
-  if (isLoading) {
+  // Loading state — also treat initial state (no project yet, no error) as loading
+  if (isLoading || (!project && !error)) {
     return (
       <TooltipProvider>
         <div className="flex h-screen bg-background">
