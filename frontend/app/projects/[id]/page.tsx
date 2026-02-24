@@ -14,8 +14,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  ArrowLeft, Volume2, Film, Loader2, X, Plus, FileUp, Download, CheckCircle, AlertCircle,
-  LayoutDashboard, Settings, Calendar, Layers, ChevronLeft, ChevronRight,
+  ArrowLeft, Volume2, Film, Loader2, X, FileUp, Download, CheckCircle, AlertCircle,
+  Settings, ChevronLeft, ChevronRight, Info, Sliders, Home, Layers, Calendar,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +36,7 @@ export default function TimelineEditorPage() {
   const id = params.id as string;
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<'info' | 'settings'>('info');
   const [mounted, setMounted] = useState(false);
   const {
     project, segments, isLoading, error,
@@ -212,115 +213,207 @@ export default function TimelineEditorPage() {
   return (
     <TooltipProvider>
       <div className="flex h-screen bg-background text-foreground">
-        {/* ── Left Sidebar — navigation + project info + settings ── */}
+        {/* ── Left Sidebar — modern tabbed layout ── */}
         <aside
           className={cn(
             'flex flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200 ease-in-out shrink-0',
             mounted
-              ? sidebarCollapsed ? 'w-14' : 'w-64'
-              : 'w-64'
+              ? sidebarCollapsed ? 'w-14' : 'w-72'
+              : 'w-72'
           )}
         >
-          {/* Brand bar */}
+          {/* ── Brand + Project header ── */}
           <div className={cn(
             'flex items-center h-14 border-b px-3 shrink-0',
             sidebarCollapsed ? 'justify-center' : 'gap-2.5'
           )}>
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground shrink-0">
+            <Link href="/" className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground shrink-0 hover:bg-primary/90 transition-colors">
               <Film className="h-4 w-4" />
-            </div>
+            </Link>
             {!sidebarCollapsed && (
-              <span className="font-semibold text-sm tracking-tight truncate">
-                StoryFlow
-              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold truncate">{project.title}</p>
+                <div className="flex items-center gap-1.5">
+                  <Badge
+                    variant="secondary"
+                    className={cn('text-[10px] px-1.5 py-0 h-4', statusStyles[project.status] || '')}
+                  >
+                    {project.status.replace('_', ' ')}
+                  </Badge>
+                  <span className="text-[10px] text-sidebar-foreground/50">
+                    · {segments.length} seg{segments.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Navigation links */}
-          <nav className="px-2 py-3 space-y-1">
-            {[
-              { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-              { label: 'Settings', href: '/settings', icon: Settings },
-            ].map((item) => {
-              const link = (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                    'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
-                    sidebarCollapsed && 'justify-center px-2'
-                  )}
-                >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  {!sidebarCollapsed && <span>{item.label}</span>}
-                </Link>
-              );
-
-              if (sidebarCollapsed) {
-                return (
-                  <Tooltip key={item.href} delayDuration={0}>
-                    <TooltipTrigger asChild>{link}</TooltipTrigger>
-                    <TooltipContent side="right" sideOffset={8}>
-                      {item.label}
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              }
-              return link;
-            })}
-          </nav>
-
-          <Separator className="mx-2" />
-
-          {/* Project info section — only when expanded */}
+          {/* ── Tab Switcher (when expanded) ── */}
           {!sidebarCollapsed && (
-            <div className="px-4 py-3 space-y-3 overflow-y-auto flex-1">
-              {/* Project name */}
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-sidebar-foreground/50 font-semibold mb-1">
-                  Project
-                </p>
-                <p className="text-sm font-medium truncate">{project.title}</p>
-              </div>
-
-              {/* Status */}
-              <div>
-                <p className="text-[10px] uppercase tracking-widest text-sidebar-foreground/50 font-semibold mb-1">
-                  Status
-                </p>
-                <Badge
-                  variant="secondary"
-                  className={cn('text-xs', statusStyles[project.status] || '')}
-                >
-                  {project.status.replace('_', ' ')}
-                </Badge>
-              </div>
-
-              {/* Segment count */}
-              <div className="flex items-center gap-2 text-sm">
-                <Layers className="h-3.5 w-3.5 text-sidebar-foreground/50" />
-                <span className="text-sidebar-foreground/80">
-                  {segments.length} segment{segments.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-
-              {/* Created date */}
-              <div className="flex items-center gap-2 text-sm">
-                <Calendar className="h-3.5 w-3.5 text-sidebar-foreground/50" />
-                <span className="text-sidebar-foreground/80">
-                  {new Date(project.created_at).toLocaleDateString()}
-                </span>
-              </div>
-
-              <Separator />
-
-              {/* Global Settings */}
-              <GlobalSettingsPanel />
+            <div className="flex border-b shrink-0">
+              <button
+                onClick={() => setSidebarTab('info')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-medium transition-colors border-b-2',
+                  sidebarTab === 'info'
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-sidebar-foreground/50 hover:text-sidebar-foreground/80'
+                )}
+              >
+                <Info className="h-3.5 w-3.5" />
+                Details
+              </button>
+              <button
+                onClick={() => setSidebarTab('settings')}
+                className={cn(
+                  'flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-medium transition-colors border-b-2',
+                  sidebarTab === 'settings'
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-sidebar-foreground/50 hover:text-sidebar-foreground/80'
+                )}
+              >
+                <Sliders className="h-3.5 w-3.5" />
+                Settings
+              </button>
             </div>
           )}
 
-          {/* Collapse toggle at bottom */}
+          {/* ── Collapsed icon tabs ── */}
+          {sidebarCollapsed && (
+            <div className="px-2 py-2 space-y-1">
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => { setSidebarCollapsed(false); setSidebarTab('info'); }}
+                    className={cn(
+                      'flex items-center justify-center w-full rounded-md p-2 transition-colors',
+                      'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                    )}
+                  >
+                    <Info className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>Project Details</TooltipContent>
+              </Tooltip>
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => { setSidebarCollapsed(false); setSidebarTab('settings'); }}
+                    className={cn(
+                      'flex items-center justify-center w-full rounded-md p-2 transition-colors',
+                      'text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                    )}
+                  >
+                    <Sliders className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right" sideOffset={8}>Settings</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+
+          {/* ── Tab Content ── */}
+          {!sidebarCollapsed && (
+            <div className="flex-1 overflow-y-auto">
+              {sidebarTab === 'info' ? (
+                /* ── Info Tab ── */
+                <div className="p-4 space-y-4">
+                  {/* Project details cards */}
+                  <div className="space-y-3">
+                    <div className="rounded-lg border bg-card/50 p-3 space-y-2.5">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Layers className="h-3.5 w-3.5" />
+                        <span>Segments</span>
+                        <span className="ml-auto font-medium text-foreground">{segments.length}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>Created</span>
+                        <span className="ml-auto font-medium text-foreground">
+                          {new Date(project.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {project.updated_at && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Calendar className="h-3.5 w-3.5" />
+                          <span>Updated</span>
+                          <span className="ml-auto font-medium text-foreground">
+                            {new Date(project.updated_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Quick Actions */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-sidebar-foreground/50 font-semibold mb-2">
+                      Quick Actions
+                    </p>
+                    <div className="space-y-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-start text-xs"
+                        onClick={() => setShowImportDialog(true)}
+                      >
+                        <FileUp className="h-3.5 w-3.5 mr-2" />
+                        Import Segments
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full justify-start text-xs"
+                        onClick={generateAllAudio}
+                        disabled={!!bulkGenerationProgress}
+                      >
+                        {isGenerating ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />
+                        ) : (
+                          <Volume2 className="h-3.5 w-3.5 mr-2" />
+                        )}
+                        {isGenerating ? 'Generating…' : 'Generate All Audio'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Navigation */}
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-sidebar-foreground/50 font-semibold mb-2">
+                      Navigate
+                    </p>
+                    <div className="space-y-1">
+                      <Link
+                        href="/"
+                        className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+                      >
+                        <Home className="h-3.5 w-3.5" />
+                        Dashboard
+                      </Link>
+                      <Link
+                        href="/settings"
+                        className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                        Global Settings
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* ── Settings Tab ── */
+                <div className="py-2">
+                  <GlobalSettingsPanel />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Collapse toggle at bottom ── */}
           <div className="border-t px-2 py-2 shrink-0">
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
@@ -353,35 +446,57 @@ export default function TimelineEditorPage() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* ── Top Bar ── */}
           <header className="flex items-center justify-between h-14 border-b bg-background px-4 sm:px-6 shrink-0">
-            <h1 className="text-sm font-semibold truncate">
-              {project.title}
-            </h1>
-            <div className="flex items-center gap-2 shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => setShowImportDialog(true)}>
-                <FileUp className="h-4 w-4 mr-1.5" />
-                <span className="hidden sm:inline">Import</span>
+            <div className="flex items-center gap-3 min-w-0">
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 sm:hidden" asChild>
+                <Link href="/"><ArrowLeft className="h-4 w-4" /></Link>
               </Button>
+              <h1 className="text-sm font-semibold truncate">
+                {project.title}
+              </h1>
+              <Badge
+                variant="secondary"
+                className={cn('text-[10px] px-1.5 py-0 h-4 shrink-0 hidden sm:inline-flex', statusStyles[project.status] || '')}
+              >
+                {project.status.replace('_', ' ')}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowImportDialog(true)}>
+                    <FileUp className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Import Segments</TooltipContent>
+              </Tooltip>
               {renderStatus === 'completed' && outputUrl ? (
-                <Button variant="ghost" size="sm" onClick={downloadVideo}>
-                  <Download className="h-4 w-4 mr-1.5" />
-                  <span className="hidden sm:inline">Download</span>
-                </Button>
+                <Tooltip delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={downloadVideo}>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Download Video</TooltipContent>
+                </Tooltip>
               ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={startRender}
-                  disabled={isRendering || segments.length === 0}
-                >
-                  {isRendering ? (
-                    <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                  ) : (
-                    <Film className="h-4 w-4 mr-1.5" />
-                  )}
-                  <span className="hidden sm:inline">
-                    {isRendering ? 'Rendering…' : 'Export'}
-                  </span>
-                </Button>
+                <Tooltip delayDuration={0}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={startRender}
+                      disabled={isRendering || segments.length === 0}
+                    >
+                      {isRendering ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Film className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{isRendering ? 'Rendering…' : 'Export Video'}</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </header>
@@ -399,139 +514,146 @@ export default function TimelineEditorPage() {
           </main>
 
           {/* ── Action Bar ── */}
-          <footer className="border-t bg-background px-4 sm:px-6 py-3 space-y-2 shrink-0">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <Button
-                size="sm"
-                onClick={generateAllAudio}
-                disabled={!!bulkGenerationProgress}
-              >
-                {isGenerating ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Volume2 className="h-4 w-4 mr-2" />
-                )}
-                {isGenerating ? 'Generating...' : 'Generate All Audio'}
-              </Button>
-              {isGenerating && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={cancelGeneration}
-                >
-                  <X className="h-4 w-4 mr-1" />
-                  Cancel
-                </Button>
-              )}
-              {/* ── Render / Export Video Button ── */}
-              {renderStatus === 'completed' && outputUrl ? (
-                <>
-                  <Button size="sm" onClick={downloadVideo}>
-                    <Download className="h-4 w-4 mr-2" />
-                    Download Video
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={resetRenderState}
-                  >
-                    Re-render
-                  </Button>
-                </>
-              ) : renderStatus === 'failed' ? (
-                <>
-                  <Button size="sm" variant="destructive" onClick={startRender}>
-                    <AlertCircle className="h-4 w-4 mr-2" />
-                    Retry Render
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={resetRenderState}>
-                    Dismiss
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={startRender}
-                    disabled={isRendering || segments.length === 0}
-                  >
-                    {isRendering ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          <footer className="border-t bg-background shrink-0">
+            {/* Progress / Status indicators (only when active) */}
+            {(bulkGenerationProgress || isRendering || renderStatus === 'completed' || renderStatus === 'failed') && (
+              <div className="px-4 sm:px-6 pt-2.5 pb-1 space-y-1.5">
+                {/* Audio generation progress */}
+                {bulkGenerationProgress && (
+                  <div className="space-y-1">
+                    {bulkGenerationProgress.status === 'COMPLETED' || bulkGenerationProgress.status === 'FAILED' ? (
+                      <p className={cn(
+                        'text-xs font-medium flex items-center gap-1.5',
+                        bulkGenerationProgress.failed > 0
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-green-600 dark:text-green-400'
+                      )}>
+                        <CheckCircle className="h-3 w-3" />
+                        {bulkGenerationProgress.failed > 0
+                          ? `Audio: ${bulkGenerationProgress.completed} done, ${bulkGenerationProgress.failed} failed`
+                          : `Audio: ${bulkGenerationProgress.completed}/${bulkGenerationProgress.total} complete`}
+                      </p>
                     ) : (
-                      <Film className="h-4 w-4 mr-2" />
+                      <div className="flex items-center gap-3">
+                        <p className="text-xs text-muted-foreground whitespace-nowrap">
+                          Audio {bulkGenerationProgress.completed}/{bulkGenerationProgress.total}
+                        </p>
+                        <Progress value={Math.round(smoothBulkPct)} className="flex-1 h-1.5" />
+                        <span className="text-xs tabular-nums text-muted-foreground">{Math.round(smoothBulkPct)}%</span>
+                      </div>
                     )}
-                    {isRendering ? 'Rendering…' : 'Export Video'}
-                  </Button>
-                  {isRendering && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={cancelRender}
-                    >
-                      <X className="h-4 w-4 mr-1" />
-                      Cancel
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
-            {bulkGenerationProgress && (
-              <div className="w-full space-y-1.5 overflow-hidden">
-                {bulkGenerationProgress.status === 'COMPLETED' || bulkGenerationProgress.status === 'FAILED' ? (
-                  <p
-                    className={`text-sm font-medium ${
-                      bulkGenerationProgress.failed > 0
-                        ? 'text-amber-600 dark:text-amber-400'
-                        : 'text-green-600 dark:text-green-400'
-                    }`}
-                  >
-                    {bulkGenerationProgress.failed > 0
-                      ? `Audio generation complete — ${bulkGenerationProgress.completed} succeeded, ${bulkGenerationProgress.failed} failed`
-                      : `Audio generation complete — ${bulkGenerationProgress.completed} of ${bulkGenerationProgress.total} segments succeeded`}
+                  </div>
+                )}
+
+                {/* Render progress */}
+                {isRendering && renderProgress && (
+                  <div className="flex items-center gap-3">
+                    <p className="text-xs text-muted-foreground whitespace-nowrap">
+                      Render {renderProgress.current_segment}/{renderProgress.total_segments}
+                    </p>
+                    <Progress value={Math.round(smoothRenderPct)} className="flex-1 h-1.5" />
+                    <span className="text-xs tabular-nums text-muted-foreground">{Math.round(smoothRenderPct)}%</span>
+                  </div>
+                )}
+                {isRendering && !renderProgress && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Preparing render pipeline…
                   </p>
+                )}
+
+                {/* Completed / Failed banners */}
+                {renderStatus === 'completed' && outputUrl && (
+                  <p className="text-xs font-medium text-green-600 dark:text-green-400 flex items-center gap-1.5">
+                    <CheckCircle className="h-3 w-3" />
+                    Render complete — ready to download
+                  </p>
+                )}
+                {renderStatus === 'failed' && (
+                  <p className="text-xs font-medium text-destructive flex items-center gap-1.5">
+                    <AlertCircle className="h-3 w-3" />
+                    Render failed — check segments have images &amp; audio
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Action buttons row */}
+            <div className="flex items-center justify-between px-4 sm:px-6 py-2">
+              {/* Left: Audio actions */}
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={generateAllAudio}
+                  disabled={!!bulkGenerationProgress}
+                  className="h-8 text-xs"
+                >
+                  {isGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Volume2 className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  {isGenerating ? 'Generating…' : 'Audio'}
+                </Button>
+                {isGenerating && (
+                  <Button variant="ghost" size="sm" onClick={cancelGeneration} className="h-8 text-xs px-2">
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+
+              {/* Center: segment count */}
+              <span className="text-[10px] text-muted-foreground tabular-nums hidden sm:block">
+                {segments.length} segment{segments.length !== 1 ? 's' : ''}
+              </span>
+
+              {/* Right: Render / Export actions */}
+              <div className="flex items-center gap-2">
+                {renderStatus === 'completed' && outputUrl ? (
+                  <>
+                    <Button size="sm" onClick={downloadVideo} className="h-8 text-xs">
+                      <Download className="h-3.5 w-3.5 mr-1.5" />
+                      Download
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={resetRenderState} className="h-8 text-xs px-2">
+                      Re-render
+                    </Button>
+                  </>
+                ) : renderStatus === 'failed' ? (
+                  <>
+                    <Button size="sm" variant="destructive" onClick={startRender} className="h-8 text-xs">
+                      <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+                      Retry
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={resetRenderState} className="h-8 text-xs px-2">
+                      Dismiss
+                    </Button>
+                  </>
                 ) : (
                   <>
-                    <p className="text-sm text-muted-foreground">
-                      Generating audio… {bulkGenerationProgress.completed}/{bulkGenerationProgress.total} segments complete ({Math.round(smoothBulkPct)}%)
-                    </p>
-                    <Progress value={Math.round(smoothBulkPct)} className="w-full" />
+                    <Button
+                      size="sm"
+                      onClick={startRender}
+                      disabled={isRendering || segments.length === 0}
+                      className="h-8 text-xs"
+                    >
+                      {isRendering ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <Film className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      {isRendering ? 'Rendering…' : 'Export'}
+                    </Button>
+                    {isRendering && (
+                      <Button variant="ghost" size="sm" onClick={cancelRender} className="h-8 text-xs px-2">
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
-            )}
-            {/* ── Render Progress ── */}
-            {isRendering && renderProgress && (
-              <div className="w-full space-y-1.5 overflow-hidden">
-                <p className="text-sm text-muted-foreground">
-                  Rendering… segment {renderProgress.current_segment}/{renderProgress.total_segments} — {renderProgress.current_phase} ({Math.round(smoothRenderPct)}%)
-                </p>
-                <Progress value={Math.round(smoothRenderPct)} className="w-full" />
-              </div>
-            )}
-            {isRendering && !renderProgress && (
-              <div className="w-full">
-                <p className="text-sm text-muted-foreground flex items-center gap-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Preparing render pipeline…
-                </p>
-              </div>
-            )}
-            {renderStatus === 'completed' && outputUrl && (
-              <div className="w-full">
-                <p className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-2">
-                  <CheckCircle className="h-3.5 w-3.5" />
-                  Video rendered successfully — ready to download
-                </p>
-              </div>
-            )}
-            {renderStatus === 'failed' && (
-              <div className="w-full">
-                <p className="text-sm font-medium text-destructive flex items-center gap-2">
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  Render failed — check that all segments have images and audio
-                </p>
-              </div>
-            )}
+            </div>
           </footer>
         </div>
 

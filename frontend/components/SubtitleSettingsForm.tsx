@@ -297,7 +297,7 @@ export function SubtitleSettingsForm({
         <Select
           value={position}
           onValueChange={(value) => {
-            onChange({ subtitle_position: value });
+            onChange({ subtitle_position: value as 'bottom' | 'center' | 'top' });
           }}
         >
           <SelectTrigger className="h-8 text-sm">
