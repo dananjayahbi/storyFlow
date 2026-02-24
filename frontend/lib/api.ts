@@ -36,6 +36,11 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
   return response.data;
 }
 
+export async function updateProject(id: string, data: Partial<Pick<Project, 'title' | 'status'>>): Promise<Project> {
+  const response = await api.patch<Project>(`/api/projects/${id}/`, data);
+  return response.data;
+}
+
 export async function importProject(payload: ImportProjectRequest): Promise<ProjectDetail> {
   const response = await api.post<ProjectDetail>('/api/projects/import/', payload);
   return response.data;

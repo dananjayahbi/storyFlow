@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select';
 import { VALIDATION } from '@/lib/constants';
 import { SubtitlePreview } from '@/components/SubtitlePreview';
-import { Type, Upload, Loader2 } from 'lucide-react';
+import { Upload, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Props ──────────────────────────────────────────────────────────
@@ -173,14 +173,6 @@ export function SubtitleSettingsForm({
 
   return (
     <div className="space-y-4">
-      {/* ── Section Header ── */}
-      <div className="flex items-center gap-1.5">
-        <Type className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Subtitles
-        </h3>
-      </div>
-
       {/* ── Font Section ── */}
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground font-medium">

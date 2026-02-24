@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { importProject, importSegments } from '@/lib/api';
+import { importProject, importSegments, updateProject } from '@/lib/api';
 import { Project, ImportProjectRequest, Segment } from '@/lib/types';
 
 interface ImportDialogProps {
@@ -39,8 +39,12 @@ export default function ImportDialog({ open, onOpenChange, onSuccess, projectId,
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]> | null>(null);
+  const [detectedTitle, setDetectedTitle] = useState<string | null>(null);
+  const [useImportedTitle, setUseImportedTitle] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mountedRef = useRef(true);
+
+  const isAppendMode = !!projectId;
 
   // Track mount state for unmount safety
   useEffect(() => {
@@ -56,8 +60,28 @@ export default function ImportDialog({ open, onOpenChange, onSuccess, projectId,
       setContent('');
       setErrors(null);
       setIsSubmitting(false);
+      setDetectedTitle(null);
+      setUseImportedTitle(true);
     }
   }, [open]);
+
+  // Detect title from JSON content (for append mode)
+  useEffect(() => {
+    if (!isAppendMode || format !== 'json' || !content.trim()) {
+      setDetectedTitle(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.title && typeof parsed.title === 'string' && parsed.title.trim()) {
+        setDetectedTitle(parsed.title.trim());
+      } else {
+        setDetectedTitle(null);
+      }
+    } catch {
+      setDetectedTitle(null);
+    }
+  }, [content, format, isAppendMode]);
 
   // Auto-focus textarea on dialog open
   useEffect(() => {
@@ -74,8 +98,6 @@ export default function ImportDialog({ open, onOpenChange, onSuccess, projectId,
       }
     }
   };
-
-  const isAppendMode = !!projectId;
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -112,6 +134,16 @@ export default function ImportDialog({ open, onOpenChange, onSuccess, projectId,
           ...(format === 'json' ? { segments } : { raw_text: rawText }),
         };
         const allSegments = await importSegments(projectId, importPayload);
+
+        // Optionally rename the project with the imported story title
+        if (detectedTitle && useImportedTitle) {
+          try {
+            await updateProject(projectId, { title: detectedTitle });
+          } catch {
+            // Non-critical — segments were imported successfully
+          }
+        }
+
         if (mountedRef.current) {
           onSegmentsImported?.(allSegments);
           onOpenChange(false);
@@ -215,6 +247,26 @@ export default function ImportDialog({ open, onOpenChange, onSuccess, projectId,
               {content.length} characters
             </p>
           </div>
+
+          {/* Rename option when importing into existing project */}
+          {isAppendMode && detectedTitle && (
+            <label className="flex items-start gap-2.5 rounded-md border bg-muted/50 px-3 py-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={useImportedTitle}
+                onChange={(e) => setUseImportedTitle(e.target.checked)}
+                className="h-4 w-4 mt-0.5 rounded border-muted-foreground accent-primary cursor-pointer"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium">
+                  Rename project to &ldquo;{detectedTitle}&rdquo;
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Update the project title with the imported story title
+                </p>
+              </div>
+            </label>
+          )}
 
           {/* Error Display */}
           {errors && (

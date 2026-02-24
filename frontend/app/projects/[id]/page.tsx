@@ -514,10 +514,10 @@ export default function TimelineEditorPage() {
           </main>
 
           {/* ── Action Bar ── */}
-          <footer className="border-t bg-background shrink-0">
+          <footer className="border-t bg-background shrink-0 py-4">
             {/* Progress / Status indicators (only when active) */}
             {(bulkGenerationProgress || isRendering || renderStatus === 'completed' || renderStatus === 'failed') && (
-              <div className="px-4 sm:px-6 pt-2.5 pb-1 space-y-1.5">
+              <div className="px-4 sm:px-6 space-y-1">
                 {/* Audio generation progress */}
                 {bulkGenerationProgress && (
                   <div className="space-y-1">
@@ -579,7 +579,7 @@ export default function TimelineEditorPage() {
             )}
 
             {/* Action buttons row */}
-            <div className="flex items-center justify-between px-4 sm:px-6 py-2">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-2.5">
               {/* Left: Audio actions */}
               <div className="flex items-center gap-2">
                 <Button
@@ -665,6 +665,8 @@ export default function TimelineEditorPage() {
           onSuccess={() => {}}
           onSegmentsImported={(segments) => {
             useProjectStore.setState({ segments });
+            // Re-fetch project to pick up title change if user renamed
+            fetchProject(id);
           }}
         />
       </div>

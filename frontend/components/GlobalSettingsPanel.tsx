@@ -208,13 +208,6 @@ export function GlobalSettingsPanel() {
         <div className="space-y-6">
           {/* ── Voice Settings Section ── */}
           <section>
-            <div className="flex items-center gap-1.5 mb-3">
-              <Volume2 className="h-4 w-4 text-muted-foreground" />
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Voice
-              </h3>
-            </div>
-
             {/* Voice Selector (Task 05.03.02) */}
             <VoiceSelector
               value={globalSettings.default_voice_id}

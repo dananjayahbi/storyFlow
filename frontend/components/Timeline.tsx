@@ -32,7 +32,7 @@ export function Timeline({
   }
 
   return (
-    <ScrollArea className="h-[calc(100vh-280px)] lg:h-[calc(100vh-200px)]">
+    <ScrollArea className="h-full">
       <div className="space-y-4 p-4">
         {segments.map((segment) => (
           <SegmentCard

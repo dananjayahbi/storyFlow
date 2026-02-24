@@ -62,7 +62,7 @@ export function VoiceSelector({ value, onChange }: VoiceSelectorProps) {
       <div className="flex items-center gap-1.5">
         <Mic className="h-4 w-4 text-muted-foreground" />
         <label className="text-xs text-muted-foreground font-medium">
-          Voice
+          VOICE
         </label>
       </div>
 
