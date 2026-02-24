@@ -97,7 +97,7 @@ export function ImageUploader({
           <img
             src={imageUrl}
             alt="Segment image"
-            className="w-full h-32 md:h-40 object-cover rounded-md border"
+            className="w-full h-auto rounded-md border"
           />
           {!isLocked && (
             <Button

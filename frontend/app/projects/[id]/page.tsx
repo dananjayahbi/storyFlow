@@ -594,7 +594,7 @@ export default function TimelineEditorPage() {
                   ) : (
                     <Volume2 className="h-3.5 w-3.5 mr-1.5" />
                   )}
-                  {isGenerating ? 'Generating…' : 'Audio'}
+                  {isGenerating ? 'Generating…' : 'Generate All Audio'}
                 </Button>
                 {isGenerating && (
                   <Button variant="ghost" size="sm" onClick={cancelGeneration} className="h-8 text-xs px-2">
