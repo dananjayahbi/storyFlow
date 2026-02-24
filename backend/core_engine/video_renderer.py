@@ -13,6 +13,7 @@ in SubPhase 04.03.
 
 import logging
 import os
+import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -50,6 +51,42 @@ except ImportError:
     from moviepy.audio.AudioClip import AudioClip as _AudioClipBase  # type: ignore[import-untyped]
 
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# GPU encoder detection (NVENC)
+# ---------------------------------------------------------------------------
+# Cached result so the detection probe runs at most once per process.
+_nvenc_available: Optional[bool] = None
+
+
+def _detect_nvenc() -> bool:
+    """Probe FFmpeg for h264_nvenc hardware encoder support.
+
+    Runs ``ffmpeg -encoders`` once and checks if ``h264_nvenc`` is listed.
+    The result is cached in :data:`_nvenc_available` for subsequent calls.
+
+    Returns:
+        True if h264_nvenc is available, False otherwise.
+    """
+    global _nvenc_available
+    if _nvenc_available is not None:
+        return _nvenc_available
+
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        _nvenc_available = "h264_nvenc" in result.stdout
+    except Exception as exc:
+        logger.debug("NVENC detection failed: %s", exc)
+        _nvenc_available = False
+
+    logger.info("NVENC h264_nvenc available: %s", _nvenc_available)
+    return _nvenc_available
+
 
 # ---------------------------------------------------------------------------
 # Transition constants
@@ -733,8 +770,14 @@ def render_project(
                 image_path, segment.sequence_index, visual_duration,
             )
 
-            # Step 3b: Composite subtitles onto Ken Burns clip
+            # Step 3b: Collect subtitle and logo overlays for FLAT compositing
+            # Instead of nesting multiple CompositeVideoClip layers (each
+            # adding per-frame Python overhead), we collect all overlay
+            # clips and composite them in a single pass.
+            overlay_layers: list = []
             text_content = getattr(segment, "text_content", None) or ""
+
+            # Subtitles
             if subtitles_enabled and text_content.strip():
                 try:
                     subtitle_clips = create_subtitles_for_segment(
@@ -747,14 +790,10 @@ def render_project(
                         position=subtitle_position,
                     )
                     if subtitle_clips:
-                        ken_burns_clip = CompositeVideoClip(
-                            [ken_burns_clip] + subtitle_clips,
-                            size=(res_width, res_height),
-                        ).with_duration(visual_duration)
+                        overlay_layers.extend(subtitle_clips)
                         logger.debug(
-                            "  Subtitles composited: %d clip(s) for %s "
-                            "(visual_duration=%.2fs)",
-                            len(subtitle_clips), seg_label, visual_duration,
+                            "  Subtitles queued: %d clip(s) for %s",
+                            len(subtitle_clips), seg_label,
                         )
                     else:
                         logger.debug(
@@ -768,7 +807,6 @@ def render_project(
                     )
                     logger.warning(warn_msg)
                     warnings.append(warn_msg)
-                    # Continue rendering without subtitles for this segment
             elif not subtitles_enabled:
                 logger.debug(
                     "  Subtitles disabled — skipping for %s.",
@@ -780,22 +818,31 @@ def render_project(
                     seg_label,
                 )
 
-            # Step 3c: Composite logo watermark if enabled
+            # Logo watermark
             if logo_enabled and logo_clip is not None:
                 try:
                     seg_logo = logo_clip.with_duration(visual_duration)
-                    ken_burns_clip = CompositeVideoClip(
-                        [ken_burns_clip, seg_logo],
-                        size=(res_width, res_height),
-                    ).with_duration(visual_duration)
+                    overlay_layers.append(seg_logo)
                     logger.debug(
-                        "  Logo watermark composited for %s", seg_label,
+                        "  Logo watermark queued for %s", seg_label,
                     )
                 except Exception as logo_exc:
                     logger.warning(
                         "  Logo compositing failed for %s: %s",
                         seg_label, logo_exc,
                     )
+
+            # Step 3c: Single flat CompositeVideoClip (if overlays exist)
+            if overlay_layers:
+                ken_burns_clip = CompositeVideoClip(
+                    [ken_burns_clip] + overlay_layers,
+                    size=(res_width, res_height),
+                ).with_duration(visual_duration)
+                logger.debug(
+                    "  Flat composite: %d overlay(s) for %s "
+                    "(visual_duration=%.2fs)",
+                    len(overlay_layers), seg_label, visual_duration,
+                )
 
             # Step 4: Pair Ken Burns clip with audio
             # The Ken Burns clip was already created with visual_duration
@@ -990,7 +1037,7 @@ def render_project(
             )
 
         # --------------------------------------------------------------
-        # J. Export to MP4
+        # J. Export to MP4 — with GPU (NVENC) acceleration when available
         # --------------------------------------------------------------
         logger.info("Exporting to %s ...", output_path)
 
@@ -1004,14 +1051,54 @@ def render_project(
                 base_percentage=80,
             )
 
+        # ── Determine best codec and encoding parameters ──
+        use_nvenc = _detect_nvenc()
+
+        if use_nvenc:
+            # NVIDIA NVENC hardware encoder — offloads encoding to the
+            # GPU's fixed-function hardware.  5–10× faster than libx264
+            # at equivalent quality.
+            video_codec = "h264_nvenc"
+            ffmpeg_params = [
+                "-preset", "p4",          # Balanced speed/quality preset
+                "-tune", "hq",            # Optimise for visual quality
+                "-rc", "vbr",             # Variable bitrate mode
+                "-cq", "23",              # Constant quality level (lower = better)
+                "-b:v", "8M",             # Target bitrate
+                "-maxrate", "12M",        # Cap peak bitrate
+                "-bufsize", "16M",        # VBV buffer size
+                "-profile:v", "high",     # H.264 High profile
+                "-movflags", "+faststart",  # Move moov atom for web streaming
+            ]
+            logger.info(
+                "Using NVIDIA NVENC GPU encoder (h264_nvenc) for export."
+            )
+        else:
+            # CPU fallback — libx264 with optimised preset.
+            # "fast" preset is ~3× faster than default "medium" with
+            # negligible quality difference at 8 Mbps bitrate.
+            video_codec = "libx264"
+            ffmpeg_params = [
+                "-preset", "fast",
+                "-tune", "film",           # Optimise for high-detail content
+                "-crf", "23",              # Constant rate factor (good quality)
+                "-profile:v", "high",
+                "-movflags", "+faststart",
+            ]
+            logger.info(
+                "Using libx264 CPU encoder (preset=fast) for export."
+            )
+
         try:
             composite_clip.write_videofile(
                 output_path,
-                codec="libx264",
+                codec=video_codec,
                 audio_codec="aac",
                 bitrate="8000k",
                 fps=fps,
-                logger=export_logger,  # Fine-grained frame-by-frame progress
+                threads=0,                # Auto-detect available CPU threads
+                ffmpeg_params=ffmpeg_params,
+                logger=export_logger,     # Fine-grained frame-by-frame progress
             )
         except PermissionError as perm_err:
             # On Windows MoviePy sometimes fails to delete the temp

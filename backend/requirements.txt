@@ -14,3 +14,4 @@ numpy>=1.26.0
 
 # Video Rendering (Phase 04)
 moviepy>=1.0.3
+opencv-python-headless>=4.8.0
