@@ -22,6 +22,9 @@ import {
   updateSettings as apiUpdateSettings,
   getVoices as apiGetVoices,
   uploadFont as apiUploadFont,
+  getLogos as apiGetLogos,
+  uploadLogo as apiUploadLogo,
+  deleteLogo as apiDeleteLogo,
 } from './api';
 import type {
   ProjectDetail,
@@ -32,6 +35,7 @@ import type {
   RenderStatus,
   RenderProgress,
   GlobalSettings,
+  Logo,
 } from './types';
 import { type Voice, AVAILABLE_VOICES } from './constants';
 
@@ -702,6 +706,24 @@ interface SettingsStore {
 
   /** Upload a custom subtitle font via POST /api/settings/font/upload/. */
   uploadFont: (file: File) => Promise<void>;
+
+  /** List of uploaded logos. */
+  logos: Logo[];
+
+  /** True while logos are loading. */
+  isLogosLoading: boolean;
+
+  /** True while a logo is being uploaded. */
+  isLogoUploading: boolean;
+
+  /** Fetch all uploaded logos. */
+  fetchLogos: () => Promise<void>;
+
+  /** Upload a new logo file. */
+  uploadLogo: (file: File) => Promise<Logo>;
+
+  /** Delete a logo by ID. */
+  deleteLogo: (logoId: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsStore>()((set, get) => ({
@@ -711,6 +733,9 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
   availableVoices: [],
   isVoicesLoading: false,
   isFontUploading: false,
+  logos: [],
+  isLogosLoading: false,
+  isLogoUploading: false,
 
   fetchSettings: async () => {
     set({ isSettingsLoading: true, settingsError: null });
@@ -777,6 +802,49 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
     } catch {
       set({ isFontUploading: false });
       throw new Error('Failed to upload font');
+    }
+  },
+
+  fetchLogos: async () => {
+    set({ isLogosLoading: true });
+    try {
+      const logos = await apiGetLogos();
+      set({ logos, isLogosLoading: false });
+    } catch {
+      set({ isLogosLoading: false });
+    }
+  },
+
+  uploadLogo: async (file) => {
+    set({ isLogoUploading: true });
+    try {
+      const logo = await apiUploadLogo(file);
+      set((state) => ({
+        logos: [logo, ...state.logos],
+        isLogoUploading: false,
+      }));
+      return logo;
+    } catch {
+      set({ isLogoUploading: false });
+      throw new Error('Failed to upload logo');
+    }
+  },
+
+  deleteLogo: async (logoId) => {
+    try {
+      await apiDeleteLogo(logoId);
+      set((state) => ({
+        logos: state.logos.filter((l) => l.id !== logoId),
+      }));
+      // If this was the active logo, disable it
+      const gs = get().globalSettings;
+      if (gs && gs.active_logo === logoId) {
+        set({
+          globalSettings: { ...gs, active_logo: null, logo_enabled: false },
+        });
+      }
+    } catch {
+      throw new Error('Failed to delete logo');
     }
   },
 }));

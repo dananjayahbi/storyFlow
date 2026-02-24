@@ -47,8 +47,8 @@ FONT_SIZE_DIVISOR: int = 18
 TEXT_WIDTH_RATIO: float = 0.9
 """Subtitle width as a fraction of frame width (90 %)."""
 
-SUBTITLE_Y_RATIO: float = 0.85
-"""Vertical position of subtitles (85 % from top)."""
+SUBTITLE_VERT_MARGIN_RATIO: float = 0.08
+"""Vertical margin for subtitle positioning (8 % of frame height)."""
 
 DEFAULT_STROKE_COLOR: str = "#000000"
 """Black stroke for readability against any background."""
@@ -329,16 +329,53 @@ def generate_subtitle_clips(
             # ── Position: anchor from bottom/center/top ─────────────
             clip_height = padded_rgb.shape[0]  # includes padding
 
+            # Maximum allowed clip height: 40 % of frame to avoid
+            # text overflowing the visible area.
+            max_clip_h = int(height * 0.40)
+            if clip_height > max_clip_h and clip_height > 0:
+                # Downscale the subtitle image to fit within bounds
+                scale_factor = max_clip_h / clip_height
+                new_h = max_clip_h
+                new_w = int(w_orig * scale_factor)
+                from PIL import Image as _PILImage
+                pil_rgb = _PILImage.fromarray(padded_rgb)
+                pil_rgb = pil_rgb.resize((new_w, new_h), _PILImage.LANCZOS)
+                padded_rgb = np.array(pil_rgb)
+                if mask_clip is not None:
+                    # Also rescale the alpha mask
+                    pil_mask = _PILImage.fromarray(
+                        (padded_mask * 255).astype(np.uint8)
+                        if padded_mask.max() <= 1.0
+                        else padded_mask.astype(np.uint8)
+                    )
+                    pil_mask = pil_mask.resize(
+                        (new_w, new_h), _PILImage.LANCZOS
+                    )
+                    padded_mask = np.array(pil_mask).astype(float) / 255.0
+                    mask_clip = ImageClip(padded_mask, is_mask=True)
+                clip = ImageClip(padded_rgb)
+                if mask_clip is not None:
+                    clip = clip.with_mask(mask_clip)
+                clip_height = new_h
+                logger.debug(
+                    "  Subtitle clip downscaled by %.2f to fit "
+                    "(%d→%dpx height)",
+                    scale_factor, int(clip_height / scale_factor), new_h,
+                )
+
+            # Vertical margin (percentage of frame height)
+            vert_margin = int(height * 0.08)  # 8 % margin
+
             if position == "top":
-                y_pos = int(height * 0.05)  # 5 % margin from top
+                y_pos = vert_margin
             elif position == "center":
                 y_pos = int((height - clip_height) / 2)
             else:  # "bottom" (default)
-                bottom_margin = int(height * 0.05)  # 5 % margin
-                y_pos = height - clip_height - bottom_margin
+                y_pos = height - clip_height - vert_margin
 
-            # Safety: clamp to frame bounds
+            # Safety: clamp so subtitle stays fully inside the frame
             y_pos = max(y_pos, 0)
+            y_pos = min(y_pos, height - clip_height)
 
             # Set position and timing (MoviePy 2.x immutable API)
             clip = (

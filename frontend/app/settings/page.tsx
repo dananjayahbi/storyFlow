@@ -3,12 +3,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { testTTS, getVoices } from '@/lib/api';
 import { AVAILABLE_VOICES, type Voice } from '@/lib/constants';
+import { useSettingsStore as useLogoStore } from '@/lib/stores';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Volume2, Loader2, Play, Square, Type, Save } from 'lucide-react';
+import { Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon, Trash2, Upload } from 'lucide-react';
 import { useSettingsStore } from '@/store/settingsStore';
+import { toast } from 'sonner';
 
 export default function SettingsPage() {
   // TTS Tester state
@@ -30,10 +32,22 @@ export default function SettingsPage() {
   const [isSavingSubtitles, setIsSavingSubtitles] = useState(false);
   const [subtitleSaveMsg, setSubtitleSaveMsg] = useState<string | null>(null);
 
+  // Logo management state
+  const {
+    logos,
+    isLogosLoading,
+    isLogoUploading,
+    fetchLogos,
+    uploadLogo,
+    deleteLogo,
+  } = useLogoStore();
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
   // Fetch settings on mount
   useEffect(() => {
     fetchSettings();
-  }, [fetchSettings]);
+    fetchLogos();
+  }, [fetchSettings, fetchLogos]);
 
   // Sync local state when settings load
   useEffect(() => {
@@ -396,6 +410,120 @@ export default function SettingsPage() {
               </span>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Logo Management Card ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ImageIcon className="h-5 w-5" />
+            Logo Management
+          </CardTitle>
+          <CardDescription>
+            Upload logos to burn into your rendered videos as watermarks.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Upload Button */}
+          <div>
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept=".png,.webp,.jpg,.jpeg"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+
+                // Validate size
+                if (file.size > 5 * 1024 * 1024) {
+                  toast.error('Logo file must be under 5 MB');
+                  return;
+                }
+
+                try {
+                  await uploadLogo(file);
+                  toast.success('Logo uploaded successfully');
+                } catch {
+                  toast.error('Failed to upload logo');
+                }
+
+                // Reset input
+                if (logoInputRef.current) logoInputRef.current.value = '';
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => logoInputRef.current?.click()}
+              disabled={isLogoUploading}
+            >
+              {isLogoUploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Uploading…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Logo
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground mt-1">
+              PNG recommended for transparency. Max 5 MB.
+            </p>
+          </div>
+
+          <Separator />
+
+          {/* Logo Grid */}
+          {isLogosLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading logos…
+            </div>
+          ) : logos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No logos uploaded yet. Upload a logo to use as a video watermark.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {logos.map((logo) => (
+                <div
+                  key={logo.id}
+                  className="relative group border rounded-lg p-2 flex flex-col items-center gap-2"
+                >
+                  <div className="w-full aspect-square bg-muted/30 rounded flex items-center justify-center overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`http://localhost:8000${logo.file}`}
+                      alt={logo.name}
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground truncate w-full text-center">
+                    {logo.name}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="absolute top-1 right-1 h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={async () => {
+                      try {
+                        await deleteLogo(logo.id);
+                        toast.success('Logo deleted');
+                      } catch {
+                        toast.error('Failed to delete logo');
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

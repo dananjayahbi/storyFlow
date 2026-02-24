@@ -3,15 +3,29 @@ import re
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Project, Segment, GlobalSettings
+from .models import Project, Segment, GlobalSettings, Logo
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
 
 # ── Allowed resolution presets (width × height) ──
 ALLOWED_RESOLUTIONS = {
+    # 16:9 Landscape (YouTube, standard widescreen)
     (1280, 720),
     (1920, 1080),
     (3840, 2160),
+    # 9:16 Portrait (TikTok, Instagram Reels, YouTube Shorts)
+    (720, 1280),
+    (1080, 1920),
+    # 1:1 Square (Instagram post, Facebook post)
+    (720, 720),
+    (1080, 1080),
+    # 4:5 Portrait (Instagram post, Facebook feed)
+    (864, 1080),
+    (1080, 1350),
+    # 4:3 Landscape (classic)
+    (1440, 1080),
+    # 3:4 Portrait
+    (1080, 1440),
 }
 
 ALLOWED_FPS = {24, 30, 60}
@@ -47,6 +61,13 @@ class SegmentSerializer(serializers.ModelSerializer):
         ]
 
 
+class LogoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Logo
+        fields = ['id', 'name', 'file', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+
 class GlobalSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = GlobalSettings
@@ -59,6 +80,8 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'ken_burns_zoom', 'transition_duration', 'zoom_intensity',
             'inter_segment_silence', 'subtitles_enabled',
             'custom_font_file',
+            'logo_enabled', 'active_logo', 'logo_scale',
+            'logo_position', 'logo_opacity', 'logo_margin',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['custom_font_file', 'created_at', 'updated_at']
@@ -121,6 +144,35 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
         if value < 0.0 or value > 5.0:
             raise serializers.ValidationError(
                 'Inter-segment silence must be between 0.0 and 5.0 seconds.'
+            )
+        return value
+
+    def validate_logo_scale(self, value):
+        if value < 0.05 or value > 0.50:
+            raise serializers.ValidationError(
+                'Logo scale must be between 0.05 and 0.50.'
+            )
+        return value
+
+    def validate_logo_position(self, value):
+        allowed = {'top-left', 'top-right', 'bottom-left', 'bottom-right'}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Logo position must be one of: {", ".join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_logo_opacity(self, value):
+        if value < 0.0 or value > 1.0:
+            raise serializers.ValidationError(
+                'Logo opacity must be between 0.0 and 1.0.'
+            )
+        return value
+
+    def validate_logo_margin(self, value):
+        if value < 0 or value > 200:
+            raise serializers.ValidationError(
+                'Logo margin must be between 0 and 200 pixels.'
             )
         return value
 

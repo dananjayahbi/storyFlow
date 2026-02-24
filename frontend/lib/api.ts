@@ -13,6 +13,7 @@ import {
   TaskStatusResponse,
   GlobalSettings,
   GalleryItem,
+  Logo,
 } from './types';
 import { Voice } from './constants';
 
@@ -274,6 +275,26 @@ export function getStreamUrl(projectId: string): string {
 export function getDownloadUrl(projectId: string): string {
   const base = api.defaults.baseURL || 'http://localhost:8000';
   return `${base}/api/gallery/${projectId}/download/`;
+}
+
+// ── Logos ──
+
+export async function getLogos(): Promise<Logo[]> {
+  const { data } = await api.get<Logo[]>('/api/settings/logos/');
+  return data;
+}
+
+export async function uploadLogo(file: File): Promise<Logo> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await api.post<Logo>('/api/settings/logos/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export async function deleteLogo(logoId: string): Promise<void> {
+  await api.delete(`/api/settings/logos/${logoId}/`);
 }
 
 export default api;

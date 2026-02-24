@@ -4,6 +4,14 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useSettingsStore } from '@/lib/stores';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { VALIDATION } from '@/lib/constants';
 import { SubtitlePreview } from '@/components/SubtitlePreview';
 import { Type, Upload, Loader2 } from 'lucide-react';
@@ -15,8 +23,17 @@ interface SubtitleSettingsFormProps {
   font: string;
   /** Current subtitle color hex string. */
   color: string;
+  /** Current subtitle font size in pixels. */
+  fontSize: number;
+  /** Current subtitle position. */
+  position: 'bottom' | 'center' | 'top';
   /** Called with partial settings update to persist changes. */
-  onChange: (data: { subtitle_font?: string; subtitle_color?: string }) => Promise<void>;
+  onChange: (data: {
+    subtitle_font?: string;
+    subtitle_color?: string;
+    subtitle_font_size?: number;
+    subtitle_position?: string;
+  }) => Promise<void>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -53,6 +70,8 @@ function validateFontFile(file: File): string | null {
 export function SubtitleSettingsForm({
   font,
   color,
+  fontSize,
+  position,
   onChange,
 }: SubtitleSettingsFormProps) {
   const { uploadFont, isFontUploading } = useSettingsStore();
@@ -66,15 +85,25 @@ export function SubtitleSettingsForm({
   const [colorError, setColorError] = useState<string | null>(null);
   const colorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Font Size state ──
+  const [localFontSize, setLocalFontSize] = useState(fontSize);
+  const fontSizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Sync local color when prop changes (e.g. after fetch)
   useEffect(() => {
     setLocalColor(color);
   }, [color]);
 
-  // Cleanup debounce timer on unmount
+  // Sync local font size when prop changes
+  useEffect(() => {
+    setLocalFontSize(fontSize);
+  }, [fontSize]);
+
+  // Cleanup debounce timers on unmount
   useEffect(() => {
     return () => {
       if (colorTimerRef.current) clearTimeout(colorTimerRef.current);
+      if (fontSizeTimerRef.current) clearTimeout(fontSizeTimerRef.current);
     };
   }, []);
 
@@ -232,6 +261,54 @@ export function SubtitleSettingsForm({
         {colorError && (
           <p className="text-xs text-destructive mt-1">{colorError}</p>
         )}
+      </div>
+
+      {/* ── Font Size Slider ── */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-muted-foreground font-medium">
+            Font Size
+          </label>
+          <span className="text-xs font-medium tabular-nums">
+            {localFontSize}px
+          </span>
+        </div>
+        <Slider
+          value={[localFontSize]}
+          min={VALIDATION.SUBTITLE_FONT_SIZE_MIN}
+          max={VALIDATION.SUBTITLE_FONT_SIZE_MAX}
+          step={2}
+          onValueChange={(values) => {
+            const value = values[0];
+            setLocalFontSize(value);
+            if (fontSizeTimerRef.current) clearTimeout(fontSizeTimerRef.current);
+            fontSizeTimerRef.current = setTimeout(() => {
+              onChange({ subtitle_font_size: value });
+            }, 300);
+          }}
+        />
+      </div>
+
+      {/* ── Position Selector ── */}
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground font-medium">
+          Position
+        </label>
+        <Select
+          value={position}
+          onValueChange={(value) => {
+            onChange({ subtitle_position: value });
+          }}
+        >
+          <SelectTrigger className="h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="bottom">Bottom</SelectItem>
+            <SelectItem value="center">Center</SelectItem>
+            <SelectItem value="top">Top</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ── Subtitle Preview (Task 05.03.04) ── */}

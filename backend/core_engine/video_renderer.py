@@ -33,6 +33,7 @@ try:
     from moviepy.editor import (  # type: ignore[import-untyped]
         AudioFileClip,
         CompositeVideoClip,
+        ImageClip,
         concatenate_videoclips,
         vfx,
     )
@@ -42,6 +43,7 @@ except ImportError:
     from moviepy import (  # type: ignore[import-untyped]
         AudioFileClip,
         CompositeVideoClip,
+        ImageClip,
         concatenate_videoclips,
         vfx,
     )
@@ -370,10 +372,9 @@ def render_project(
     res_width = project.resolution_width
     res_height = project.resolution_height
     fps = project.framerate
-    logger.info("Resolution: %dx%d @ %d fps", res_width, res_height, fps)
 
     # ------------------------------------------------------------------
-    # C2. Read zoom intensity from GlobalSettings
+    # C2. Read zoom intensity and overrides from GlobalSettings
     # ------------------------------------------------------------------
     _DEFAULT_ZOOM = 1.3
     zoom_intensity = _DEFAULT_ZOOM
@@ -383,6 +384,25 @@ def render_project(
             gs = GlobalSettings.objects.first()
 
             if gs is not None:
+                # ── Override resolution from GlobalSettings if set ──
+                gs_width = getattr(gs, "render_width", None)
+                gs_height = getattr(gs, "render_height", None)
+                if gs_width and gs_height and gs_width > 0 and gs_height > 0:
+                    res_width = int(gs_width)
+                    res_height = int(gs_height)
+                    logger.info(
+                        "Resolution overridden by GlobalSettings: %dx%d",
+                        res_width, res_height,
+                    )
+
+                # ── Override FPS from GlobalSettings if set ──
+                gs_fps = getattr(gs, "render_fps", None)
+                if gs_fps and gs_fps > 0:
+                    fps = int(gs_fps)
+                    logger.info(
+                        "FPS overridden by GlobalSettings: %d", fps,
+                    )
+
                 val = getattr(gs, "zoom_intensity", None)
 
                 if val is None:
@@ -427,6 +447,7 @@ def render_project(
             )
 
     logger.info("Zoom intensity for render: %.2f", zoom_intensity)
+    logger.info("Resolution: %dx%d @ %d fps", res_width, res_height, fps)
 
     # ------------------------------------------------------------------
     # C3. Read subtitle settings from GlobalSettings
@@ -480,6 +501,78 @@ def render_project(
     logger.info(
         "Inter-segment silence: %.2fs", inter_segment_silence,
     )
+
+    # ------------------------------------------------------------------
+    # C4. Read logo watermark settings from GlobalSettings
+    # ------------------------------------------------------------------
+    logo_enabled = False
+    logo_clip = None  # Will be set if logo is enabled and valid
+
+    if GlobalSettings is not None:
+        try:
+            gs_logo = GlobalSettings.objects.first()
+            if gs_logo is not None and getattr(gs_logo, "logo_enabled", False):
+                active_logo = getattr(gs_logo, "active_logo", None)
+                if active_logo is not None and active_logo.file:
+                    logo_file_path = active_logo.file.path
+                    if os.path.isfile(logo_file_path):
+                        logo_enabled = True
+                        logo_scale = float(getattr(gs_logo, "logo_scale", 0.15))
+                        logo_position_str = getattr(gs_logo, "logo_position", "bottom-right")
+                        logo_opacity = float(getattr(gs_logo, "logo_opacity", 1.0))
+                        logo_margin_px = int(getattr(gs_logo, "logo_margin", 20))
+
+                        # Compute logo size based on resolution and scale
+                        logo_target_w = int(res_width * logo_scale)
+
+                        from PIL import Image as PILImage
+                        pil_logo = PILImage.open(logo_file_path).convert("RGBA")
+                        logo_aspect = pil_logo.width / pil_logo.height
+                        logo_target_h = int(logo_target_w / logo_aspect)
+                        pil_logo = pil_logo.resize(
+                            (logo_target_w, logo_target_h),
+                            PILImage.LANCZOS,
+                        )
+
+                        # Compute position
+                        if logo_position_str == "top-left":
+                            logo_pos = (logo_margin_px, logo_margin_px)
+                        elif logo_position_str == "top-right":
+                            logo_pos = (res_width - logo_target_w - logo_margin_px, logo_margin_px)
+                        elif logo_position_str == "bottom-left":
+                            logo_pos = (logo_margin_px, res_height - logo_target_h - logo_margin_px)
+                        else:  # bottom-right
+                            logo_pos = (res_width - logo_target_w - logo_margin_px, res_height - logo_target_h - logo_margin_px)
+
+                        import numpy as np  # noqa: F811 — already imported at module level
+                        logo_arr = np.array(pil_logo)
+                        # Separate RGB and alpha
+                        logo_rgb = logo_arr[:, :, :3]
+                        logo_alpha = logo_arr[:, :, 3].astype(float) / 255.0
+                        if logo_opacity < 1.0:
+                            logo_alpha = logo_alpha * logo_opacity
+
+                        logo_clip = (
+                            ImageClip(logo_rgb)
+                            .with_mask(ImageClip(logo_alpha, is_mask=True))
+                            .with_position(logo_pos)
+                        )
+
+                        logger.info(
+                            "Logo watermark enabled: %s, size: %dx%d, "
+                            "position: %s (%s), opacity: %.2f",
+                            os.path.basename(logo_file_path),
+                            logo_target_w, logo_target_h,
+                            logo_position_str, logo_pos, logo_opacity,
+                        )
+                    else:
+                        logger.warning(
+                            "Logo file not found: %s", logo_file_path,
+                        )
+        except Exception as logo_err:
+            logger.warning(
+                "Could not read logo settings: %s. Logo disabled.", logo_err,
+            )
 
     # Warnings accumulator for the result dict
     warnings: list[str] = []
@@ -686,6 +779,23 @@ def render_project(
                     "  No text_content for %s — skipping subtitles.",
                     seg_label,
                 )
+
+            # Step 3c: Composite logo watermark if enabled
+            if logo_enabled and logo_clip is not None:
+                try:
+                    seg_logo = logo_clip.with_duration(visual_duration)
+                    ken_burns_clip = CompositeVideoClip(
+                        [ken_burns_clip, seg_logo],
+                        size=(res_width, res_height),
+                    ).with_duration(visual_duration)
+                    logger.debug(
+                        "  Logo watermark composited for %s", seg_label,
+                    )
+                except Exception as logo_exc:
+                    logger.warning(
+                        "  Logo compositing failed for %s: %s",
+                        seg_label, logo_exc,
+                    )
 
             # Step 4: Pair Ken Burns clip with audio
             # The Ken Burns clip was already created with visual_duration

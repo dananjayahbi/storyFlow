@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { VoiceSelector } from '@/components/VoiceSelector';
 import { SubtitleSettingsForm } from '@/components/SubtitleSettingsForm';
 import { RenderSettingsForm } from '@/components/RenderSettingsForm';
+import { LogoWatermarkModal } from '@/components/LogoWatermarkModal';
 import {
   Settings,
   ChevronDown,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   Timer,
   Captions,
+  Stamp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -52,6 +54,9 @@ export function GlobalSettingsPanel() {
   // Local slider value for responsive UI (updated immediately, saved after debounce)
   const [localSpeed, setLocalSpeed] = useState<number | null>(null);
   const [localSilence, setLocalSilence] = useState<number | null>(null);
+
+  // Logo watermark modal state
+  const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
 
   // Fetch settings on mount
   useEffect(() => {
@@ -276,7 +281,62 @@ export function GlobalSettingsPanel() {
           <section>
             <RenderSettingsForm
               zoomIntensity={globalSettings.zoom_intensity}
+              renderWidth={globalSettings.render_width ?? 1920}
+              renderHeight={globalSettings.render_height ?? 1080}
+              renderFps={globalSettings.render_fps ?? 30}
               onChange={handleSettingChange}
+            />
+          </section>
+
+          <Separator />
+
+          {/* ── Logo Watermark Section ── */}
+          <section>
+            <div className="flex items-center gap-1.5 mb-3">
+              <Stamp className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex-1">
+                Watermark
+              </h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs text-muted-foreground">
+                  {globalSettings.logo_enabled ? 'On' : 'Off'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={globalSettings.logo_enabled ?? false}
+                  onChange={(e) =>
+                    handleSettingChange({ logo_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-muted-foreground accent-primary cursor-pointer"
+                />
+              </label>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => setIsLogoModalOpen(true)}
+            >
+              <Stamp className="h-4 w-4 mr-2" />
+              Configure Watermark
+            </Button>
+
+            {globalSettings.logo_enabled && globalSettings.active_logo && (
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                Logo will be placed at{' '}
+                <span className="font-medium">
+                  {globalSettings.logo_position?.replace('-', ' ') ?? 'bottom right'}
+                </span>{' '}
+                with {Math.round((globalSettings.logo_opacity ?? 1) * 100)}% opacity
+              </p>
+            )}
+
+            <LogoWatermarkModal
+              open={isLogoModalOpen}
+              onOpenChange={setIsLogoModalOpen}
+              renderWidth={globalSettings.render_width ?? 1920}
+              renderHeight={globalSettings.render_height ?? 1080}
             />
           </section>
 
@@ -309,6 +369,8 @@ export function GlobalSettingsPanel() {
               <SubtitleSettingsForm
                 font={globalSettings.subtitle_font}
                 color={globalSettings.subtitle_color}
+                fontSize={globalSettings.subtitle_font_size ?? 48}
+                position={globalSettings.subtitle_position ?? 'bottom'}
                 onChange={handleSettingChange}
               />
             )}

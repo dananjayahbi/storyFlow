@@ -28,8 +28,26 @@ export interface GlobalSettings {
   zoom_intensity: number;
   subtitle_font: string;
   subtitle_color: string;
+  subtitle_font_size: number;
+  subtitle_position: 'bottom' | 'center' | 'top';
   inter_segment_silence: number;
   subtitles_enabled: boolean;
+  render_width: number;
+  render_height: number;
+  render_fps: number;
+  logo_enabled: boolean;
+  active_logo: string | null;  // Logo UUID or null
+  logo_scale: number;
+  logo_position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  logo_opacity: number;
+  logo_margin: number;
+}
+
+export interface Logo {
+  id: string;
+  name: string;
+  file: string;      // URL path to the logo image
+  uploaded_at: string;
 }
 
 export interface ProjectDetail extends Omit<Project, 'segment_count'> {

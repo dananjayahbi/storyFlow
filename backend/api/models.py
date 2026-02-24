@@ -67,6 +67,31 @@ SUBTITLE_POSITION_CHOICES = [
     ('top', 'Top'),
 ]
 
+LOGO_POSITION_CHOICES = [
+    ('top-left', 'Top Left'),
+    ('top-right', 'Top Right'),
+    ('bottom-left', 'Bottom Left'),
+    ('bottom-right', 'Bottom Right'),
+]
+
+
+def logo_upload_path(instance, filename):
+    return f'logos/{filename}'
+
+
+class Logo(models.Model):
+    """An uploaded logo image that can be burned into rendered videos."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    file = models.ImageField(upload_to=logo_upload_path)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
 
 class GlobalSettings(models.Model):
     """Singleton application-wide configuration record (pk always == 1)."""
@@ -108,6 +133,21 @@ class GlobalSettings(models.Model):
     custom_font_file = models.FileField(
         upload_to='fonts/', null=True, blank=True,
     )
+
+    # ── Logo watermark ──
+    logo_enabled = models.BooleanField(default=False)
+    active_logo = models.ForeignKey(
+        'Logo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='active_in_settings',
+    )
+    logo_scale = models.FloatField(default=0.15)       # 0.05–0.50
+    logo_position = models.CharField(
+        max_length=20,
+        choices=LOGO_POSITION_CHOICES,
+        default='bottom-right',
+    )
+    logo_opacity = models.FloatField(default=1.0)      # 0.0–1.0
+    logo_margin = models.IntegerField(default=20)      # pixels
 
     # ── Timestamps ──
     created_at = models.DateTimeField(auto_now_add=True, null=True)

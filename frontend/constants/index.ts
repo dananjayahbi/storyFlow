@@ -66,6 +66,8 @@ export interface ResolutionPreset {
   label: string;
   width: number;
   height: number;
+  aspect: string;
+  category: 'landscape' | 'portrait' | 'square';
 }
 
 export const VALIDATION = {
@@ -86,9 +88,22 @@ export const VALIDATION = {
 
   /** Common resolution presets. */
   RESOLUTION_PRESETS: [
-    { label: '720p',  width: 1280, height: 720 },
-    { label: '1080p', width: 1920, height: 1080 },
-    { label: '4K',    width: 3840, height: 2160 },
+    // 16:9 Landscape — YouTube, standard widescreen
+    { label: '720p',          width: 1280, height: 720,  aspect: '16:9', category: 'landscape' },
+    { label: '1080p',         width: 1920, height: 1080, aspect: '16:9', category: 'landscape' },
+    { label: '4K',            width: 3840, height: 2160, aspect: '16:9', category: 'landscape' },
+    // 9:16 Portrait — TikTok, Reels, Shorts
+    { label: '720p Portrait', width: 720,  height: 1280, aspect: '9:16', category: 'portrait' },
+    { label: '1080p Portrait',width: 1080, height: 1920, aspect: '9:16', category: 'portrait' },
+    // 1:1 Square — Instagram / Facebook post
+    { label: '720p Square',   width: 720,  height: 720,  aspect: '1:1',  category: 'square' },
+    { label: '1080p Square',  width: 1080, height: 1080, aspect: '1:1',  category: 'square' },
+    // 4:5 Portrait — Instagram / Facebook feed
+    { label: '1080 × 1350',   width: 1080, height: 1350, aspect: '4:5',  category: 'portrait' },
+    // 4:3 Landscape — Classic
+    { label: '1440 × 1080',   width: 1440, height: 1080, aspect: '4:3',  category: 'landscape' },
+    // 3:4 Portrait
+    { label: '1080 × 1440',   width: 1080, height: 1440, aspect: '3:4',  category: 'portrait' },
   ] as const satisfies readonly ResolutionPreset[],
 
   /** Maximum font file size in bytes (10 MB). */

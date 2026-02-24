@@ -12,8 +12,8 @@ from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Project, Segment, GlobalSettings, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
-from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer
+from .models import Project, Segment, GlobalSettings, Logo, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
+from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer, LogoSerializer
 from .parsers import ParseError
 from .tasks import get_task_manager, render_task_function
 from .validators import validate_image_upload, validate_project_for_render, validate_font_upload
@@ -1297,3 +1297,89 @@ def gallery_download_view(request, project_id):
     response['Content-Disposition'] = f'attachment; filename="{safe_title}.mp4"'
     response['Content-Length'] = str(os.path.getsize(video_path))
     return response
+
+
+# ===================================================================
+# Logo Management Endpoints
+# ===================================================================
+
+@api_view(['GET', 'POST'])
+def logos_view(request):
+    """List all logos (GET) or upload a new logo (POST).
+
+    GET  /api/settings/logos/
+    POST /api/settings/logos/  (multipart with 'file' field)
+    """
+    if request.method == 'GET':
+        logos = Logo.objects.all()
+        serializer = LogoSerializer(logos, many=True)
+        return Response(serializer.data)
+
+    # POST — upload
+    logo_file = request.FILES.get('file')
+    if not logo_file:
+        return Response(
+            {'error': 'No file provided.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate extension
+    ext = os.path.splitext(logo_file.name)[1].lower()
+    allowed_exts = {'.png', '.webp', '.jpg', '.jpeg'}
+    if ext not in allowed_exts:
+        return Response(
+            {'error': f'Only {", ".join(sorted(allowed_exts))} files are allowed.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate size (5 MB max)
+    if logo_file.size > 5 * 1024 * 1024:
+        return Response(
+            {'error': 'Logo file must be under 5 MB.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Ensure logos directory exists
+    logos_dir = os.path.join(settings.MEDIA_ROOT, 'logos')
+    os.makedirs(logos_dir, exist_ok=True)
+
+    # Derive name from filename
+    name = os.path.splitext(os.path.basename(logo_file.name))[0]
+
+    logo = Logo.objects.create(name=name, file=logo_file)
+    serializer = LogoSerializer(logo)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+def logo_detail_view(request, logo_id):
+    """Delete a logo by ID.
+
+    DELETE /api/settings/logos/<logo_id>/
+    """
+    try:
+        logo = Logo.objects.get(id=logo_id)
+    except Logo.DoesNotExist:
+        return Response(
+            {'error': 'Logo not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # If this logo is the active logo, null it out
+    gs = GlobalSettings.load()
+    if gs.active_logo_id == logo.id:
+        gs.active_logo = None
+        gs.logo_enabled = False
+        gs.save()
+
+    # Delete file from disk
+    if logo.file:
+        try:
+            file_path = logo.file.path
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+    logo.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
