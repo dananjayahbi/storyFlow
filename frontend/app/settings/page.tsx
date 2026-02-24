@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Volume2, Loader2, Play, Square } from 'lucide-react';
+import { Volume2, Loader2, Play, Square, Type, Save } from 'lucide-react';
+import { useSettingsStore } from '@/store/settingsStore';
 
 export default function SettingsPage() {
   // TTS Tester state
@@ -20,6 +21,28 @@ export default function SettingsPage() {
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [voices, setVoices] = useState<Voice[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Subtitle settings state
+  const { settings, fetchSettings, saveSettings } = useSettingsStore();
+  const [subtitleFontSize, setSubtitleFontSize] = useState(48);
+  const [subtitlePosition, setSubtitlePosition] = useState<'bottom' | 'center' | 'top'>('bottom');
+  const [subtitleFontColor, setSubtitleFontColor] = useState('#FFFFFF');
+  const [isSavingSubtitles, setIsSavingSubtitles] = useState(false);
+  const [subtitleSaveMsg, setSubtitleSaveMsg] = useState<string | null>(null);
+
+  // Fetch settings on mount
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
+
+  // Sync local state when settings load
+  useEffect(() => {
+    if (settings) {
+      setSubtitleFontSize(settings.subtitle_font_size ?? 48);
+      setSubtitlePosition(settings.subtitle_position ?? 'bottom');
+      setSubtitleFontColor(settings.subtitle_font_color ?? '#FFFFFF');
+    }
+  }, [settings]);
 
   // Load available voices
   useEffect(() => {
@@ -250,6 +273,129 @@ export default function SettingsPage() {
               {ttsError}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Subtitle Settings Card */}
+      <Card className="mt-6">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+              <Type className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">Subtitle Settings</CardTitle>
+              <CardDescription>
+                Adjust subtitle appearance for rendered videos.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Font Size */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Font Size</label>
+              <span className="text-sm font-medium tabular-nums text-muted-foreground">
+                {subtitleFontSize}px
+              </span>
+            </div>
+            <Slider
+              value={[subtitleFontSize]}
+              min={12}
+              max={120}
+              step={1}
+              onValueChange={(values) => setSubtitleFontSize(values[0])}
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">12px</span>
+              <span className="text-xs text-muted-foreground">120px</span>
+            </div>
+          </div>
+
+          {/* Position */}
+          <div className="space-y-2">
+            <label htmlFor="subtitle-position" className="text-sm font-medium">
+              Position
+            </label>
+            <select
+              id="subtitle-position"
+              value={subtitlePosition}
+              onChange={(e) => setSubtitlePosition(e.target.value as 'bottom' | 'center' | 'top')}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="bottom">Bottom</option>
+              <option value="center">Center</option>
+              <option value="top">Top</option>
+            </select>
+          </div>
+
+          {/* Font Color */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Font Color</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={subtitleFontColor}
+                onChange={(e) => setSubtitleFontColor(e.target.value)}
+                className="h-9 w-12 rounded-md border border-input bg-background p-1 cursor-pointer"
+              />
+              <input
+                type="text"
+                value={subtitleFontColor}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (/^#[0-9A-Fa-f]{0,6}$/.test(val)) setSubtitleFontColor(val);
+                }}
+                maxLength={7}
+                className="flex h-9 w-28 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm font-mono transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Save */}
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={async () => {
+                setIsSavingSubtitles(true);
+                setSubtitleSaveMsg(null);
+                try {
+                  await saveSettings({
+                    subtitle_font_size: subtitleFontSize,
+                    subtitle_position: subtitlePosition,
+                    subtitle_font_color: subtitleFontColor,
+                  });
+                  setSubtitleSaveMsg('Saved successfully');
+                  setTimeout(() => setSubtitleSaveMsg(null), 3000);
+                } catch {
+                  setSubtitleSaveMsg('Failed to save');
+                } finally {
+                  setIsSavingSubtitles(false);
+                }
+              }}
+              disabled={isSavingSubtitles}
+            >
+              {isSavingSubtitles ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Subtitle Settings
+                </>
+              )}
+            </Button>
+
+            {subtitleSaveMsg && (
+              <span className={`text-sm ${subtitleSaveMsg.includes('Failed') ? 'text-destructive' : 'text-green-600'}`}>
+                {subtitleSaveMsg}
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

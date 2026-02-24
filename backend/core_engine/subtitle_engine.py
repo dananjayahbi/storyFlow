@@ -179,16 +179,18 @@ def calculate_subtitle_timing(
     if len(chunks) == 1:
         return [(0.0, total_duration)]
 
-    # ── Step 3: Count words per chunk ───────────────────────────────
-    word_counts = [len(chunk.split()) for chunk in chunks]
-    total_words = sum(word_counts)
+    # ── Step 3: Count characters per chunk (better speech-duration proxy) ──
+    # Character count more accurately models speech duration than word
+    # count because longer words take proportionally longer to speak.
+    char_counts = [max(len(chunk), 1) for chunk in chunks]
+    total_chars = sum(char_counts)
 
-    if total_words == 0:
+    if total_chars == 0:
         return []
 
     # ── Step 4: Proportional durations ──────────────────────────────
     durations = [
-        (wc / total_words) * total_duration for wc in word_counts
+        (cc / total_chars) * total_duration for cc in char_counts
     ]
 
     # ── Step 5: Enforce minimum duration ────────────────────────────
@@ -221,12 +223,14 @@ def generate_subtitle_clips(
     resolution: tuple[int, int],
     font: str,
     color: str,
+    font_size: int | None = None,
+    position: str = "bottom",
 ) -> list[TextClip]:
     """Create styled ``TextClip`` objects for each subtitle chunk.
 
     Each clip is styled in the "YouTube-style" subtitle look: white
-    text with black stroke, bold font, positioned at bottom-centre,
-    with proportional font sizing based on video resolution.
+    text with black stroke, bold font, positioned based on *position*
+    setting, with proportional font sizing based on video resolution.
 
     Parameters
     ----------
@@ -240,6 +244,12 @@ def generate_subtitle_clips(
         Path to a ``.ttf`` font file.
     color:
         Text colour (e.g. ``"#FFFFFF"``).
+    font_size:
+        Explicit font size in pixels.  When ``None`` or ``<= 0``,
+        falls back to ``resolution_height / FONT_SIZE_DIVISOR``.
+    position:
+        Vertical anchor — ``"bottom"`` (default), ``"center"``, or
+        ``"top"``.
 
     Returns
     -------
@@ -252,18 +262,28 @@ def generate_subtitle_clips(
     width, height = resolution
 
     # ── Step 3: Compute styling parameters ──────────────────────────
-    font_size = int(height / FONT_SIZE_DIVISOR)
+    effective_font_size = (
+        font_size if font_size and font_size > 0
+        else int(height / FONT_SIZE_DIVISOR)
+    )
     text_width = int(width * TEXT_WIDTH_RATIO)
-    y_position = int(height * SUBTITLE_Y_RATIO)
 
     # ── Step 4–7: Create TextClips ──────────────────────────────────
     clips: list[TextClip] = []
 
+    # Vertical padding (px per side) added to every subtitle frame so
+    # that the stroke outline is never cropped at the top or bottom.
+    # ``method="caption"`` draws text starting at y=0 inside the clip
+    # image, so the top-side stroke always gets cut unless we pad the
+    # raw pixel array after rendering.
+    pad_px = max(DEFAULT_STROKE_WIDTH * 4, effective_font_size // 4, 12)
+
     for chunk, (start_time, duration) in zip(chunks, timings):
         try:
-            clip = TextClip(
+            # Render the text with auto-calculated height
+            raw_clip = TextClip(
                 text=chunk,
-                font_size=font_size,
+                font_size=effective_font_size,
                 font=font,
                 color=color,
                 stroke_color=DEFAULT_STROKE_COLOR,
@@ -273,10 +293,57 @@ def generate_subtitle_clips(
                 text_align="center",
             )
 
+            # ── Pad the raw image with transparent rows so the
+            #    stroke is never clipped at top or bottom. ────────
+            import numpy as np
+            from moviepy import ImageClip
+
+            frame_rgb = raw_clip.get_frame(0)          # (H, W, 3)
+            h_orig, w_orig = frame_rgb.shape[:2]
+
+            # Build top & bottom padding strips (black = transparent
+            # once the mask is applied).
+            top_pad = np.zeros((pad_px, w_orig, 3), dtype=frame_rgb.dtype)
+            bot_pad = np.zeros((pad_px, w_orig, 3), dtype=frame_rgb.dtype)
+            padded_rgb = np.vstack([top_pad, frame_rgb, bot_pad])
+
+            # Pad the alpha mask in exactly the same way
+            if raw_clip.mask is not None:
+                mask_frame = raw_clip.mask.get_frame(0)  # (H, W)
+                if mask_frame.ndim == 3:
+                    mask_frame = mask_frame[:, :, 0]
+                top_mask = np.zeros((pad_px, w_orig), dtype=mask_frame.dtype)
+                bot_mask = np.zeros((pad_px, w_orig), dtype=mask_frame.dtype)
+                padded_mask = np.vstack([top_mask, mask_frame, bot_mask])
+                mask_clip = ImageClip(padded_mask, is_mask=True)
+            else:
+                mask_clip = None
+
+            raw_clip.close()
+
+            # Create the final padded clip
+            clip = ImageClip(padded_rgb)
+            if mask_clip is not None:
+                clip = clip.with_mask(mask_clip)
+
+            # ── Position: anchor from bottom/center/top ─────────────
+            clip_height = padded_rgb.shape[0]  # includes padding
+
+            if position == "top":
+                y_pos = int(height * 0.05)  # 5 % margin from top
+            elif position == "center":
+                y_pos = int((height - clip_height) / 2)
+            else:  # "bottom" (default)
+                bottom_margin = int(height * 0.05)  # 5 % margin
+                y_pos = height - clip_height - bottom_margin
+
+            # Safety: clamp to frame bounds
+            y_pos = max(y_pos, 0)
+
             # Set position and timing (MoviePy 2.x immutable API)
             clip = (
                 clip
-                .with_position(("center", y_position))
+                .with_position(("center", y_pos))
                 .with_start(start_time)
                 .with_duration(duration)
             )
@@ -284,11 +351,16 @@ def generate_subtitle_clips(
             clips.append(clip)
 
             logger.debug(
-                "Subtitle clip: '%.30s%s' @ %.2fs for %.2fs",
+                "Subtitle clip: '%.30s%s' @ %.2fs for %.2fs  "
+                "(font=%dpx, y=%d, pos=%s, pad=%dpx)",
                 chunk,
                 "…" if len(chunk) > 30 else "",
                 start_time,
                 duration,
+                effective_font_size,
+                y_pos,
+                position,
+                pad_px,
             )
 
         except Exception as exc:
@@ -310,6 +382,8 @@ def create_subtitles_for_segment(
     resolution: tuple[int, int],
     font: str,
     color: str,
+    font_size: int | None = None,
+    position: str = "bottom",
 ) -> list[TextClip]:
     """Generate subtitle clips for a single video segment.
 
@@ -333,6 +407,10 @@ def create_subtitles_for_segment(
         Font family name.
     color:
         Text colour.
+    font_size:
+        Explicit font size in pixels (``None`` → auto from resolution).
+    position:
+        Vertical position — ``"bottom"``, ``"center"``, or ``"top"``.
 
     Returns
     -------
@@ -351,11 +429,16 @@ def create_subtitles_for_segment(
     timings = calculate_subtitle_timing(chunks, audio_duration)
 
     # Step 3 — clips
-    clips = generate_subtitle_clips(chunks, timings, resolution, font, color)
+    clips = generate_subtitle_clips(
+        chunks, timings, resolution, font, color,
+        font_size=font_size, position=position,
+    )
 
     logger.info(
-        "Created %d subtitle clips (%.1f s total).",
+        "Created %d subtitle clips (%.1f s total, font_size=%s, pos=%s).",
         len(clips),
         audio_duration,
+        font_size or "auto",
+        position,
     )
     return clips

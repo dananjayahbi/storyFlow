@@ -6,11 +6,14 @@ import { useProjectStore } from "@/lib/stores";
 import { getRenderStatus } from "@/lib/api";
 
 /**
- * RenderProgress — Real-time progress bar during video rendering.
+ * RenderProgress — Multi-phase progress display during video rendering.
+ *
+ * Shows two separate progress sections:
+ *   1. **Segment processing** (0–80 % overall) — Ken Burns + subtitle compositing
+ *   2. **Export / encoding** (80–100 % overall) — video frames → audio → finalize
  *
  * Polls GET /api/projects/{id}/status/ every 3 seconds while the
- * project is in the PROCESSING state.  Automatically stops when
- * rendering completes or fails and disappears from the UI.
+ * project is in the PROCESSING state.
  */
 export default function RenderProgress() {
   const {
@@ -23,17 +26,13 @@ export default function RenderProgress() {
 
   // ── Polling effect ──
   useEffect(() => {
-    // Only poll while rendering
     if (renderStatus !== "rendering" || !project) return;
 
     const poll = async () => {
       try {
         const status = await getRenderStatus(project.id);
-
-        // Update Zustand store with latest progress
         useProjectStore.setState({ renderProgress: status.progress });
 
-        // Terminal states — stop polling
         if (status.status === "COMPLETED") {
           useProjectStore.setState({
             renderStatus: "completed",
@@ -62,7 +61,6 @@ export default function RenderProgress() {
 
     intervalRef.current = setInterval(poll, 3000);
 
-    // Cleanup on unmount or when renderStatus changes
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -71,10 +69,8 @@ export default function RenderProgress() {
     };
   }, [renderStatus, project]);
 
-  // ── Don't render when not PROCESSING ──
   if (renderStatus !== "rendering") return null;
 
-  // ── Starting state — before first poll response ──
   if (!renderProgress) {
     return (
       <div className="space-y-2 py-3">
@@ -84,17 +80,60 @@ export default function RenderProgress() {
     );
   }
 
-  // ── Active progress ──
+  const overallPct = renderProgress.percentage;
+  const isExportPhase = overallPct >= 80;
+
+  // Phase 1: Segment processing (overall 0–80 %) → mapped to 0–100 %
+  const segmentPct = isExportPhase ? 100 : Math.round((overallPct / 80) * 100);
+
+  // Phase 2: Export / encoding (overall 80–100 %) → mapped to 0–100 %
+  const exportPct = isExportPhase
+    ? Math.round(((overallPct - 80) / 20) * 100)
+    : 0;
+
   return (
-    <div className="space-y-2 py-3">
-      <Progress value={renderProgress.percentage} />
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>
-          Segment {renderProgress.current_segment} of{" "}
-          {renderProgress.total_segments} ({renderProgress.percentage}%)
-        </span>
-        <span className="text-xs">{renderProgress.current_phase}</span>
+    <div className="space-y-4 py-3">
+      {/* Phase 1 — Segment Processing */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-medium">
+            {isExportPhase ? "✓ Segments processed" : "Processing segments…"}
+          </span>
+          <span className="text-muted-foreground tabular-nums">
+            {renderProgress.current_segment}/{renderProgress.total_segments}
+            {!isExportPhase && ` (${segmentPct}%)`}
+          </span>
+        </div>
+        <Progress value={segmentPct} />
+        {!isExportPhase && renderProgress.current_phase && (
+          <p className="text-xs text-muted-foreground">
+            {renderProgress.current_phase}
+          </p>
+        )}
       </div>
+
+      {/* Phase 2 — Export / Encoding */}
+      {isExportPhase && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">
+              {exportPct >= 100 ? "✓ Export complete" : "Exporting video…"}
+            </span>
+            <span className="text-muted-foreground tabular-nums">
+              {exportPct}%
+            </span>
+          </div>
+          <Progress value={exportPct} />
+          <p className="text-xs text-muted-foreground">
+            {renderProgress.current_phase}
+          </p>
+        </div>
+      )}
+
+      {/* Overall percentage */}
+      <p className="text-xs text-muted-foreground text-right">
+        Overall: {overallPct}%
+      </p>
     </div>
   );
 }

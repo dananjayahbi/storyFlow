@@ -113,9 +113,18 @@ class _ExportProgressLogger(proglog.ProgressBarLogger):
         self._total_segments = total_segments
         self._base_pct = base_percentage  # percentage at start of export
         self._last_reported_pct = base_percentage
+        # Track bars in order of appearance to detect phase transitions
+        self._seen_bars: list[str] = []
 
     def bars_callback(self, bar, attr, value, old_value=None):
-        """Called by proglog whenever a progress bar attribute changes."""
+        """Called by proglog whenever a progress bar attribute changes.
+
+        Splits the export range into two sub-phases:
+          • First progress bar  (video frames) → base_pct … 93 %
+          • Second progress bar (audio chunks)  → 93 … 98 %
+        The remaining 98 → 100 % is reported after ``write_videofile``
+        returns (file verification step in ``render_project``).
+        """
         if self._on_progress is None:
             return
         if attr != "index":
@@ -129,12 +138,29 @@ class _ExportProgressLogger(proglog.ProgressBarLogger):
         if total <= 0:
             return
 
-        # Map frame index → percentage in [base_pct .. 99]
-        # Cap at 99% during export; the final 100% is only reported by the
-        # task function after the export is confirmed successful.
+        # Record the bar name the first time we see it
+        if bar not in self._seen_bars:
+            self._seen_bars.append(bar)
+
+        bar_index = self._seen_bars.index(bar)
         fraction = min(value / total, 1.0)
-        pct = int(self._base_pct + fraction * (99 - self._base_pct))
-        pct = min(pct, 99)
+
+        # Map fraction to percentage depending on phase
+        if bar_index == 0:
+            # First bar — video frame encoding: base_pct → 93 %
+            pct = int(self._base_pct + fraction * (93 - self._base_pct))
+            pct = min(pct, 93)
+            phase_msg = f"Encoding video frames… {pct}%"
+        elif bar_index == 1:
+            # Second bar — audio encoding: 93 → 98 %
+            pct = int(93 + fraction * 5)
+            pct = min(pct, 98)
+            phase_msg = f"Encoding audio track… {pct}%"
+        else:
+            # Any additional bars: 98 → 99 %
+            pct = int(98 + fraction * 1)
+            pct = min(pct, 99)
+            phase_msg = f"Finalizing… {pct}%"
 
         # Throttle: only report when percentage actually advances
         if pct <= self._last_reported_pct:
@@ -146,7 +172,7 @@ class _ExportProgressLogger(proglog.ProgressBarLogger):
         self._on_progress(
             pct,
             100,
-            f"Exporting MP4… {pct}%",
+            phase_msg,
         )
 
 
@@ -407,6 +433,8 @@ def render_project(
     # ------------------------------------------------------------------
     subtitle_font = None
     subtitle_color = "#FFFFFF"
+    subtitle_font_size = None  # None → auto-compute from resolution
+    subtitle_position = "bottom"
     subtitles_enabled = True
     inter_segment_silence = INTER_SEGMENT_SILENCE
 
@@ -420,6 +448,14 @@ def render_project(
                 raw_color = getattr(gs_sub, "subtitle_color", "") or ""
                 if raw_color.strip():
                     subtitle_color = raw_color.strip()
+                # Font size (None → auto)
+                raw_fs = getattr(gs_sub, "subtitle_font_size", None)
+                if raw_fs is not None and int(raw_fs) > 0:
+                    subtitle_font_size = int(raw_fs)
+                # Subtitle position
+                raw_pos = getattr(gs_sub, "subtitle_position", "") or ""
+                if raw_pos.strip() in ("top", "center", "bottom"):
+                    subtitle_position = raw_pos.strip()
                 # Subtitles toggle
                 subtitles_enabled = getattr(gs_sub, "subtitles_enabled", True)
                 # Inter-segment silence
@@ -437,28 +473,16 @@ def render_project(
     resolved_font = render_utils.get_font_path(subtitle_font)
     logger.info(
         "Subtitle settings — font: %s (resolved: %s), color: %s, "
-        "enabled: %s",
-        subtitle_font, resolved_font, subtitle_color, subtitles_enabled,
+        "size: %s, position: %s, enabled: %s",
+        subtitle_font, resolved_font, subtitle_color,
+        subtitle_font_size or "auto", subtitle_position, subtitles_enabled,
     )
     logger.info(
         "Inter-segment silence: %.2fs", inter_segment_silence,
     )
 
-    # ------------------------------------------------------------------
-    # C4. Check ImageMagick availability (once, before loop)
-    # ------------------------------------------------------------------
-    imagemagick_available = render_utils.check_imagemagick()
-
     # Warnings accumulator for the result dict
     warnings: list[str] = []
-
-    if not imagemagick_available:
-        im_warn = (
-            "ImageMagick not available — subtitle overlay will be skipped "
-            "for all segments."
-        )
-        logger.warning(im_warn)
-        warnings.append(im_warn)
 
     # ------------------------------------------------------------------
     # D. Query segments in order
@@ -584,11 +608,17 @@ def render_project(
                         audio_duration, segment.audio_duration, diff,
                     )
 
-            # Step 3: Create Ken Burns animated clip with error handling
+            # Step 3: Compute visual duration (image stays on screen
+            #         during the inter-segment silence gap too)
+            visual_duration = audio_duration
+            if inter_segment_silence > 0:
+                visual_duration = audio_duration + inter_segment_silence
+
+            # Step 3a: Create Ken Burns animated clip with error handling
             try:
                 ken_burns_clip = apply_ken_burns(
                     image_path=image_path,
-                    duration=audio_duration,
+                    duration=visual_duration,
                     resolution=(res_width, res_height),
                     zoom_intensity=zoom_intensity,
                     fps=fps,
@@ -605,13 +635,14 @@ def render_project(
                 ) from exc
 
             logger.debug(
-                "  Ken Burns clip created: %s (direction index %d)",
-                image_path, segment.sequence_index,
+                "  Ken Burns clip created: %s (direction index %d, "
+                "visual_duration=%.2fs)",
+                image_path, segment.sequence_index, visual_duration,
             )
 
             # Step 3b: Composite subtitles onto Ken Burns clip
             text_content = getattr(segment, "text_content", None) or ""
-            if subtitles_enabled and imagemagick_available and text_content.strip():
+            if subtitles_enabled and text_content.strip():
                 try:
                     subtitle_clips = create_subtitles_for_segment(
                         text_content=text_content,
@@ -619,14 +650,18 @@ def render_project(
                         resolution=(res_width, res_height),
                         font=resolved_font,
                         color=subtitle_color,
+                        font_size=subtitle_font_size,
+                        position=subtitle_position,
                     )
                     if subtitle_clips:
                         ken_burns_clip = CompositeVideoClip(
-                            [ken_burns_clip] + subtitle_clips
-                        ).with_duration(audio_duration)
+                            [ken_burns_clip] + subtitle_clips,
+                            size=(res_width, res_height),
+                        ).with_duration(visual_duration)
                         logger.debug(
-                            "  Subtitles composited: %d clip(s) for %s",
-                            len(subtitle_clips), seg_label,
+                            "  Subtitles composited: %d clip(s) for %s "
+                            "(visual_duration=%.2fs)",
+                            len(subtitle_clips), seg_label, visual_duration,
                         )
                     else:
                         logger.debug(
@@ -641,6 +676,11 @@ def render_project(
                     logger.warning(warn_msg)
                     warnings.append(warn_msg)
                     # Continue rendering without subtitles for this segment
+            elif not subtitles_enabled:
+                logger.debug(
+                    "  Subtitles disabled — skipping for %s.",
+                    seg_label,
+                )
             elif not text_content.strip():
                 logger.debug(
                     "  No text_content for %s — skipping subtitles.",
@@ -648,12 +688,10 @@ def render_project(
                 )
 
             # Step 4: Pair Ken Burns clip with audio
-            # Add a brief silence gap after each segment's audio so that
-            # narration from consecutive segments doesn't run together.
+            # The Ken Burns clip was already created with visual_duration
+            # (audio + silence), so the image stays on screen during the
+            # silence gap — no black frame.
             if inter_segment_silence > 0:
-                padded_duration = audio_duration + inter_segment_silence
-                ken_burns_clip = ken_burns_clip.with_duration(padded_duration)
-
                 try:
                     from moviepy import concatenate_audioclips  # type: ignore[import-untyped]
                 except ImportError:
@@ -668,10 +706,9 @@ def render_project(
 
                 logger.debug(
                     "  Audio padded: %.2fs + %.2fs silence = %.2fs",
-                    audio_duration, inter_segment_silence, padded_duration,
+                    audio_duration, inter_segment_silence, visual_duration,
                 )
             else:
-                ken_burns_clip = ken_burns_clip.with_duration(audio_duration)
                 ken_burns_clip = ken_burns_clip.with_audio(audio_clip)
                 logger.debug(
                     "  Audio set: %.2fs (no silence gap)", audio_duration,
@@ -683,7 +720,7 @@ def render_project(
             # Progress callback
             if on_progress:
                 subtitle_note = ""
-                if subtitles_enabled and imagemagick_available and text_content.strip():
+                if subtitles_enabled and text_content.strip():
                     subtitle_note = " + subtitles composited"
                 on_progress(
                     idx,
@@ -892,6 +929,9 @@ def render_project(
         # --------------------------------------------------------------
         # K. Verify output and capture duration
         # --------------------------------------------------------------
+        if on_progress:
+            on_progress(99, 100, "Verifying output file…")
+
         if not os.path.exists(output_path):
             raise RuntimeError(
                 f"Export completed but output file not found: {output_path}"
