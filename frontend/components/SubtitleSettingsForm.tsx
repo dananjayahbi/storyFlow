@@ -14,7 +14,8 @@ import {
 } from '@/components/ui/select';
 import { VALIDATION } from '@/lib/constants';
 import { SubtitlePreview } from '@/components/SubtitlePreview';
-import { Upload, Loader2 } from 'lucide-react';
+import { SubtitlePositionModal } from '@/components/SubtitlePositionModal';
+import { Upload, Loader2, Move } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Props ──────────────────────────────────────────────────────────
@@ -27,12 +28,19 @@ interface SubtitleSettingsFormProps {
   fontSize: number;
   /** Current subtitle position. */
   position: 'bottom' | 'center' | 'top';
+  /** Manual vertical position override (pixels from top at render res), or null. */
+  yPosition: number | null;
+  /** Render resolution width. */
+  renderWidth: number;
+  /** Render resolution height. */
+  renderHeight: number;
   /** Called with partial settings update to persist changes. */
   onChange: (data: {
     subtitle_font?: string;
     subtitle_color?: string;
     subtitle_font_size?: number;
     subtitle_position?: 'bottom' | 'center' | 'top';
+    subtitle_y_position?: number | null;
   }) => Promise<void>;
 }
 
@@ -72,6 +80,9 @@ export function SubtitleSettingsForm({
   color,
   fontSize,
   position,
+  yPosition,
+  renderWidth,
+  renderHeight,
   onChange,
 }: SubtitleSettingsFormProps) {
   const { uploadFont, isFontUploading } = useSettingsStore();
@@ -88,6 +99,9 @@ export function SubtitleSettingsForm({
   // ── Font Size state ──
   const [localFontSize, setLocalFontSize] = useState(fontSize);
   const fontSizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Position modal state ──
+  const [posModalOpen, setPosModalOpen] = useState(false);
 
   // Sync local color when prop changes (e.g. after fetch)
   useEffect(() => {
@@ -302,6 +316,39 @@ export function SubtitleSettingsForm({
           </SelectContent>
         </Select>
       </div>
+
+      {/* ── Manual Position Adjustment ── */}
+      <div className="space-y-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full h-8 text-xs gap-1.5"
+          onClick={() => setPosModalOpen(true)}
+        >
+          <Move className="w-3.5 h-3.5" />
+          Adjust Position Manually
+          {yPosition !== null && yPosition !== undefined && (
+            <span className="ml-auto text-muted-foreground tabular-nums">
+              Y: {yPosition}px
+            </span>
+          )}
+        </Button>
+      </div>
+
+      {/* ── Position Modal ── */}
+      <SubtitlePositionModal
+        open={posModalOpen}
+        onOpenChange={setPosModalOpen}
+        yPosition={yPosition}
+        presetPosition={position}
+        renderWidth={renderWidth}
+        renderHeight={renderHeight}
+        fontSize={localFontSize}
+        subtitleColor={localColor}
+        onSave={async (y) => {
+          await onChange({ subtitle_y_position: y });
+        }}
+      />
 
       {/* ── Subtitle Preview (Task 05.03.04) ── */}
       <SubtitlePreview font={font} color={localColor} />

@@ -109,6 +109,10 @@ class GlobalSettings(models.Model):
         choices=SUBTITLE_POSITION_CHOICES,
         default='bottom',
     )
+    # Manual vertical position override (pixels from top at render resolution).
+    # ``None`` means use the preset position from ``subtitle_position``.
+    subtitle_y_position = models.PositiveIntegerField(null=True, blank=True, default=None)
+
     # Legacy fields kept for backward compatibility
     subtitle_font = models.CharField(max_length=255, blank=True, default='')
     subtitle_color = models.CharField(max_length=7, default='#FFFFFF')

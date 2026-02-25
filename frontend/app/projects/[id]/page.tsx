@@ -15,12 +15,35 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrowLeft, Volume2, Film, Loader2, X, FileUp, Download, CheckCircle, AlertCircle,
-  Settings, ChevronLeft, ChevronRight, Info, Sliders, Home, Layers, Calendar,
+  Settings, ChevronLeft, ChevronRight, Info, Sliders, Home, Layers, Calendar, FolderOpen, Pencil, Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ── Sidebar collapsed state persistence ──
 const EDITOR_SIDEBAR_KEY = 'storyflow-editor-sidebar-collapsed';
+
+/** Format seconds into a human-readable "Xh Ym Zs" string. */
+function formatRemainingTime(seconds: number): string {
+  if (seconds <= 0) return '0s';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.round(seconds % 60);
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0 || h > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
+}
+
+/**
+ * Replace raw "~NNNs remaining" in a phase string with a formatted
+ * "~Xh Ym Zs remaining" version.
+ */
+function formatPhaseLabel(label: string): string {
+  return label.replace(/~(\d+)s remaining/, (_match, secs) => {
+    return `~${formatRemainingTime(parseInt(secs, 10))} remaining`;
+  });
+}
 
 function getEditorSidebarCollapsed(): boolean {
   if (typeof window === 'undefined') return false;
@@ -43,10 +66,36 @@ export default function TimelineEditorPage() {
     fetchProject, addSegment, importSegmentsToProject, updateSegment, deleteSegment,
     uploadImage, removeImage, reset,
     bulkGenerationProgress, generateAllAudio, cancelGeneration,
+    renameProject,
     // Render pipeline
     renderStatus, renderProgress, outputUrl,
     startRender, resetRenderState, cancelRender, downloadVideo,
   } = useProjectStore();
+
+  // ── Rename state ──
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const startRenaming = () => {
+    if (!project) return;
+    setRenameValue(project.title);
+    setIsRenaming(true);
+    setTimeout(() => renameInputRef.current?.select(), 0);
+  };
+
+  const submitRename = async () => {
+    if (!renameValue.trim() || renameValue.trim() === project?.title) {
+      setIsRenaming(false);
+      return;
+    }
+    try {
+      await renameProject(renameValue.trim());
+      setIsRenaming(false);
+    } catch {
+      setIsRenaming(false);
+    }
+  };
 
   const isGenerating = !!bulkGenerationProgress &&
     bulkGenerationProgress.status !== 'COMPLETED' &&
@@ -59,32 +108,98 @@ export default function TimelineEditorPage() {
   const isRendering = renderStatus === 'rendering' || renderStatus === 'validating';
   const renderPercentage = renderProgress?.percentage ?? 0;
 
-  // ── Smooth progress interpolation ──
-  // Smoothly animate between polled render percentage values instead of
-  // jumping discretely. Uses requestAnimationFrame to increment the
-  // displayed value toward the actual target at ~1% per 50ms.
+  // ── Phase-aware render progress ──
+  // The backend reports an overall percentage that can jump backward when
+  // the fast compositor phase starts (segments 0-80% → frames 5-96%).
+  // Instead of smoothing a jumpy number, we detect the current render
+  // phase and compute a phase-specific 0-100% percentage so the bar
+  // resets cleanly at each major phase transition.
+  const [renderPhase, setRenderPhase] = useState<'segments' | 'frames' | 'encoding' | 'finalizing' | 'idle'>('idle');
+  const [phasePercentage, setPhasePercentage] = useState(0);
+  const [phaseLabel, setPhaseLabel] = useState('');
+
+  useEffect(() => {
+    if (!isRendering || !renderProgress) {
+      setRenderPhase('idle');
+      setPhasePercentage(0);
+      setPhaseLabel('');
+      return;
+    }
+
+    const phase = renderProgress.current_phase || '';
+
+    // Detect frame rendering phase: "Rendering frames… 552/5509 (23 fps, ~219s remaining)"
+    const frameMatch = phase.match(/Rendering frames[^\d]*(\d+)\s*\/\s*(\d+)/);
+    if (frameMatch) {
+      const current = parseInt(frameMatch[1], 10);
+      const total = parseInt(frameMatch[2], 10);
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      if (renderPhase !== 'frames') setRenderPhase('frames');
+      setPhasePercentage(Math.min(pct, 100));
+      setPhaseLabel(phase);
+      return;
+    }
+
+    // Detect encoding phases
+    if (phase.startsWith('Encoding video') || phase.startsWith('Encoding audio')) {
+      const pctMatch = phase.match(/(\d+)%/);
+      if (renderPhase !== 'encoding') setRenderPhase('encoding');
+      setPhasePercentage(pctMatch ? Math.min(parseInt(pctMatch[1], 10), 100) : renderPercentage);
+      setPhaseLabel(phase);
+      return;
+    }
+
+    // Detect finalizing / verifying
+    if (phase.startsWith('Finaliz') || phase.startsWith('Verif')) {
+      if (renderPhase !== 'finalizing') setRenderPhase('finalizing');
+      setPhasePercentage(renderPercentage);
+      setPhaseLabel(phase);
+      return;
+    }
+
+    // Default: segment processing phase (loading, mixing, etc.)
+    if (renderPhase !== 'segments') setRenderPhase('segments');
+    setPhasePercentage(renderPercentage);
+    setPhaseLabel(phase);
+  }, [renderProgress, isRendering, renderPercentage, renderPhase]);
+
+  // Smooth the phase percentage for visual polish
   const [smoothRenderPct, setSmoothRenderPct] = useState(0);
   const smoothRef = useRef<number | null>(null);
   const targetPctRef = useRef(0);
+  const prevPhaseRef = useRef<string>('idle');
 
   useEffect(() => {
-    targetPctRef.current = renderPercentage;
-  }, [renderPercentage]);
+    // When phase changes, reset smooth pct to 0 for a fresh start
+    if (renderPhase !== prevPhaseRef.current) {
+      prevPhaseRef.current = renderPhase;
+      setSmoothRenderPct(0);
+      targetPctRef.current = phasePercentage;
+      return;
+    }
+    targetPctRef.current = phasePercentage;
+  }, [phasePercentage, renderPhase]);
 
   useEffect(() => {
     if (!isRendering) {
       setSmoothRenderPct(0);
+      prevPhaseRef.current = 'idle';
       if (smoothRef.current) cancelAnimationFrame(smoothRef.current);
+      smoothRef.current = null;
       return;
     }
 
-    const tick = () => {
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      const dt = now - lastTime;
+      lastTime = now;
       setSmoothRenderPct((prev) => {
         const target = targetPctRef.current;
-        if (prev >= target) return prev;
-        // Advance ~1% per frame, capped at target
-        const step = Math.max(0.3, (target - prev) * 0.08);
-        return Math.min(prev + step, target);
+        if (Math.abs(prev - target) < 0.1) return target;
+        const speed = Math.max(0.5, (target - prev) * 0.12);
+        const step = speed * (dt / 16);
+        if (prev < target) return Math.min(prev + step, target);
+        return prev;
       });
       smoothRef.current = requestAnimationFrame(tick);
     };
@@ -92,6 +207,7 @@ export default function TimelineEditorPage() {
     smoothRef.current = requestAnimationFrame(tick);
     return () => {
       if (smoothRef.current) cancelAnimationFrame(smoothRef.current);
+      smoothRef.current = null;
     };
   }, [isRendering]);
 
@@ -232,7 +348,33 @@ export default function TimelineEditorPage() {
             </Link>
             {!sidebarCollapsed && (
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">{project.title}</p>
+                {isRenaming ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      ref={renameInputRef}
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitRename();
+                        if (e.key === 'Escape') setIsRenaming(false);
+                      }}
+                      onBlur={submitRename}
+                      className="text-sm font-semibold bg-transparent border-b border-primary outline-none w-full py-0.5"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1 group/title">
+                    <p className="text-sm font-semibold truncate">{project.title}</p>
+                    <button
+                      onClick={startRenaming}
+                      className="opacity-0 group-hover/title:opacity-100 transition-opacity p-0.5 rounded hover:bg-sidebar-accent/50"
+                      aria-label="Rename project"
+                    >
+                      <Pencil className="h-3 w-3 text-sidebar-foreground/50" />
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center gap-1.5">
                   <Badge
                     variant="secondary"
@@ -395,6 +537,13 @@ export default function TimelineEditorPage() {
                         Dashboard
                       </Link>
                       <Link
+                        href="/projects"
+                        className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        Projects
+                      </Link>
+                      <Link
                         href="/settings"
                         className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground transition-colors"
                       >
@@ -546,20 +695,19 @@ export default function TimelineEditorPage() {
                 )}
 
                 {/* Render progress */}
-                {isRendering && renderProgress && (
-                  <div className="flex items-center gap-3">
-                    <p className="text-xs text-muted-foreground whitespace-nowrap">
-                      Render {renderProgress.current_segment}/{renderProgress.total_segments}
-                    </p>
-                    <Progress value={Math.round(smoothRenderPct)} className="flex-1 h-1.5" />
-                    <span className="text-xs tabular-nums text-muted-foreground">{Math.round(smoothRenderPct)}%</span>
+                {isRendering && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1.5">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {phaseLabel ? formatPhaseLabel(phaseLabel) : (renderProgress
+                          ? `${renderProgress.current_phase || 'Rendering'} — Segment ${renderProgress.current_segment}/${renderProgress.total_segments}`
+                          : 'Starting render pipeline…')}
+                      </p>
+                      <span className="text-xs tabular-nums text-muted-foreground">{Math.round(smoothRenderPct)}%</span>
+                    </div>
+                    <Progress value={Math.round(smoothRenderPct)} className="flex-1 h-2" />
                   </div>
-                )}
-                {isRendering && !renderProgress && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Preparing render pipeline…
-                  </p>
                 )}
 
                 {/* Completed / Failed banners */}
@@ -572,7 +720,7 @@ export default function TimelineEditorPage() {
                 {renderStatus === 'failed' && (
                   <p className="text-xs font-medium text-destructive flex items-center gap-1.5">
                     <AlertCircle className="h-3 w-3" />
-                    Render failed — check segments have images &amp; audio
+                    Render failed{renderProgress?.current_phase ? ` during: ${renderProgress.current_phase}` : ' — check segments have images & audio'}
                   </p>
                 )}
               </div>

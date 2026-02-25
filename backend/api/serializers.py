@@ -75,6 +75,7 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'default_voice_id', 'tts_speed',
             'subtitle_font_family', 'subtitle_font_size',
             'subtitle_font_color', 'subtitle_position',
+            'subtitle_y_position',
             'subtitle_font', 'subtitle_color',
             'render_width', 'render_height', 'render_fps',
             'ken_burns_zoom', 'transition_duration', 'zoom_intensity',
@@ -116,6 +117,14 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
         if value not in allowed:
             raise serializers.ValidationError(
                 f'Position must be one of: {", ".join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_subtitle_y_position(self, value):
+        """Must be None (use preset) or a positive integer within frame."""
+        if value is not None and value < 0:
+            raise serializers.ValidationError(
+                'Subtitle Y position must be a non-negative integer.'
             )
         return value
 

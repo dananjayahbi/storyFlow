@@ -30,6 +30,7 @@ export interface GlobalSettings {
   subtitle_color: string;
   subtitle_font_size: number;
   subtitle_position: 'bottom' | 'center' | 'top';
+  subtitle_y_position: number | null;  // Manual vertical position override (pixels from top at render res)
   inter_segment_silence: number;
   subtitles_enabled: boolean;
   render_width: number;

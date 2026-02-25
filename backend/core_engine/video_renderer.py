@@ -523,6 +523,7 @@ def render_project(
     subtitle_color = "#FFFFFF"
     subtitle_font_size = None  # None → auto-compute from resolution
     subtitle_position = "bottom"
+    subtitle_y_position = None  # None → use preset position
     subtitles_enabled = True
     inter_segment_silence = INTER_SEGMENT_SILENCE
 
@@ -544,6 +545,10 @@ def render_project(
                 raw_pos = getattr(gs_sub, "subtitle_position", "") or ""
                 if raw_pos.strip() in ("top", "center", "bottom"):
                     subtitle_position = raw_pos.strip()
+                # Manual Y position override
+                raw_y_pos = getattr(gs_sub, "subtitle_y_position", None)
+                if raw_y_pos is not None:
+                    subtitle_y_position = int(raw_y_pos)
                 # Subtitles toggle
                 subtitles_enabled = getattr(gs_sub, "subtitles_enabled", True)
                 # Inter-segment silence
@@ -829,6 +834,7 @@ def render_project(
             "color": subtitle_color,
             "font_size": subtitle_font_size,
             "position": subtitle_position,
+            "y_position": subtitle_y_position,
         }
 
         # Prepare logo settings dict

@@ -15,6 +15,7 @@ import {
   generateAllAudio as apiGenerateAllAudio,
   getTaskStatus,
   pollTaskStatus,
+  updateProject as apiUpdateProject,
   startRender as apiStartRender,
   getRenderStatus as apiGetRenderStatus,
   cancelRender as apiCancelRender,
@@ -124,6 +125,9 @@ interface ProjectStore {
   /** Download the rendered video file. */
   downloadVideo: () => void;
 
+  /** Rename the current project. */
+  renameProject: (newTitle: string) => Promise<void>;
+
   reset: () => void;
 }
 
@@ -146,6 +150,13 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
   renderStatus: 'idle' as RenderStatus,
   renderProgress: null,
   outputUrl: null,
+
+  renameProject: async (newTitle) => {
+    const project = get().project;
+    if (!project) return;
+    const updated = await apiUpdateProject(String(project.id), { title: newTitle });
+    set({ project: { ...project, title: updated.title } });
+  },
 
   fetchProject: async (id) => {
     set({ isLoading: true, error: null });
@@ -369,15 +380,15 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
 
         // Still processing — update progress and poll again
         set({ renderProgress: status.progress });
-        renderPollingTimer = setTimeout(poll, 3000);
+        renderPollingTimer = setTimeout(poll, 2000);
       } catch {
         // Transient error — try again
-        renderPollingTimer = setTimeout(poll, 3000);
+        renderPollingTimer = setTimeout(poll, 2000);
       }
     };
 
-    // Start polling after a short delay to let the backend begin
-    renderPollingTimer = setTimeout(poll, 1000);
+    // Start polling quickly
+    renderPollingTimer = setTimeout(poll, 500);
   },
 
   resetRenderState: () => {

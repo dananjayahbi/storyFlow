@@ -127,6 +127,7 @@ def pre_render_subtitles(
     color: str,
     font_size: Optional[int] = None,
     position: str = "bottom",
+    y_position: Optional[int] = None,
     stroke_color: str = "#000000",
     stroke_width: int = 2,
 ) -> List[OverlaySlice]:
@@ -148,6 +149,9 @@ def pre_render_subtitles(
         color: Text fill colour as hex string (e.g. ``"#FFFFFF"``).
         font_size: Explicit font size in pixels.  ``None`` → auto.
         position: ``"bottom"``, ``"center"``, or ``"top"``.
+        y_position: Manual vertical position override — top edge of the
+            subtitle block in pixels from the top of the frame.
+            When not ``None``, overrides the *position* keyword.
         stroke_color: Outline colour as hex string.
         stroke_width: Outline thickness in pixels.
 
@@ -254,7 +258,11 @@ def pre_render_subtitles(
             clip_w = rgb.shape[1]
             x_pos = (width - clip_w) // 2  # centred horizontally
 
-            if position == "top":
+            if y_position is not None:
+                # Manual override — y_position is the TOP EDGE of the subtitle.
+                # Used directly — no clip-height conversion needed.
+                y_pos = y_position
+            elif position == "top":
                 y_pos = vert_margin
             elif position == "center":
                 y_pos = (height - clip_height) // 2
@@ -571,6 +579,7 @@ def fast_render_segments(
                 color=subtitle_settings.get("color", "#FFFFFF"),
                 font_size=subtitle_settings.get("font_size"),
                 position=subtitle_settings.get("position", "bottom"),
+                y_position=subtitle_settings.get("y_position"),
             )
 
         # Prepare Ken Burns frame generator

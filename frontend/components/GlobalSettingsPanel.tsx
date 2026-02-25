@@ -364,6 +364,9 @@ export function GlobalSettingsPanel() {
                 color={globalSettings.subtitle_color}
                 fontSize={globalSettings.subtitle_font_size ?? 48}
                 position={globalSettings.subtitle_position ?? 'bottom'}
+                yPosition={globalSettings.subtitle_y_position ?? null}
+                renderWidth={globalSettings.render_width ?? 1920}
+                renderHeight={globalSettings.render_height ?? 1080}
                 onChange={handleSettingChange}
               />
             )}

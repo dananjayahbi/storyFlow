@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { getProjects, deleteProject } from '@/lib/api';
+import { getProjects, deleteProject, updateProject } from '@/lib/api';
 import { Project } from '@/lib/types';
 import { CreateProjectDialog } from '@/components/CreateProjectDialog';
 import ImportDialog from '@/components/ImportDialog';
@@ -28,9 +28,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { EmptyState } from '@/components/EmptyState';
-import { FolderPlus, Search, X, ArrowUpDown, Trash2 } from 'lucide-react';
+import { FolderPlus, Search, X, ArrowUpDown, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { ProjectsSkeleton } from '@/components/skeletons';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
+} from '@/components/ui/dialog';
 
 // ── Sort modes ──
 
@@ -110,6 +113,12 @@ export default function ProjectsPage() {
   const [sortMode, setSortMode] = useState<SortMode>('date-desc');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Rename state
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renamingProject, setRenamingProject] = useState<Project | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+
   const fetchProjects = async () => {
     try {
       setLoading(true);
@@ -137,6 +146,33 @@ export default function ProjectsPage() {
     toast('Project deleted', {
       description: 'Project and all media removed.',
     });
+  };
+
+  const openRenameDialog = (project: Project) => {
+    setRenamingProject(project);
+    setRenameValue(project.title);
+    setRenameDialogOpen(true);
+  };
+
+  const handleRename = async () => {
+    if (!renamingProject || !renameValue.trim()) return;
+    if (renameValue.trim() === renamingProject.title) {
+      setRenameDialogOpen(false);
+      return;
+    }
+    setRenameLoading(true);
+    try {
+      const updated = await updateProject(String(renamingProject.id), { title: renameValue.trim() });
+      setProjects((prev) =>
+        prev.map((p) => (String(p.id) === String(renamingProject.id) ? { ...p, title: updated.title } : p))
+      );
+      toast('Project renamed', { description: `Renamed to "${updated.title}".` });
+      setRenameDialogOpen(false);
+    } catch {
+      toast.error('Failed to rename project');
+    } finally {
+      setRenameLoading(false);
+    }
   };
 
   // Cycle through sort modes
@@ -281,7 +317,7 @@ export default function ProjectsPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Segments</TableHead>
                 <TableHead>Updated</TableHead>
-                <TableHead className="w-12.5"></TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -320,7 +356,20 @@ export default function ProjectsPage() {
                       </Tooltip>
                     </TableCell>
                     <TableCell>
-                      <div onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                              onClick={() => openRenameDialog(project)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p className="text-xs">Rename</p></TooltipContent>
+                        </Tooltip>
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
@@ -358,6 +407,36 @@ export default function ProjectsPage() {
           </Table>
         </div>
       )}
+
+      {/* Rename Dialog */}
+      <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename Project</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              placeholder="Project title"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleRename(); }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline" size="sm">Cancel</Button>
+            </DialogClose>
+            <Button
+              size="sm"
+              onClick={handleRename}
+              disabled={renameLoading || !renameValue.trim()}
+            >
+              {renameLoading ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -225,6 +225,7 @@ def generate_subtitle_clips(
     color: str,
     font_size: int | None = None,
     position: str = "bottom",
+    y_position: int | None = None,
 ) -> list[TextClip]:
     """Create styled ``TextClip`` objects for each subtitle chunk.
 
@@ -250,6 +251,10 @@ def generate_subtitle_clips(
     position:
         Vertical anchor — ``"bottom"`` (default), ``"center"``, or
         ``"top"``.
+    y_position:
+        Manual vertical position override — top edge of the subtitle
+        block in pixels from the top of the frame.
+        When not ``None``, overrides the *position* keyword.
 
     Returns
     -------
@@ -320,7 +325,11 @@ def generate_subtitle_clips(
             # Vertical margin (percentage of frame height)
             vert_margin = int(height * SUBTITLE_VERT_MARGIN_RATIO)
 
-            if position == "top":
+            if y_position is not None:
+                # Manual override — y_position is the TOP EDGE of the subtitle.
+                # Used directly — no clip-height conversion needed.
+                y_pos = y_position
+            elif position == "top":
                 y_pos = vert_margin
             elif position == "center":
                 y_pos = int((height - clip_height) / 2)
@@ -374,6 +383,7 @@ def create_subtitles_for_segment(
     color: str,
     font_size: int | None = None,
     position: str = "bottom",
+    y_position: int | None = None,
 ) -> list[TextClip]:
     """Generate subtitle clips for a single video segment.
 
@@ -401,6 +411,10 @@ def create_subtitles_for_segment(
         Explicit font size in pixels (``None`` → auto from resolution).
     position:
         Vertical position — ``"bottom"``, ``"center"``, or ``"top"``.
+    y_position:
+        Manual vertical position override — top edge of the subtitle
+        block in pixels from the top of the frame.
+        When not ``None``, overrides the *position* keyword.
 
     Returns
     -------
@@ -422,6 +436,7 @@ def create_subtitles_for_segment(
     clips = generate_subtitle_clips(
         chunks, timings, resolution, font, color,
         font_size=font_size, position=position,
+        y_position=y_position,
     )
 
     logger.info(
