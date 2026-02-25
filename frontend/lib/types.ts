@@ -42,12 +42,21 @@ export interface GlobalSettings {
   logo_position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
   logo_opacity: number;
   logo_margin: number;
+  outro_enabled: boolean;
+  active_outro: string | null;  // OutroVideo UUID or null
 }
 
 export interface Logo {
   id: string;
   name: string;
   file: string;      // URL path to the logo image
+  uploaded_at: string;
+}
+
+export interface OutroVideo {
+  id: string;
+  name: string;
+  file: string;      // URL path to the outro video
   uploaded_at: string;
 }
 

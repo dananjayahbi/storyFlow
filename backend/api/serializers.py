@@ -3,7 +3,7 @@ import re
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Project, Segment, GlobalSettings, Logo
+from .models import Project, Segment, GlobalSettings, Logo, OutroVideo
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
 
@@ -68,6 +68,13 @@ class LogoSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'uploaded_at']
 
 
+class OutroVideoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OutroVideo
+        fields = ['id', 'name', 'file', 'uploaded_at']
+        read_only_fields = ['id', 'uploaded_at']
+
+
 class GlobalSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = GlobalSettings
@@ -83,6 +90,7 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'custom_font_file',
             'logo_enabled', 'active_logo', 'logo_scale',
             'logo_position', 'logo_opacity', 'logo_margin',
+            'outro_enabled', 'active_outro',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['custom_font_file', 'created_at', 'updated_at']

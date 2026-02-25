@@ -79,11 +79,29 @@ def logo_upload_path(instance, filename):
     return f'logos/{filename}'
 
 
+def outro_video_upload_path(instance, filename):
+    return f'outros/{filename}'
+
+
 class Logo(models.Model):
     """An uploaded logo image that can be burned into rendered videos."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     file = models.ImageField(upload_to=logo_upload_path)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+
+class OutroVideo(models.Model):
+    """An uploaded video clip to append at the end of rendered videos."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    file = models.FileField(upload_to=outro_video_upload_path)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -152,6 +170,13 @@ class GlobalSettings(models.Model):
     )
     logo_opacity = models.FloatField(default=1.0)      # 0.0–1.0
     logo_margin = models.IntegerField(default=20)      # pixels
+
+    # ── Outro video ──
+    outro_enabled = models.BooleanField(default=False)
+    active_outro = models.ForeignKey(
+        'OutroVideo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='active_in_settings',
+    )
 
     # ── Timestamps ──
     created_at = models.DateTimeField(auto_now_add=True, null=True)

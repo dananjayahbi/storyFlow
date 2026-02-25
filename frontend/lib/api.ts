@@ -14,6 +14,7 @@ import {
   GlobalSettings,
   GalleryItem,
   Logo,
+  OutroVideo,
 } from './types';
 import { Voice } from './constants';
 
@@ -300,6 +301,26 @@ export async function uploadLogo(file: File): Promise<Logo> {
 
 export async function deleteLogo(logoId: string): Promise<void> {
   await api.delete(`/api/settings/logos/${logoId}/`);
+}
+
+// ── Outro Videos ──
+
+export async function getOutroVideos(): Promise<OutroVideo[]> {
+  const { data } = await api.get<OutroVideo[]>('/api/settings/outros/');
+  return data;
+}
+
+export async function uploadOutroVideo(file: File): Promise<OutroVideo> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const { data } = await api.post<OutroVideo>('/api/settings/outros/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export async function deleteOutroVideo(outroId: string): Promise<void> {
+  await api.delete(`/api/settings/outros/${outroId}/`);
 }
 
 export default api;

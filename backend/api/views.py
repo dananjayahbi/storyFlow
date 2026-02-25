@@ -12,8 +12,8 @@ from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Project, Segment, GlobalSettings, Logo, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
-from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer, LogoSerializer
+from .models import Project, Segment, GlobalSettings, Logo, OutroVideo, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
+from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer, LogoSerializer, OutroVideoSerializer
 from .parsers import ParseError
 from .tasks import get_task_manager, render_task_function
 from .validators import validate_image_upload, validate_project_for_render, validate_font_upload
@@ -1382,4 +1382,91 @@ def logo_detail_view(request, logo_id):
             pass
 
     logo.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  Outro Video Management
+# ═══════════════════════════════════════════════════════════════════
+
+
+@api_view(['GET', 'POST'])
+def outros_view(request):
+    """List all outro videos (GET) or upload a new one (POST).
+
+    GET  /api/settings/outros/
+    POST /api/settings/outros/  (multipart with 'file' field)
+    """
+    if request.method == 'GET':
+        outros = OutroVideo.objects.all()
+        serializer = OutroVideoSerializer(outros, many=True)
+        return Response(serializer.data)
+
+    # POST — upload
+    video_file = request.FILES.get('file')
+    if not video_file:
+        return Response(
+            {'error': 'No file provided.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate extension
+    ext = os.path.splitext(video_file.name)[1].lower()
+    allowed_exts = {'.mp4', '.mov', '.webm', '.avi', '.mkv'}
+    if ext not in allowed_exts:
+        return Response(
+            {'error': f'Only {", ".join(sorted(allowed_exts))} files are allowed.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Validate size (100 MB max)
+    if video_file.size > 100 * 1024 * 1024:
+        return Response(
+            {'error': 'Outro video file must be under 100 MB.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Ensure outros directory exists
+    outros_dir = os.path.join(settings.MEDIA_ROOT, 'outros')
+    os.makedirs(outros_dir, exist_ok=True)
+
+    # Derive name from filename
+    name = os.path.splitext(os.path.basename(video_file.name))[0]
+
+    outro = OutroVideo.objects.create(name=name, file=video_file)
+    serializer = OutroVideoSerializer(outro)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['DELETE'])
+def outro_detail_view(request, outro_id):
+    """Delete an outro video by ID.
+
+    DELETE /api/settings/outros/<outro_id>/
+    """
+    try:
+        outro = OutroVideo.objects.get(id=outro_id)
+    except OutroVideo.DoesNotExist:
+        return Response(
+            {'error': 'Outro video not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # If this outro is the active outro, null it out
+    gs = GlobalSettings.load()
+    if gs.active_outro_id == outro.id:
+        gs.active_outro = None
+        gs.outro_enabled = False
+        gs.save()
+
+    # Delete file from disk
+    if outro.file:
+        try:
+            file_path = outro.file.path
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+    outro.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)

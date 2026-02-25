@@ -26,6 +26,9 @@ import {
   getLogos as apiGetLogos,
   uploadLogo as apiUploadLogo,
   deleteLogo as apiDeleteLogo,
+  getOutroVideos as apiGetOutroVideos,
+  uploadOutroVideo as apiUploadOutroVideo,
+  deleteOutroVideo as apiDeleteOutroVideo,
 } from './api';
 import type {
   ProjectDetail,
@@ -37,6 +40,7 @@ import type {
   RenderProgress,
   GlobalSettings,
   Logo,
+  OutroVideo,
 } from './types';
 import { type Voice, AVAILABLE_VOICES } from './constants';
 
@@ -735,6 +739,24 @@ interface SettingsStore {
 
   /** Delete a logo by ID. */
   deleteLogo: (logoId: string) => Promise<void>;
+
+  /** List of uploaded outro videos. */
+  outroVideos: OutroVideo[];
+
+  /** True while outro videos are loading. */
+  isOutrosLoading: boolean;
+
+  /** True while an outro video is being uploaded. */
+  isOutroUploading: boolean;
+
+  /** Fetch all uploaded outro videos. */
+  fetchOutroVideos: () => Promise<void>;
+
+  /** Upload a new outro video file. */
+  uploadOutroVideo: (file: File) => Promise<OutroVideo>;
+
+  /** Delete an outro video by ID. */
+  deleteOutroVideo: (outroId: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsStore>()((set, get) => ({
@@ -747,6 +769,9 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
   logos: [],
   isLogosLoading: false,
   isLogoUploading: false,
+  outroVideos: [],
+  isOutrosLoading: false,
+  isOutroUploading: false,
 
   fetchSettings: async () => {
     set({ isSettingsLoading: true, settingsError: null });
@@ -856,6 +881,49 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
       }
     } catch {
       throw new Error('Failed to delete logo');
+    }
+  },
+
+  fetchOutroVideos: async () => {
+    set({ isOutrosLoading: true });
+    try {
+      const outroVideos = await apiGetOutroVideos();
+      set({ outroVideos, isOutrosLoading: false });
+    } catch {
+      set({ isOutrosLoading: false });
+    }
+  },
+
+  uploadOutroVideo: async (file) => {
+    set({ isOutroUploading: true });
+    try {
+      const outro = await apiUploadOutroVideo(file);
+      set((state) => ({
+        outroVideos: [outro, ...state.outroVideos],
+        isOutroUploading: false,
+      }));
+      return outro;
+    } catch {
+      set({ isOutroUploading: false });
+      throw new Error('Failed to upload outro video');
+    }
+  },
+
+  deleteOutroVideo: async (outroId) => {
+    try {
+      await apiDeleteOutroVideo(outroId);
+      set((state) => ({
+        outroVideos: state.outroVideos.filter((o) => o.id !== outroId),
+      }));
+      // If this was the active outro, disable it
+      const gs = get().globalSettings;
+      if (gs && gs.active_outro === outroId) {
+        set({
+          globalSettings: { ...gs, active_outro: null, outro_enabled: false },
+        });
+      }
+    } catch {
+      throw new Error('Failed to delete outro video');
     }
   },
 }));

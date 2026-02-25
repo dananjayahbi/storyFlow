@@ -118,6 +118,199 @@ def _probe_duration(file_path: str) -> Optional[float]:
     return None
 
 
+def _probe_has_audio(file_path: str) -> bool:
+    """Check whether a media file contains an audio stream."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-select_streams", "a",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+                file_path,
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def _probe_resolution(file_path: str) -> Optional[tuple]:
+    """Return (width, height) of the first video stream, or None."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "csv=s=x:p=0",
+                file_path,
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and "x" in result.stdout:
+            w, h = result.stdout.strip().split("x")
+            return int(w), int(h)
+    except Exception:
+        pass
+    return None
+
+
+def _append_outro(
+    main_video: str,
+    outro_video: str,
+    fps: int = 30,
+    crossfade_duration: float = 0.5,
+    use_nvenc: bool = False,
+) -> bool:
+    """Append an outro video to the main rendered video with a crossfade.
+
+    Probes both files first to detect resolution mismatches and audio
+    presence, then builds the most appropriate FFmpeg filter graph:
+    - Scales the outro to match the main video dimensions if needed.
+    - Uses ``acrossfade`` only when both files have an audio track.
+    - Extends/pads main audio when the outro has no audio.
+
+    The result replaces *main_video* in-place.
+
+    Returns ``True`` on success, ``False`` on failure.
+    """
+    main_dur = _probe_duration(main_video)
+    outro_dur = _probe_duration(outro_video)
+
+    if main_dur is None or main_dur <= 0:
+        logger.warning("Cannot probe main video duration for outro append.")
+        return False
+    if outro_dur is None or outro_dur <= 0:
+        logger.warning("Cannot probe outro video duration.")
+        return False
+
+    # Detect capabilities of both files
+    main_has_audio = _probe_has_audio(main_video)
+    outro_has_audio = _probe_has_audio(outro_video)
+    main_res = _probe_resolution(main_video)
+
+    logger.info(
+        "Outro append: main_dur=%.2f outro_dur=%.2f "
+        "main_audio=%s outro_audio=%s main_res=%s",
+        main_dur, outro_dur, main_has_audio, outro_has_audio, main_res,
+    )
+
+    # xfade offset = point in the main video where crossfade begins
+    xfade_offset = max(0.0, main_dur - crossfade_duration)
+
+    # Temporary output path
+    temp_out = main_video + ".outro_tmp.mp4"
+
+    # Encoder settings
+    if use_nvenc:
+        vcodec_args = ["-c:v", "h264_nvenc", "-preset", "p4",
+                       "-rc", "vbr", "-cq", "23"]
+    else:
+        vcodec_args = ["-c:v", "libx264", "-preset", "fast",
+                       "-crf", "23"]
+
+    # ── Build filter graph ──────────────────────────────────────────
+    # Normalise both video streams:  fps + settb ensure identical
+    # frame-rate and timebase, which ``xfade`` requires.
+    main_v_prep = f"[0:v]fps={fps},settb=AVTB[main_v];"
+    if main_res:
+        outro_v_prep = (
+            f"[1:v]scale={main_res[0]}:{main_res[1]}:"
+            f"force_original_aspect_ratio=decrease,"
+            f"pad={main_res[0]}:{main_res[1]}:(ow-iw)/2:(oh-ih)/2,"
+            f"setsar=1,fps={fps},settb=AVTB[outro_v];"
+        )
+    else:
+        outro_v_prep = f"[1:v]fps={fps},settb=AVTB[outro_v];"
+
+    # Video crossfade
+    video_filter = (
+        f"{main_v_prep}{outro_v_prep}"
+        f"[main_v][outro_v]xfade=transition=fade"
+        f":duration={crossfade_duration}:offset={xfade_offset},"
+        f"format=yuv420p[vout]"
+    )
+
+    # Audio handling
+    total_dur = main_dur + outro_dur - crossfade_duration
+    if main_has_audio and outro_has_audio:
+        # Normalise both audio streams to same format before acrossfade
+        audio_filter = (
+            f";[0:a]aformat=sample_rates=44100:channel_layouts=stereo[main_a];"
+            f"[1:a]aformat=sample_rates=44100:channel_layouts=stereo[outro_a];"
+            f"[main_a][outro_a]acrossfade=d={crossfade_duration}"
+            f":c1=tri:c2=tri[aout]"
+        )
+    elif main_has_audio:
+        # Outro has no audio – extend main audio with silence to cover
+        # the full output duration, then trim to exact length.
+        audio_filter = (
+            f";[0:a]apad=whole_dur={total_dur}[aout]"
+        )
+    else:
+        # No audio at all – generate silent track
+        audio_filter = ""
+
+    filter_complex = video_filter + audio_filter
+
+    # Map outputs
+    map_args = ["-map", "[vout]"]
+    if main_has_audio or outro_has_audio:
+        map_args += ["-map", "[aout]"]
+        acodec_args = ["-c:a", "aac", "-b:a", "192k"]
+    else:
+        acodec_args = []
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", main_video,
+        "-i", outro_video,
+        "-filter_complex", filter_complex,
+        *map_args,
+        *vcodec_args,
+        *acodec_args,
+        "-r", str(fps),
+        "-movflags", "+faststart",
+        temp_out,
+    ]
+
+    logger.info("Outro FFmpeg command: %s", " ".join(cmd))
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 min max
+        )
+        if result.returncode != 0:
+            logger.error(
+                "FFmpeg outro append failed (rc=%d): %s",
+                result.returncode,
+                result.stderr[-1000:] if result.stderr else "(no stderr)",
+            )
+            if os.path.exists(temp_out):
+                os.remove(temp_out)
+            return False
+
+        # Replace original with the merged file
+        os.replace(temp_out, main_video)
+        return True
+
+    except subprocess.TimeoutExpired:
+        logger.error("FFmpeg outro append timed out after 600s.")
+        if os.path.exists(temp_out):
+            os.remove(temp_out)
+        return False
+    except Exception as exc:
+        logger.error("FFmpeg outro append error: %s", exc)
+        if os.path.exists(temp_out):
+            os.remove(temp_out)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Transition constants
 # ---------------------------------------------------------------------------
@@ -876,6 +1069,73 @@ def render_project(
             render_stats["render_time"],
             render_stats["avg_ms_per_frame"],
         )
+
+        # --------------------------------------------------------------
+        # I. Append outro video (if enabled)
+        # --------------------------------------------------------------
+        outro_appended = False
+        if GlobalSettings is not None:
+            try:
+                gs_outro = GlobalSettings.objects.first()
+                outro_enabled = (
+                    gs_outro is not None
+                    and getattr(gs_outro, "outro_enabled", False)
+                )
+                logger.info(
+                    "Outro check: gs_outro=%s, outro_enabled=%s, "
+                    "active_outro=%s",
+                    gs_outro is not None,
+                    outro_enabled,
+                    getattr(gs_outro, "active_outro_id", None)
+                    if gs_outro else None,
+                )
+                if outro_enabled:
+                    active_outro = getattr(gs_outro, "active_outro", None)
+                    if active_outro is not None and active_outro.file:
+                        outro_path = active_outro.file.path
+                        logger.info(
+                            "Outro file path: %s  exists=%s",
+                            outro_path,
+                            os.path.isfile(outro_path),
+                        )
+                        if os.path.isfile(outro_path):
+                            if on_progress:
+                                on_progress(92, 100, "Appending outro video…")
+                            outro_appended = _append_outro(
+                                main_video=output_path,
+                                outro_video=outro_path,
+                                fps=fps,
+                                crossfade_duration=TRANSITION_DURATION,
+                                use_nvenc=use_nvenc,
+                            )
+                            if outro_appended:
+                                logger.info(
+                                    "Outro video appended successfully: %s",
+                                    os.path.basename(outro_path),
+                                )
+                            else:
+                                warnings.append(
+                                    "Outro video could not be appended "
+                                    "(FFmpeg error – check server logs)."
+                                )
+                        else:
+                            warnings.append(
+                                f"Outro file not found on disk: "
+                                f"{os.path.basename(outro_path)}"
+                            )
+                            logger.warning(
+                                "Outro file not found: %s", outro_path,
+                            )
+                    else:
+                        logger.info(
+                            "Outro enabled but no active outro selected "
+                            "or file is empty."
+                        )
+            except Exception as outro_err:
+                logger.warning(
+                    "Could not append outro video: %s", outro_err,
+                )
+                warnings.append(f"Outro append failed: {outro_err}")
 
         # --------------------------------------------------------------
         # K. Verify output and capture duration

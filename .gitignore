@@ -13,6 +13,8 @@ venv/
 # ========================
 db.sqlite3
 backend/media/projects/
+backend/media/outros/
+backend/media/logos/
 
 # ========================
 # Node.js

@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon, Trash2, Upload } from 'lucide-react';
+import { Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon, Trash2, Upload, Film } from 'lucide-react';
 import { useSettingsStore } from '@/store/settingsStore';
 import { toast } from 'sonner';
 import { SettingsSkeleton } from '@/components/skeletons';
@@ -41,14 +41,22 @@ export default function SettingsPage() {
     fetchLogos,
     uploadLogo,
     deleteLogo,
+    outroVideos,
+    isOutrosLoading,
+    isOutroUploading,
+    fetchOutroVideos,
+    uploadOutroVideo,
+    deleteOutroVideo,
   } = useLogoStore();
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const outroInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch settings on mount
   useEffect(() => {
     fetchSettings();
     fetchLogos();
-  }, [fetchSettings, fetchLogos]);
+    fetchOutroVideos();
+  }, [fetchSettings, fetchLogos, fetchOutroVideos]);
 
   // Sync local state when settings load
   useEffect(() => {
@@ -527,6 +535,115 @@ export default function SettingsPage() {
                     }}
                   >
                     <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Outro Video Management Card ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Film className="h-5 w-5" />
+            Outro Video Management
+          </CardTitle>
+          <CardDescription>
+            Upload outro/logo animation videos to append at the end of rendered videos.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Upload Button */}
+          <div>
+            <input
+              ref={outroInputRef}
+              type="file"
+              accept=".mp4,.mov,.webm,.avi,.mkv"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 100 * 1024 * 1024) {
+                  toast.error('Outro video file must be under 100 MB');
+                  return;
+                }
+                try {
+                  await uploadOutroVideo(file);
+                  toast.success('Outro video uploaded successfully');
+                } catch {
+                  toast.error('Failed to upload outro video');
+                }
+                if (outroInputRef.current) outroInputRef.current.value = '';
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => outroInputRef.current?.click()}
+              disabled={isOutroUploading}
+            >
+              {isOutroUploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Uploading…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Outro Video
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground mt-1">
+              MP4 recommended. Max 100 MB.
+            </p>
+          </div>
+
+          <Separator />
+
+          {/* Outro Videos List */}
+          {isOutrosLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading outro videos…
+            </div>
+          ) : outroVideos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No outro videos uploaded yet. Upload a video to append at the end of your renders.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {outroVideos.map((outro) => (
+                <div
+                  key={outro.id}
+                  className="flex items-center justify-between gap-3 border rounded-lg p-3 group"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <Film className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {outro.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Uploaded {new Date(outro.uploaded_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                    onClick={async () => {
+                      try {
+                        await deleteOutroVideo(outro.id);
+                        toast.success('Outro video deleted');
+                      } catch {
+                        toast.error('Failed to delete outro video');
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}

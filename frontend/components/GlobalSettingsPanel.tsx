@@ -6,6 +6,13 @@ import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { VoiceSelector } from '@/components/VoiceSelector';
 import { SubtitleSettingsForm } from '@/components/SubtitleSettingsForm';
 import { RenderSettingsForm } from '@/components/RenderSettingsForm';
@@ -19,6 +26,7 @@ import {
   Timer,
   Captions,
   Stamp,
+  Film,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -41,6 +49,8 @@ export function GlobalSettingsPanel() {
     settingsError,
     fetchSettings,
     updateSettings,
+    outroVideos,
+    fetchOutroVideos,
   } = useSettingsStore();
 
   const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
@@ -61,7 +71,8 @@ export function GlobalSettingsPanel() {
   // Fetch settings on mount
   useEffect(() => {
     fetchSettings();
-  }, [fetchSettings]);
+    fetchOutroVideos();
+  }, [fetchSettings, fetchOutroVideos]);
 
   // Sync local slider value when globalSettings loads/changes
   useEffect(() => {
@@ -331,6 +342,63 @@ export function GlobalSettingsPanel() {
               renderWidth={globalSettings.render_width ?? 1920}
               renderHeight={globalSettings.render_height ?? 1080}
             />
+          </section>
+
+          <Separator />
+
+          {/* ── Outro Video Section ── */}
+          <section>
+            <div className="flex items-center gap-1.5 mb-3">
+              <Film className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex-1">
+                Outro Video
+              </h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs text-muted-foreground">
+                  {globalSettings.outro_enabled ? 'On' : 'Off'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={globalSettings.outro_enabled ?? false}
+                  onChange={(e) =>
+                    handleSettingChange({ outro_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-muted-foreground accent-primary cursor-pointer"
+                />
+              </label>
+            </div>
+
+            {globalSettings.outro_enabled && (
+              <div className="space-y-2">
+                <Select
+                  value={globalSettings.active_outro ?? ''}
+                  onValueChange={(val) =>
+                    handleSettingChange({ active_outro: val || null })
+                  }
+                >
+                  <SelectTrigger className="w-full h-8 text-xs">
+                    <SelectValue placeholder="Select outro video…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {outroVideos.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {outroVideos.length === 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    No outro videos uploaded. Go to Settings page to upload.
+                  </p>
+                )}
+                {globalSettings.active_outro && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Selected video will be appended with a smooth crossfade.
+                  </p>
+                )}
+              </div>
+            )}
           </section>
 
           <Separator />
