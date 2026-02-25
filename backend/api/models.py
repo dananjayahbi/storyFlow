@@ -16,6 +16,19 @@ STATUS_CHOICES = [
 # States from which a new render can be started.
 RENDERABLE_STATUSES = {STATUS_DRAFT, STATUS_COMPLETED, STATUS_FAILED}
 
+SUBTITLE_POSITION_CHOICES = [
+    ('bottom', 'Bottom'),
+    ('center', 'Center'),
+    ('top', 'Top'),
+]
+
+LOGO_POSITION_CHOICES = [
+    ('top-left', 'Top Left'),
+    ('top-right', 'Top Right'),
+    ('bottom-left', 'Bottom Left'),
+    ('bottom-right', 'Bottom Right'),
+]
+
 
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -27,6 +40,61 @@ class Project(models.Model):
     resolution_height = models.IntegerField(default=1080)
     framerate = models.IntegerField(default=30)
     output_path = models.CharField(max_length=500, blank=True, null=True)
+
+    # ── Per-project settings (copied from GlobalSettings on creation) ──
+
+    # TTS
+    default_voice_id = models.CharField(max_length=100, default='af_bella')
+    tts_speed = models.FloatField(default=1.0)
+
+    # Subtitle styling
+    subtitle_font_family = models.CharField(max_length=200, default='Arial')
+    subtitle_font_size = models.PositiveIntegerField(default=48)
+    subtitle_font_color = models.CharField(max_length=7, default='#FFFFFF')
+    subtitle_position = models.CharField(
+        max_length=10,
+        choices=SUBTITLE_POSITION_CHOICES,
+        default='bottom',
+    )
+    subtitle_y_position = models.PositiveIntegerField(
+        null=True, blank=True, default=None,
+    )
+    subtitle_font = models.CharField(max_length=255, blank=True, default='')
+    subtitle_color = models.CharField(max_length=7, default='#FFFFFF')
+    subtitles_enabled = models.BooleanField(default=True)
+    custom_font_file = models.FileField(
+        upload_to='fonts/', null=True, blank=True,
+    )
+
+    # Render / Ken-Burns
+    zoom_intensity = models.FloatField(default=1.3)
+    ken_burns_zoom = models.FloatField(default=1.2)
+    transition_duration = models.FloatField(default=0.5)
+
+    # Audio / timing
+    inter_segment_silence = models.FloatField(default=0.3)
+
+    # Logo watermark
+    logo_enabled = models.BooleanField(default=False)
+    active_logo = models.ForeignKey(
+        'Logo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='projects_using',
+    )
+    logo_scale = models.FloatField(default=0.15)
+    logo_position = models.CharField(
+        max_length=20,
+        choices=LOGO_POSITION_CHOICES,
+        default='bottom-right',
+    )
+    logo_opacity = models.FloatField(default=1.0)
+    logo_margin = models.IntegerField(default=20)
+
+    # Outro video
+    outro_enabled = models.BooleanField(default=False)
+    active_outro = models.ForeignKey(
+        'OutroVideo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='projects_using',
+    )
 
     def __str__(self):
         return self.title
@@ -59,20 +127,6 @@ class Segment(models.Model):
 
     class Meta:
         ordering = ['sequence_index']
-
-
-SUBTITLE_POSITION_CHOICES = [
-    ('bottom', 'Bottom'),
-    ('center', 'Center'),
-    ('top', 'Top'),
-]
-
-LOGO_POSITION_CHOICES = [
-    ('top-left', 'Top Left'),
-    ('top-right', 'Top Right'),
-    ('bottom-left', 'Bottom Left'),
-    ('bottom-right', 'Bottom Right'),
-]
 
 
 def logo_upload_path(instance, filename):

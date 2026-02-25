@@ -107,10 +107,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        # 5. Read global TTS settings (capture as plain values for thread safety)
-        settings_obj = GlobalSettings.load()
-        voice_id = settings_obj.default_voice_id
-        speed = settings_obj.tts_speed
+        # 5. Read project-level TTS settings (capture as plain values for thread safety)
+        voice_id = project.default_voice_id
+        speed = project.tts_speed
 
         # Capture project ID as string (not ORM object)
         project_id = str(project.id)
@@ -610,14 +609,14 @@ class SegmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        # 4. Read global TTS settings
-        settings_obj = GlobalSettings.load()
-        voice_id = settings_obj.default_voice_id
-        speed = settings_obj.tts_speed
+        # 4. Read project-level TTS settings
+        project = segment.project
+        voice_id = project.default_voice_id
+        speed = project.tts_speed
 
         # 5. Define background task
         segment_id = str(segment.id)
-        project_id = str(segment.project_id)
+        project_id = str(project.id)
 
         def task_fn():
             from core_engine.tts_wrapper import (

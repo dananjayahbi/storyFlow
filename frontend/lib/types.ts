@@ -10,6 +10,37 @@ export interface Project {
   segment_count: number;
 }
 
+/** Extended project data returned by the detail endpoint. */
+export interface ProjectDetail extends Omit<Project, 'segment_count'> {
+  output_path: string | null;
+  segments: Segment[];
+
+  // ── Per-project settings ──
+  default_voice_id: string;
+  tts_speed: number;
+  subtitle_font_family: string;
+  subtitle_font_size: number;
+  subtitle_font_color: string;
+  subtitle_position: 'bottom' | 'center' | 'top';
+  subtitle_y_position: number | null;
+  subtitle_font: string;
+  subtitle_color: string;
+  subtitles_enabled: boolean;
+  custom_font_file: string | null;
+  zoom_intensity: number;
+  ken_burns_zoom: number;
+  transition_duration: number;
+  inter_segment_silence: number;
+  logo_enabled: boolean;
+  active_logo: string | null;
+  logo_scale: number;
+  logo_position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  logo_opacity: number;
+  logo_margin: number;
+  outro_enabled: boolean;
+  active_outro: string | null;
+}
+
 export interface Segment {
   id: string;
   project: string;
@@ -58,11 +89,6 @@ export interface OutroVideo {
   name: string;
   file: string;      // URL path to the outro video
   uploaded_at: string;
-}
-
-export interface ProjectDetail extends Omit<Project, 'segment_count'> {
-  output_path: string | null;
-  segments: Segment[];
 }
 
 export interface CreateProjectPayload {

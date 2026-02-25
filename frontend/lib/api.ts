@@ -37,8 +37,11 @@ export async function createProject(payload: CreateProjectPayload): Promise<Proj
   return response.data;
 }
 
-export async function updateProject(id: string, data: Partial<Pick<Project, 'title' | 'status'>>): Promise<Project> {
-  const response = await api.patch<Project>(`/api/projects/${id}/`, data);
+export async function updateProject(
+  id: string,
+  data: Partial<Omit<ProjectDetail, 'id' | 'created_at' | 'updated_at' | 'segments' | 'custom_font_file'>>,
+): Promise<ProjectDetail> {
+  const response = await api.patch<ProjectDetail>(`/api/projects/${id}/`, data);
   return response.data;
 }
 

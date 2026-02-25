@@ -28,6 +28,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { EmptyState } from '@/components/EmptyState';
+import { StoryTemplateModal } from '@/components/StoryTemplateModal';
 import { FolderPlus, Search, X, ArrowUpDown, Trash2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { ProjectsSkeleton } from '@/components/skeletons';
@@ -235,6 +236,7 @@ export default function ProjectsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <StoryTemplateModal />
           <CreateProjectDialog onProjectCreated={handleProjectCreated} />
           <Button variant="outline" size="sm" onClick={() => setShowImportDialog(true)}>
             Import Story

@@ -605,13 +605,6 @@ def render_project(
     # outside a Django context during early development.
     from api.models import Project, Segment  # noqa: E402
 
-    # GlobalSettings may not exist yet; import separately to handle
-    # gracefully if the model or table is missing.
-    try:
-        from api.models import GlobalSettings  # noqa: E402
-    except ImportError:
-        GlobalSettings = None  # type: ignore[assignment,misc]
-
     logger.info("=== Render started for project %s ===", project_id)
 
     # ------------------------------------------------------------------
@@ -634,83 +627,30 @@ def render_project(
     fps = project.framerate
 
     # ------------------------------------------------------------------
-    # C2. Read zoom intensity and overrides from GlobalSettings
+    # C2. Read zoom intensity from Project
     # ------------------------------------------------------------------
     _DEFAULT_ZOOM = 1.3
-    zoom_intensity = _DEFAULT_ZOOM
-
-    if GlobalSettings is not None:
-        try:
-            gs = GlobalSettings.objects.first()
-
-            if gs is not None:
-                # ── Override resolution from GlobalSettings if set ──
-                gs_width = getattr(gs, "render_width", None)
-                gs_height = getattr(gs, "render_height", None)
-                if gs_width and gs_height and gs_width > 0 and gs_height > 0:
-                    res_width = int(gs_width)
-                    res_height = int(gs_height)
-                    logger.info(
-                        "Resolution overridden by GlobalSettings: %dx%d",
-                        res_width, res_height,
-                    )
-
-                # ── Override FPS from GlobalSettings if set ──
-                gs_fps = getattr(gs, "render_fps", None)
-                if gs_fps and gs_fps > 0:
-                    fps = int(gs_fps)
-                    logger.info(
-                        "FPS overridden by GlobalSettings: %d", fps,
-                    )
-
-                val = getattr(gs, "zoom_intensity", None)
-
-                if val is None:
-                    # zoom_intensity attribute missing or None — use default.
-                    logger.warning(
-                        "GlobalSettings zoom_intensity is None. "
-                        "Falling back to default %.1f.",
-                        _DEFAULT_ZOOM,
-                    )
-                elif val <= 0:
-                    # Invalid: zoom_intensity must be positive.
-                    logger.warning(
-                        "Invalid zoom_intensity value in GlobalSettings: %s "
-                        "(must be > 0). Falling back to default %.1f.",
-                        val,
-                        _DEFAULT_ZOOM,
-                    )
-                else:
-                    # Valid positive value — accept it.
-                    zoom_intensity = float(val)
-
-                    # Log atypical but technically valid ranges.
-                    if zoom_intensity < 1.0 or zoom_intensity > 2.0:
-                        logger.debug(
-                            "zoom_intensity %.2f is outside the typical "
-                            "range (1.0–2.0). Accepting as-is.",
-                            zoom_intensity,
-                        )
-            else:
-                # GlobalSettings table exists but has no rows.
-                logger.warning(
-                    "No GlobalSettings row found in the database. "
-                    "Using default zoom_intensity=%.1f.",
-                    _DEFAULT_ZOOM,
-                )
-        except Exception as gs_err:
-            logger.warning(
-                "Could not read GlobalSettings: %s. "
-                "Using default zoom_intensity=%.1f.",
-                gs_err,
-                _DEFAULT_ZOOM,
+    val = getattr(project, "zoom_intensity", None)
+    if val is not None and val > 0:
+        zoom_intensity = float(val)
+        if zoom_intensity < 1.0 or zoom_intensity > 2.0:
+            logger.debug(
+                "zoom_intensity %.2f is outside the typical "
+                "range (1.0–2.0). Accepting as-is.",
+                zoom_intensity,
             )
+    else:
+        zoom_intensity = _DEFAULT_ZOOM
+        logger.warning(
+            "Project zoom_intensity is %s. Falling back to default %.1f.",
+            val, _DEFAULT_ZOOM,
+        )
 
     logger.info("Zoom intensity for render: %.2f", zoom_intensity)
     logger.info("Resolution: %dx%d @ %d fps", res_width, res_height, fps)
 
     # ------------------------------------------------------------------
-    # C3. Read subtitle settings from GlobalSettings
+    # C3. Read subtitle settings from Project
     # ------------------------------------------------------------------
     subtitle_font = None
     subtitle_color = "#FFFFFF"
@@ -720,40 +660,30 @@ def render_project(
     subtitles_enabled = True
     inter_segment_silence = INTER_SEGMENT_SILENCE
 
-    if GlobalSettings is not None:
-        try:
-            gs_sub = GlobalSettings.objects.first()
-            if gs_sub is not None:
-                raw_font = getattr(gs_sub, "subtitle_font", "") or ""
-                if raw_font.strip():
-                    subtitle_font = raw_font.strip()
-                raw_color = getattr(gs_sub, "subtitle_color", "") or ""
-                if raw_color.strip():
-                    subtitle_color = raw_color.strip()
-                # Font size (None → auto)
-                raw_fs = getattr(gs_sub, "subtitle_font_size", None)
-                if raw_fs is not None and int(raw_fs) > 0:
-                    subtitle_font_size = int(raw_fs)
-                # Subtitle position
-                raw_pos = getattr(gs_sub, "subtitle_position", "") or ""
-                if raw_pos.strip() in ("top", "center", "bottom"):
-                    subtitle_position = raw_pos.strip()
-                # Manual Y position override
-                raw_y_pos = getattr(gs_sub, "subtitle_y_position", None)
-                if raw_y_pos is not None:
-                    subtitle_y_position = int(raw_y_pos)
-                # Subtitles toggle
-                subtitles_enabled = getattr(gs_sub, "subtitles_enabled", True)
-                # Inter-segment silence
-                iss_val = getattr(gs_sub, "inter_segment_silence", None)
-                if iss_val is not None and iss_val >= 0:
-                    inter_segment_silence = float(iss_val)
-        except Exception as sub_err:
-            logger.warning(
-                "Could not read subtitle settings from GlobalSettings: %s. "
-                "Using defaults.",
-                sub_err,
-            )
+    raw_font = getattr(project, "subtitle_font", "") or ""
+    if raw_font.strip():
+        subtitle_font = raw_font.strip()
+    raw_color = getattr(project, "subtitle_color", "") or ""
+    if raw_color.strip():
+        subtitle_color = raw_color.strip()
+    # Font size (None → auto)
+    raw_fs = getattr(project, "subtitle_font_size", None)
+    if raw_fs is not None and int(raw_fs) > 0:
+        subtitle_font_size = int(raw_fs)
+    # Subtitle position
+    raw_pos = getattr(project, "subtitle_position", "") or ""
+    if raw_pos.strip() in ("top", "center", "bottom"):
+        subtitle_position = raw_pos.strip()
+    # Manual Y position override
+    raw_y_pos = getattr(project, "subtitle_y_position", None)
+    if raw_y_pos is not None:
+        subtitle_y_position = int(raw_y_pos)
+    # Subtitles toggle
+    subtitles_enabled = getattr(project, "subtitles_enabled", True)
+    # Inter-segment silence
+    iss_val = getattr(project, "inter_segment_silence", None)
+    if iss_val is not None and iss_val >= 0:
+        inter_segment_silence = float(iss_val)
 
     # Resolve font name to a filesystem path
     resolved_font = render_utils.get_font_path(subtitle_font)
@@ -768,33 +698,31 @@ def render_project(
     )
 
     # ------------------------------------------------------------------
-    # C4. Read logo watermark settings from GlobalSettings
+    # C4. Read logo watermark settings from Project
     # ------------------------------------------------------------------
     # Logo is pre-rendered in the fast compositor — we only need to
     # detect if it's enabled and pass the file path.
     logo_enabled = False
 
-    if GlobalSettings is not None:
-        try:
-            gs_logo = GlobalSettings.objects.first()
-            if gs_logo is not None and getattr(gs_logo, "logo_enabled", False):
-                active_logo = getattr(gs_logo, "active_logo", None)
-                if active_logo is not None and active_logo.file:
-                    logo_file_path = active_logo.file.path
-                    if os.path.isfile(logo_file_path):
-                        logo_enabled = True
-                        logger.info(
-                            "Logo watermark enabled: %s",
-                            os.path.basename(logo_file_path),
-                        )
-                    else:
-                        logger.warning(
-                            "Logo file not found: %s", logo_file_path,
-                        )
-        except Exception as logo_err:
-            logger.warning(
-                "Could not read logo settings: %s. Logo disabled.", logo_err,
-            )
+    try:
+        if getattr(project, "logo_enabled", False):
+            active_logo = getattr(project, "active_logo", None)
+            if active_logo is not None and active_logo.file:
+                logo_file_path = active_logo.file.path
+                if os.path.isfile(logo_file_path):
+                    logo_enabled = True
+                    logger.info(
+                        "Logo watermark enabled: %s",
+                        os.path.basename(logo_file_path),
+                    )
+                else:
+                    logger.warning(
+                        "Logo file not found: %s", logo_file_path,
+                    )
+    except Exception as logo_err:
+        logger.warning(
+            "Could not read logo settings: %s. Logo disabled.", logo_err,
+        )
 
     # Warnings accumulator for the result dict
     warnings: list[str] = []
@@ -1034,15 +962,14 @@ def render_project(
         logo_settings_dict: Optional[dict] = None
         if logo_enabled:
             try:
-                gs_logo = GlobalSettings.objects.first()
-                active_logo = getattr(gs_logo, "active_logo", None)
+                active_logo = getattr(project, "active_logo", None)
                 if active_logo and active_logo.file:
                     logo_settings_dict = {
                         "file_path": active_logo.file.path,
-                        "scale": float(getattr(gs_logo, "logo_scale", 0.15)),
-                        "position": getattr(gs_logo, "logo_position", "bottom-right"),
-                        "opacity": float(getattr(gs_logo, "logo_opacity", 1.0)),
-                        "margin": int(getattr(gs_logo, "logo_margin", 20)),
+                        "scale": float(getattr(project, "logo_scale", 0.15)),
+                        "position": getattr(project, "logo_position", "bottom-right"),
+                        "opacity": float(getattr(project, "logo_opacity", 1.0)),
+                        "margin": int(getattr(project, "logo_margin", 20)),
                     }
             except Exception as logo_err:
                 logger.warning("Could not read logo settings: %s", logo_err)
@@ -1074,68 +1001,60 @@ def render_project(
         # I. Append outro video (if enabled)
         # --------------------------------------------------------------
         outro_appended = False
-        if GlobalSettings is not None:
-            try:
-                gs_outro = GlobalSettings.objects.first()
-                outro_enabled = (
-                    gs_outro is not None
-                    and getattr(gs_outro, "outro_enabled", False)
-                )
-                logger.info(
-                    "Outro check: gs_outro=%s, outro_enabled=%s, "
-                    "active_outro=%s",
-                    gs_outro is not None,
-                    outro_enabled,
-                    getattr(gs_outro, "active_outro_id", None)
-                    if gs_outro else None,
-                )
-                if outro_enabled:
-                    active_outro = getattr(gs_outro, "active_outro", None)
-                    if active_outro is not None and active_outro.file:
-                        outro_path = active_outro.file.path
-                        logger.info(
-                            "Outro file path: %s  exists=%s",
-                            outro_path,
-                            os.path.isfile(outro_path),
+        try:
+            outro_enabled = getattr(project, "outro_enabled", False)
+            logger.info(
+                "Outro check: outro_enabled=%s, active_outro=%s",
+                outro_enabled,
+                getattr(project, "active_outro_id", None),
+            )
+            if outro_enabled:
+                active_outro = getattr(project, "active_outro", None)
+                if active_outro is not None and active_outro.file:
+                    outro_path = active_outro.file.path
+                    logger.info(
+                        "Outro file path: %s  exists=%s",
+                        outro_path,
+                        os.path.isfile(outro_path),
+                    )
+                    if os.path.isfile(outro_path):
+                        if on_progress:
+                            on_progress(92, 100, "Appending outro video…")
+                        outro_appended = _append_outro(
+                            main_video=output_path,
+                            outro_video=outro_path,
+                            fps=fps,
+                            crossfade_duration=TRANSITION_DURATION,
+                            use_nvenc=use_nvenc,
                         )
-                        if os.path.isfile(outro_path):
-                            if on_progress:
-                                on_progress(92, 100, "Appending outro video…")
-                            outro_appended = _append_outro(
-                                main_video=output_path,
-                                outro_video=outro_path,
-                                fps=fps,
-                                crossfade_duration=TRANSITION_DURATION,
-                                use_nvenc=use_nvenc,
+                        if outro_appended:
+                            logger.info(
+                                "Outro video appended successfully: %s",
+                                os.path.basename(outro_path),
                             )
-                            if outro_appended:
-                                logger.info(
-                                    "Outro video appended successfully: %s",
-                                    os.path.basename(outro_path),
-                                )
-                            else:
-                                warnings.append(
-                                    "Outro video could not be appended "
-                                    "(FFmpeg error – check server logs)."
-                                )
                         else:
                             warnings.append(
-                                f"Outro file not found on disk: "
-                                f"{os.path.basename(outro_path)}"
-                            )
-                            logger.warning(
-                                "Outro file not found: %s", outro_path,
+                                "Outro video could not be appended "
+                                "(FFmpeg error – check server logs)."
                             )
                     else:
-                        logger.info(
-                            "Outro enabled but no active outro selected "
-                            "or file is empty."
+                        warnings.append(
+                            f"Outro file not found on disk: "
+                            f"{os.path.basename(outro_path)}"
                         )
-            except Exception as outro_err:
-                logger.warning(
-                    "Could not append outro video: %s", outro_err,
-                )
-                warnings.append(f"Outro append failed: {outro_err}")
+                        logger.warning(
+                            "Outro file not found: %s", outro_path,
+                        )
+                else:
+                    logger.info(
+                        "Outro enabled but no active outro selected "
+                        "or file is empty."
+                    )
+        except Exception as outro_err:
+            logger.warning(
+                "Could not append outro video: %s", outro_err,
+            )
+            warnings.append(f"Outro append failed: {outro_err}")
 
         # --------------------------------------------------------------
         # K. Verify output and capture duration

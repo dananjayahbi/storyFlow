@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSettingsStore } from '@/lib/stores';
+import { useSettingsStore, useProjectStore } from '@/lib/stores';
 import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -21,8 +21,6 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
-  Volume2,
-  RefreshCw,
   Timer,
   Captions,
   Stamp,
@@ -43,15 +41,8 @@ function getInitialCollapsed(): boolean {
 }
 
 export function GlobalSettingsPanel() {
-  const {
-    globalSettings,
-    isSettingsLoading,
-    settingsError,
-    fetchSettings,
-    updateSettings,
-    outroVideos,
-    fetchOutroVideos,
-  } = useSettingsStore();
+  const { project, isLoading: isProjectLoading, updateProjectSettings } = useProjectStore();
+  const { outroVideos, fetchOutroVideos, logos, fetchLogos } = useSettingsStore();
 
   const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
 
@@ -68,19 +59,19 @@ export function GlobalSettingsPanel() {
   // Logo watermark modal state
   const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
 
-  // Fetch settings on mount
+  // Fetch global assets on mount (project is already loaded by the page)
   useEffect(() => {
-    fetchSettings();
     fetchOutroVideos();
-  }, [fetchSettings, fetchOutroVideos]);
+    fetchLogos();
+  }, [fetchOutroVideos, fetchLogos]);
 
-  // Sync local slider value when globalSettings loads/changes
+  // Sync local slider value when project loads/changes
   useEffect(() => {
-    if (globalSettings) {
-      setLocalSpeed(globalSettings.tts_speed);
-      setLocalSilence(globalSettings.inter_segment_silence);
+    if (project) {
+      setLocalSpeed(project.tts_speed);
+      setLocalSilence(project.inter_segment_silence);
     }
-  }, [globalSettings]);
+  }, [project]);
 
   // Persist collapsed state to localStorage
   const toggleCollapsed = useCallback(() => {
@@ -95,17 +86,30 @@ export function GlobalSettingsPanel() {
     });
   }, []);
 
-  // Shared handler: wraps updateSettings with toast feedback
+  // Shared handler: wraps updateProjectSettings with toast feedback
   const handleSettingChange = useCallback(
-    async (data: Parameters<typeof updateSettings>[0]) => {
+    async (data: Parameters<typeof updateProjectSettings>[0]) => {
       try {
-        await updateSettings(data);
-        toast.success('Settings saved successfully');
+        await updateProjectSettings(data);
+        toast.success('Settings saved');
       } catch {
         toast.error('Failed to save settings');
       }
     },
-    [updateSettings]
+    [updateProjectSettings]
+  );
+
+  // Wrapper for RenderSettingsForm that maps render_* field names to ProjectDetail field names
+  const handleRenderSettingChange = useCallback(
+    async (data: { zoom_intensity?: number; render_width?: number; render_height?: number; render_fps?: number }) => {
+      const mapped: Parameters<typeof updateProjectSettings>[0] = {};
+      if (data.zoom_intensity !== undefined) mapped.zoom_intensity = data.zoom_intensity;
+      if (data.render_width !== undefined) mapped.resolution_width = data.render_width;
+      if (data.render_height !== undefined) mapped.resolution_height = data.render_height;
+      if (data.render_fps !== undefined) mapped.framerate = data.render_fps;
+      await handleSettingChange(mapped);
+    },
+    [handleSettingChange]
   );
 
   // ── TTS Speed slider with debounce ──
@@ -149,7 +153,7 @@ export function GlobalSettingsPanel() {
   }, []);
 
   // ── Loading skeleton ──
-  if (isSettingsLoading) {
+  if (isProjectLoading) {
     return (
       <div className="p-4">
         <div className="flex items-center gap-2 mb-4">
@@ -180,20 +184,16 @@ export function GlobalSettingsPanel() {
   }
 
   // ── Error state ──
-  if (settingsError || !globalSettings) {
+  if (!project) {
     return (
       <div className="p-4">
         <div className="flex items-center gap-2 mb-4">
           <Settings className="h-5 w-5 text-muted-foreground" />
           <span className="font-medium text-sm">Settings</span>
         </div>
-        <p className="text-sm text-destructive mb-3">
-          {settingsError || 'Failed to load settings'}
+        <p className="text-sm text-muted-foreground mb-3">
+          No project loaded
         </p>
-        <Button size="sm" variant="outline" onClick={fetchSettings}>
-          <RefreshCw className="h-4 w-4 mr-1" />
-          Retry
-        </Button>
       </div>
     );
   }
@@ -221,7 +221,7 @@ export function GlobalSettingsPanel() {
           <section>
             {/* Voice Selector (Task 05.03.02) */}
             <VoiceSelector
-              value={globalSettings.default_voice_id}
+              value={project.default_voice_id}
               onChange={handleSettingChange}
             />
 
@@ -232,11 +232,11 @@ export function GlobalSettingsPanel() {
                   TTS Speed
                 </label>
                 <span className="text-xs font-medium tabular-nums">
-                  {(localSpeed ?? globalSettings.tts_speed).toFixed(1)}x
+                  {(localSpeed ?? project.tts_speed).toFixed(1)}x
                 </span>
               </div>
               <Slider
-                value={[localSpeed ?? globalSettings.tts_speed]}
+                value={[localSpeed ?? project.tts_speed]}
                 min={0.5}
                 max={2.0}
                 step={0.1}
@@ -263,11 +263,11 @@ export function GlobalSettingsPanel() {
                   Pause Between Segments
                 </label>
                 <span className="text-xs font-medium tabular-nums">
-                  {(localSilence ?? globalSettings.inter_segment_silence).toFixed(1)}s
+                  {(localSilence ?? project.inter_segment_silence).toFixed(1)}s
                 </span>
               </div>
               <Slider
-                value={[localSilence ?? globalSettings.inter_segment_silence]}
+                value={[localSilence ?? project.inter_segment_silence]}
                 min={0}
                 max={3.0}
                 step={0.1}
@@ -284,11 +284,11 @@ export function GlobalSettingsPanel() {
           {/* ── Render Settings Section (Task 05.03.05) ── */}
           <section>
             <RenderSettingsForm
-              zoomIntensity={globalSettings.zoom_intensity}
-              renderWidth={globalSettings.render_width ?? 1920}
-              renderHeight={globalSettings.render_height ?? 1080}
-              renderFps={globalSettings.render_fps ?? 30}
-              onChange={handleSettingChange}
+              zoomIntensity={project.zoom_intensity}
+              renderWidth={project.resolution_width ?? 1920}
+              renderHeight={project.resolution_height ?? 1080}
+              renderFps={project.framerate ?? 30}
+              onChange={handleRenderSettingChange}
             />
           </section>
 
@@ -303,11 +303,11 @@ export function GlobalSettingsPanel() {
               </h3>
               <label className="flex items-center gap-2 cursor-pointer">
                 <span className="text-xs text-muted-foreground">
-                  {globalSettings.logo_enabled ? 'On' : 'Off'}
+                  {project.logo_enabled ? 'On' : 'Off'}
                 </span>
                 <input
                   type="checkbox"
-                  checked={globalSettings.logo_enabled ?? false}
+                  checked={project.logo_enabled ?? false}
                   onChange={(e) =>
                     handleSettingChange({ logo_enabled: e.target.checked })
                   }
@@ -326,21 +326,21 @@ export function GlobalSettingsPanel() {
               Configure Watermark
             </Button>
 
-            {globalSettings.logo_enabled && globalSettings.active_logo && (
+            {project.logo_enabled && project.active_logo && (
               <p className="text-[10px] text-muted-foreground mt-1.5">
                 Logo will be placed at{' '}
                 <span className="font-medium">
-                  {globalSettings.logo_position?.replace('-', ' ') ?? 'bottom right'}
+                  {project.logo_position?.replace('-', ' ') ?? 'bottom right'}
                 </span>{' '}
-                with {Math.round((globalSettings.logo_opacity ?? 1) * 100)}% opacity
+                with {Math.round((project.logo_opacity ?? 1) * 100)}% opacity
               </p>
             )}
 
             <LogoWatermarkModal
               open={isLogoModalOpen}
               onOpenChange={setIsLogoModalOpen}
-              renderWidth={globalSettings.render_width ?? 1920}
-              renderHeight={globalSettings.render_height ?? 1080}
+              renderWidth={project.resolution_width ?? 1920}
+              renderHeight={project.resolution_height ?? 1080}
             />
           </section>
 
@@ -355,11 +355,11 @@ export function GlobalSettingsPanel() {
               </h3>
               <label className="flex items-center gap-2 cursor-pointer">
                 <span className="text-xs text-muted-foreground">
-                  {globalSettings.outro_enabled ? 'On' : 'Off'}
+                  {project.outro_enabled ? 'On' : 'Off'}
                 </span>
                 <input
                   type="checkbox"
-                  checked={globalSettings.outro_enabled ?? false}
+                  checked={project.outro_enabled ?? false}
                   onChange={(e) =>
                     handleSettingChange({ outro_enabled: e.target.checked })
                   }
@@ -368,10 +368,10 @@ export function GlobalSettingsPanel() {
               </label>
             </div>
 
-            {globalSettings.outro_enabled && (
+            {project.outro_enabled && (
               <div className="space-y-2">
                 <Select
-                  value={globalSettings.active_outro ?? ''}
+                  value={project.active_outro ?? ''}
                   onValueChange={(val) =>
                     handleSettingChange({ active_outro: val || null })
                   }
@@ -392,7 +392,7 @@ export function GlobalSettingsPanel() {
                     No outro videos uploaded. Go to Settings page to upload.
                   </p>
                 )}
-                {globalSettings.active_outro && (
+                {project.active_outro && (
                   <p className="text-[10px] text-muted-foreground">
                     Selected video will be appended with a smooth crossfade.
                   </p>
@@ -413,11 +413,11 @@ export function GlobalSettingsPanel() {
               </h3>
               <label className="flex items-center gap-2 cursor-pointer">
                 <span className="text-xs text-muted-foreground">
-                  {globalSettings.subtitles_enabled ? 'On' : 'Off'}
+                  {project.subtitles_enabled ? 'On' : 'Off'}
                 </span>
                 <input
                   type="checkbox"
-                  checked={globalSettings.subtitles_enabled}
+                  checked={project.subtitles_enabled}
                   onChange={(e) =>
                     handleSettingChange({ subtitles_enabled: e.target.checked })
                   }
@@ -426,15 +426,15 @@ export function GlobalSettingsPanel() {
               </label>
             </div>
 
-            {globalSettings.subtitles_enabled && (
+            {project.subtitles_enabled && (
               <SubtitleSettingsForm
-                font={globalSettings.subtitle_font}
-                color={globalSettings.subtitle_color}
-                fontSize={globalSettings.subtitle_font_size ?? 48}
-                position={globalSettings.subtitle_position ?? 'bottom'}
-                yPosition={globalSettings.subtitle_y_position ?? null}
-                renderWidth={globalSettings.render_width ?? 1920}
-                renderHeight={globalSettings.render_height ?? 1080}
+                font={project.subtitle_font}
+                color={project.subtitle_color}
+                fontSize={project.subtitle_font_size ?? 48}
+                position={project.subtitle_position ?? 'bottom'}
+                yPosition={project.subtitle_y_position ?? null}
+                renderWidth={project.resolution_width ?? 1920}
+                renderHeight={project.resolution_height ?? 1080}
                 onChange={handleSettingChange}
               />
             )}

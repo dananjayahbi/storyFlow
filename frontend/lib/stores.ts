@@ -132,6 +132,9 @@ interface ProjectStore {
   /** Rename the current project. */
   renameProject: (newTitle: string) => Promise<void>;
 
+  /** Update per-project settings (optimistic). */
+  updateProjectSettings: (data: Partial<ProjectDetail>) => Promise<void>;
+
   reset: () => void;
 }
 
@@ -160,6 +163,22 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     if (!project) return;
     const updated = await apiUpdateProject(String(project.id), { title: newTitle });
     set({ project: { ...project, title: updated.title } });
+  },
+
+  updateProjectSettings: async (data) => {
+    const project = get().project;
+    if (!project) return;
+    const previous = project;
+    // Optimistic update
+    set({ project: { ...project, ...data } });
+    try {
+      const updated = await apiUpdateProject(String(project.id), data);
+      set({ project: { ...project, ...updated } });
+    } catch {
+      // Rollback on failure
+      set({ project: previous });
+      throw new Error('Failed to save project settings');
+    }
   },
 
   fetchProject: async (id) => {

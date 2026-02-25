@@ -7,6 +7,7 @@ import { useProjectStore } from '@/lib/stores';
 import { Timeline } from '@/components/Timeline';
 import { GlobalSettingsPanel } from '@/components/GlobalSettingsPanel';
 import ImportDialog from '@/components/ImportDialog';
+import { StoryTemplateModal } from '@/components/StoryTemplateModal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -15,7 +16,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrowLeft, Volume2, Film, Loader2, X, FileUp, Download, CheckCircle, AlertCircle,
-  Settings, ChevronLeft, ChevronRight, Info, Sliders, Home, Layers, Calendar, FolderOpen, Pencil, Check,
+  Settings, ChevronLeft, ChevronRight, Info, Sliders, Home, Layers, Calendar, FolderOpen, Pencil, Check, BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -504,6 +505,18 @@ export default function TimelineEditorPage() {
                         <FileUp className="h-3.5 w-3.5 mr-2" />
                         Import Segments
                       </Button>
+                      <StoryTemplateModal
+                        trigger={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full justify-start text-xs"
+                          >
+                            <BookOpen className="h-3.5 w-3.5 mr-2" />
+                            Story Template
+                          </Button>
+                        }
+                      />
                       <Button
                         variant="outline"
                         size="sm"

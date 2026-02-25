@@ -237,10 +237,10 @@ export default function GalleryPage() {
 
       {/* Loading state */}
       {loading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="columns-1 md:columns-2 lg:columns-3 gap-4 [column-fill:_balance]">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="overflow-hidden">
-              <Skeleton className="aspect-video w-full" />
+            <Card key={i} className="overflow-hidden break-inside-avoid mb-4">
+              <Skeleton className={`w-full ${i % 3 === 1 ? 'aspect-[9/16]' : 'aspect-video'}`} />
               <CardContent className="pt-4">
                 <Skeleton className="h-5 w-3/4 mb-2" />
                 <Skeleton className="h-4 w-1/2" />
@@ -262,17 +262,22 @@ export default function GalleryPage() {
         </div>
       )}
 
-      {/* Video grid */}
+      {/* Video grid — masonry layout for mixed aspect ratios */}
       {!loading && items.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="columns-1 md:columns-2 lg:columns-3 gap-4 [column-fill:_balance]">
           {items.map((item) => (
             <Card
               key={item.id}
-              className="overflow-hidden cursor-pointer group hover:ring-2 hover:ring-primary/20 transition-all"
+              className="overflow-hidden cursor-pointer group hover:ring-2 hover:ring-primary/20 transition-all break-inside-avoid mb-4"
               onClick={() => setSelectedItem(item)}
             >
               {/* Video preview */}
-              <div className="relative aspect-video bg-black">
+              <div
+                className="relative bg-black"
+                style={{
+                  aspectRatio: `${item.resolution_width} / ${item.resolution_height}`,
+                }}
+              >
                 <video
                   src={getStreamUrl(item.id)}
                   className="w-full h-full object-contain"
