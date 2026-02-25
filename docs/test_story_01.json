@@ -1,0 +1,53 @@
+{
+  "title": "The Midnight Train to Nowhere",
+  "segments": [
+    {
+      "text_content": "There's a rail line that doesn't appear on any map. No schedule, no ticketing office, no destination listed. But if you stand on the right platform, at the right hour, you'll hear it — a low, iron groan rising from the dark.",
+      "image_prompt": "An abandoned train station at night, bathed in cold blue moonlight. Rusted tracks disappear into thick fog. A single flickering lamp post casts long shadows across cracked concrete. Cinematic wide shot, low angle, eerie atmosphere, photorealistic style."
+    },
+    {
+      "text_content": "The Midnight Train arrives at 12:01. Not midnight — one minute past. As if it waits for the day to fully die before it makes its entrance. The locomotive is ancient, blackened steel with windows that glow a dim amber, like the last embers of a campfire.",
+      "image_prompt": "A vintage black steam locomotive emerging from dense fog at a desolate station. Warm amber light glows from the windows, contrasting with the cold night. Steam billows around the wheels. Eye-level shot, dramatic chiaroscuro lighting, moody cinematic color grading."
+    },
+    {
+      "text_content": "Nobody talks about buying a ticket. You just walk on. The doors are always open, the seats always empty — or almost empty. There are others, sometimes, sitting with their eyes closed, tears running silently down their cheeks. You learn quickly not to disturb them.",
+      "image_prompt": "Interior of an old train car with worn velvet seats in deep burgundy. A few solitary passengers sit apart, faces illuminated by soft golden window light, eyes closed, tears visible. Dust motes float in the air. Medium shot, shallow depth of field, melancholic and intimate atmosphere."
+    },
+    {
+      "text_content": "The moment you sit down, the world outside the window changes. It's not a landscape anymore. It's a kitchen — your grandmother's kitchen, with the yellow curtains and the radio playing something you forgot you loved. The smell of cinnamon hits you so hard your chest aches.",
+      "image_prompt": "View through a train window that shows not a landscape but a warm, sunlit kitchen from the 1970s. Yellow floral curtains, a wooden radio on the counter, a plate of cinnamon rolls. The image is slightly hazy, dreamlike. Over-the-shoulder shot from inside the train, warm nostalgic color palette, soft focus edges."
+    },
+    {
+      "text_content": "Each window shows a different memory. Not just yours — other people's too, if you look long enough. A child's birthday party in a backyard strung with paper lanterns. A couple slow-dancing in a living room at three in the morning. Moments so private you feel guilty for watching.",
+      "image_prompt": "A montage visible through multiple train windows: one shows a children's birthday party with paper lanterns, another a couple dancing in a dim living room, another a sunset viewed from a porch. Each window framed in dark wood. Tracking shot along the train corridor, each window glowing with different warm tones, painterly and surreal."
+    },
+    {
+      "text_content": "A conductor walks the aisle, though he never checks tickets. He's tall, gaunt, with a face that looks carved from driftwood. When you ask where the train is going, he smiles — just barely — and says, 'Wherever you left something behind.'",
+      "image_prompt": "A tall, gaunt train conductor in a dark navy uniform walking down a dimly lit train aisle. His face is weathered and ancient, with deep-set kind eyes. He holds a brass lantern. Low angle shot looking up, dramatic rim lighting, shadows stretching behind him, gothic and mysterious tone."
+    },
+    {
+      "text_content": "There's a woman in car number seven who has ridden the train for what she says is eleven years. She's looking for one specific memory — the sound of her daughter's laugh before the accident. She says she's heard it twice, but the train moved on before she could hold onto it.",
+      "image_prompt": "A middle-aged woman sitting alone in a train car, pressing her hand against the cold window glass. Her reflection overlaps with the image of a young girl laughing in a sunlit garden visible through the window. Close-up portrait, split lighting between cold blue interior and warm golden memory, deeply emotional composition."
+    },
+    {
+      "text_content": "The train passes through tunnels that last hours. In the darkness, you hear things — fragments of conversations, a dog barking, rain on a tin roof. Sounds you didn't know you remembered. Sounds that remake you from the inside out.",
+      "image_prompt": "The interior of a dark train tunnel, viewed from inside the train car. The car is nearly black except for faint reflections. Abstract sound waves are subtly visualized as ghostly ripples in the air. First-person perspective, ultra-dark with minimal highlights, abstract and atmospheric, sound made visible."
+    },
+    {
+      "text_content": "Some passengers try to get off at their memories. They stand, they reach for the door. But the platform is never quite there. The train slows, and the memory sharpens into perfect focus — and then it slides away, like a word on the tip of your tongue.",
+      "image_prompt": "A passenger standing at an open train door, reaching out toward a vivid scene of a childhood home with a red door and blooming garden. The scene is crystal clear but just out of reach, beginning to blur at the edges as the train moves. Dynamic motion blur, bittersweet atmosphere, hyperrealistic memory dissolving into impressionist streaks."
+    },
+    {
+      "text_content": "But once — just once — a man stepped off. He was old, frail, wearing a coat two sizes too big. The train stopped at what looked like a hospital room, white and quiet. He stepped through the door, sat beside the bed, and took someone's hand. The doors closed behind him. He never came back.",
+      "image_prompt": "An elderly man in an oversized brown coat stepping from the train into a white hospital room. He reaches for the hand of someone lying in the bed, their face unseen. The train door frames the scene like a portal. Warm white light flooding in from the hospital side, dark train interior behind him, deeply poignant composition, cinematic aspect ratio."
+    },
+    {
+      "text_content": "The conductor said nothing about it. Just tipped his hat and moved on. But I noticed something — the seat where the old man sat had changed. The velvet was newer, brighter, as if the train itself had healed a little where he'd been.",
+      "image_prompt": "An empty train seat with noticeably brighter, richer burgundy velvet compared to the worn seats around it. A faint warm glow emanates from the cushion. The conductor's silhouette is visible in the background, walking away. Close-up detail shot, warm golden highlights, metaphorical and tender, soft cinematic grain."
+    },
+    {
+      "text_content": "I rode the Midnight Train three times before I understood. It doesn't take you to your memories — it takes you through them, so you can finally let them go. And maybe, if you're brave enough, you stop holding on and start holding someone else's hand instead. The train is still running. It always will be.",
+      "image_prompt": "A wide shot of the midnight train pulling away from a station into a star-filled sky, its amber windows glowing like a string of lanterns. A single figure stands on the platform, watching it leave, at peace. The tracks ahead dissolve into soft golden light. Epic wide composition, magical realism, hopeful and bittersweet, painterly night sky with deep blues and gold."
+    }
+  ]
+}
