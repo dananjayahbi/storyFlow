@@ -39,6 +39,9 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   logo_margin: number;
   outro_enabled: boolean;
   active_outro: string | null;
+  upscale_enabled: boolean;
+  upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
+  upscale_denoise_strength: number;
 }
 
 export interface Segment {
@@ -75,6 +78,9 @@ export interface GlobalSettings {
   logo_margin: number;
   outro_enabled: boolean;
   active_outro: string | null;  // OutroVideo UUID or null
+  upscale_enabled: boolean;
+  upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
+  upscale_denoise_strength: number;
 }
 
 export interface Logo {

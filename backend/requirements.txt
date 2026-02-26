@@ -15,3 +15,9 @@ numpy>=1.26.0
 # Video Rendering (Phase 04)
 moviepy>=1.0.3
 opencv-python-headless>=4.8.0
+
+# Image Upscaling (GAN models — Real-ESRGAN via inline RRDBNet)
+# Install PyTorch first: https://pytorch.org/get-started/locally/
+# CPU-only:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# CUDA 12.x: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# torch is installed separately — not pinned here due to CPU/CUDA variants

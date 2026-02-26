@@ -25,6 +25,7 @@ import {
   Captions,
   Stamp,
   Film,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -52,9 +53,13 @@ export function GlobalSettingsPanel() {
   // Debounce timer ref for inter-segment silence slider
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Debounce timer ref for upscale denoise slider
+  const denoiseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Local slider value for responsive UI (updated immediately, saved after debounce)
   const [localSpeed, setLocalSpeed] = useState<number | null>(null);
   const [localSilence, setLocalSilence] = useState<number | null>(null);
+  const [localDenoise, setLocalDenoise] = useState<number | null>(null);
 
   // Logo watermark modal state
   const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
@@ -70,6 +75,7 @@ export function GlobalSettingsPanel() {
     if (project) {
       setLocalSpeed(project.tts_speed);
       setLocalSilence(project.inter_segment_silence);
+      setLocalDenoise(project.upscale_denoise_strength);
     }
   }, [project]);
 
@@ -144,11 +150,28 @@ export function GlobalSettingsPanel() {
     [handleSettingChange]
   );
 
+  // ── Upscale denoise strength slider with debounce ──
+  const handleDenoiseChange = useCallback(
+    (values: number[]) => {
+      const value = values[0];
+      setLocalDenoise(value);
+
+      if (denoiseTimerRef.current) {
+        clearTimeout(denoiseTimerRef.current);
+      }
+      denoiseTimerRef.current = setTimeout(() => {
+        handleSettingChange({ upscale_denoise_strength: value });
+      }, 300);
+    },
+    [handleSettingChange]
+  );
+
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
       if (speedTimerRef.current) clearTimeout(speedTimerRef.current);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (denoiseTimerRef.current) clearTimeout(denoiseTimerRef.current);
     };
   }, []);
 
@@ -290,6 +313,90 @@ export function GlobalSettingsPanel() {
               renderFps={project.framerate ?? 30}
               onChange={handleRenderSettingChange}
             />
+          </section>
+
+          <Separator />
+
+          {/* ── Image Upscale (GAN) Section ── */}
+          <section>
+            <div className="flex items-center gap-1.5 mb-3">
+              <Sparkles className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex-1">
+                Image Upscale
+              </h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs text-muted-foreground">
+                  {project.upscale_enabled ? 'On' : 'Off'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={project.upscale_enabled ?? false}
+                  onChange={(e) =>
+                    handleSettingChange({ upscale_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-muted-foreground accent-primary cursor-pointer"
+                />
+              </label>
+            </div>
+
+            {project.upscale_enabled && (
+              <div className="space-y-3">
+                {/* Model Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">
+                    GAN Model
+                  </label>
+                  <Select
+                    value={project.upscale_model ?? 'RealESRGAN_x4plus'}
+                    onValueChange={(val) =>
+                      handleSettingChange({ upscale_model: val as 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B' })
+                    }
+                  >
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="Select model…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="RealESRGAN_x4plus">
+                        Real-ESRGAN x4 (General)
+                      </SelectItem>
+                      <SelectItem value="RealESRGAN_x2plus">
+                        Real-ESRGAN x2 (General)
+                      </SelectItem>
+                      <SelectItem value="RealESRGAN_x4plus_anime_6B">
+                        Real-ESRGAN x4 (Anime)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Denoise Strength Slider */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-muted-foreground">
+                      Denoise Strength
+                    </label>
+                    <span className="text-xs font-medium tabular-nums">
+                      {((localDenoise ?? project.upscale_denoise_strength) * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <Slider
+                    value={[localDenoise ?? project.upscale_denoise_strength]}
+                    min={0}
+                    max={1.0}
+                    step={0.05}
+                    onValueChange={handleDenoiseChange}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Higher values remove more noise but may lose details
+                  </p>
+                </div>
+
+                <p className="text-[10px] text-muted-foreground">
+                  Images will be upscaled using the selected GAN model before rendering.
+                  This improves quality for low-resolution source images.
+                </p>
+              </div>
+            )}
           </section>
 
           <Separator />

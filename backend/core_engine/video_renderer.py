@@ -724,6 +724,17 @@ def render_project(
             "Could not read logo settings: %s. Logo disabled.", logo_err,
         )
 
+    # ------------------------------------------------------------------
+    # C5. Read image upscale settings from Project
+    # ------------------------------------------------------------------
+    upscale_enabled = getattr(project, "upscale_enabled", False)
+    upscale_model = getattr(project, "upscale_model", "RealESRGAN_x4plus")
+    upscale_denoise = getattr(project, "upscale_denoise_strength", 0.5)
+    logger.info(
+        "Image upscaling: enabled=%s, model=%s, denoise=%.2f",
+        upscale_enabled, upscale_model, upscale_denoise,
+    )
+
     # Warnings accumulator for the result dict
     warnings: list[str] = []
 
@@ -854,6 +865,56 @@ def render_project(
             raise ValueError(
                 "No valid segments available for rendering."
             )
+
+        # --------------------------------------------------------------
+        # G1.5. Optionally upscale images using GAN model
+        # --------------------------------------------------------------
+        if upscale_enabled:
+            try:
+                from core_engine.image_upscaler import upscale_images_batch
+
+                image_paths = [sd["image_path"] for sd in segment_data_list]
+                upscale_output_dir = os.path.join(
+                    os.path.dirname(output_path), "upscaled_images",
+                )
+                logger.info(
+                    "Upscaling %d images with %s (denoise=%.2f)…",
+                    len(image_paths), upscale_model, upscale_denoise,
+                )
+                if on_progress:
+                    on_progress(0, total_segments, "Upscaling images with GAN model…")
+
+                path_map = upscale_images_batch(
+                    image_paths=image_paths,
+                    output_dir=upscale_output_dir,
+                    model_name=upscale_model,
+                    denoise_strength=upscale_denoise,
+                    on_progress=on_progress,
+                )
+
+                # Replace image paths in segment_data_list
+                for sd in segment_data_list:
+                    original = sd["image_path"]
+                    upscaled = path_map.get(original, original)
+                    if upscaled != original:
+                        sd["image_path"] = upscaled
+                        logger.debug("Using upscaled: %s", upscaled)
+
+                logger.info("Image upscaling complete.")
+            except ImportError:
+                logger.warning(
+                    "realesrgan / basicsr not installed — skipping upscale."
+                )
+                warnings.append(
+                    "Image upscaling was enabled but realesrgan is not installed. "
+                    "Install with: pip install realesrgan basicsr"
+                )
+            except Exception as upscale_err:
+                logger.warning(
+                    "Image upscaling failed: %s — continuing with originals.",
+                    upscale_err,
+                )
+                warnings.append(f"Image upscaling failed: {upscale_err}")
 
         # --------------------------------------------------------------
         # G2. Export mixed audio to temp WAV file

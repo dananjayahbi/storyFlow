@@ -96,6 +96,20 @@ class Project(models.Model):
         related_name='projects_using',
     )
 
+    # Image upscaling (GAN)
+    UPSCALE_MODEL_CHOICES = [
+        ('RealESRGAN_x4plus', 'Real-ESRGAN x4 (General)'),
+        ('RealESRGAN_x2plus', 'Real-ESRGAN x2 (General)'),
+        ('RealESRGAN_x4plus_anime_6B', 'Real-ESRGAN x4 (Anime)'),
+    ]
+    upscale_enabled = models.BooleanField(default=False)
+    upscale_model = models.CharField(
+        max_length=40,
+        choices=UPSCALE_MODEL_CHOICES,
+        default='RealESRGAN_x4plus',
+    )
+    upscale_denoise_strength = models.FloatField(default=0.5)
+
     def __str__(self):
         return self.title
 
@@ -231,6 +245,15 @@ class GlobalSettings(models.Model):
         'OutroVideo', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='active_in_settings',
     )
+
+    # ── Image upscaling (GAN) ──
+    upscale_enabled = models.BooleanField(default=False)
+    upscale_model = models.CharField(
+        max_length=40,
+        choices=Project.UPSCALE_MODEL_CHOICES,
+        default='RealESRGAN_x4plus',
+    )
+    upscale_denoise_strength = models.FloatField(default=0.5)
 
     # ── Timestamps ──
     created_at = models.DateTimeField(auto_now_add=True, null=True)

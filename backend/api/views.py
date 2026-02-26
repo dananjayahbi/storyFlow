@@ -30,7 +30,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
     def get_serializer_class(self):
-        if self.action == 'retrieve':
+        if self.action in ('retrieve', 'partial_update', 'update'):
             return ProjectDetailSerializer
         return ProjectSerializer
 

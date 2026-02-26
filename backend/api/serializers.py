@@ -91,6 +91,7 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             'logo_enabled', 'active_logo', 'logo_scale',
             'logo_position', 'logo_opacity', 'logo_margin',
             'outro_enabled', 'active_outro',
+            'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['custom_font_file', 'created_at', 'updated_at']
@@ -193,6 +194,21 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_upscale_model(self, value):
+        allowed = {'RealESRGAN_x4plus', 'RealESRGAN_x2plus', 'RealESRGAN_x4plus_anime_6B'}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Upscale model must be one of: {", ".join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_upscale_denoise_strength(self, value):
+        if value < 0.0 or value > 1.0:
+            raise serializers.ValidationError(
+                'Upscale denoise strength must be between 0.0 and 1.0.'
+            )
+        return value
+
     # ── Cross-field validation ──────────────────────────────────────
 
     def validate(self, attrs):
@@ -241,6 +257,7 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             'logo_enabled', 'active_logo', 'logo_scale',
             'logo_position', 'logo_opacity', 'logo_margin',
             'outro_enabled', 'active_outro',
+            'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'custom_font_file']
 
@@ -329,6 +346,21 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
         if value < 0 or value > 200:
             raise serializers.ValidationError(
                 'Logo margin must be between 0 and 200 pixels.'
+            )
+        return value
+
+    def validate_upscale_model(self, value):
+        allowed = {'RealESRGAN_x4plus', 'RealESRGAN_x2plus', 'RealESRGAN_x4plus_anime_6B'}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Upscale model must be one of: {', '.join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_upscale_denoise_strength(self, value):
+        if value < 0.0 or value > 1.0:
+            raise serializers.ValidationError(
+                'Upscale denoise strength must be between 0.0 and 1.0.'
             )
         return value
 
@@ -433,6 +465,9 @@ class ProjectImportSerializer(serializers.Serializer):
             logo_margin=gs.logo_margin,
             outro_enabled=gs.outro_enabled,
             active_outro=gs.active_outro,
+            upscale_enabled=gs.upscale_enabled,
+            upscale_model=gs.upscale_model,
+            upscale_denoise_strength=gs.upscale_denoise_strength,
         )
 
         # 2. Bulk create Segments
