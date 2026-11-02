@@ -1,5 +1,6 @@
 import axios from 'axios';
 import {
+  Account,
   Project,
   ProjectDetail,
   Segment,
@@ -21,6 +22,7 @@ import {
 } from './types';
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
+import { getCurrentAccountId } from './account';
 
 const api = axios.create({
   baseURL: 'http://localhost:8765',
@@ -35,8 +37,49 @@ api.interceptors.request.use((config) => {
   if (!config.params.section) {
     config.params.section = section;
   }
+
+  // Account isolation: when an account is selected, every request carries it
+  // so projects, segments, gallery items and uploads stay inside that account.
+  const account = getCurrentAccountId(section);
+  if (account && !config.params.account) {
+    config.params.account = account;
+  }
   return config;
 });
+
+// ── Accounts ──
+
+export async function getAccounts(
+  section?: Section
+): Promise<PaginatedResponse<Account>> {
+  const response = await api.get<PaginatedResponse<Account>>('/api/accounts/', {
+    params: section ? { section } : undefined,
+  });
+  return response.data;
+}
+
+export interface AccountPayload {
+  name: string;
+  section?: Section;
+  description?: string;
+}
+
+export async function createAccount(payload: AccountPayload): Promise<Account> {
+  const response = await api.post<Account>('/api/accounts/', payload);
+  return response.data;
+}
+
+export async function updateAccount(
+  id: string,
+  data: Partial<AccountPayload>
+): Promise<Account> {
+  const response = await api.patch<Account>(`/api/accounts/${id}/`, data);
+  return response.data;
+}
+
+export async function deleteAccount(id: string): Promise<void> {
+  await api.delete(`/api/accounts/${id}/`);
+}
 
 export async function getProjects(section?: Section): Promise<PaginatedResponse<Project>> {
   const response = await api.get<PaginatedResponse<Project>>('/api/projects/', {

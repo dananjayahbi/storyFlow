@@ -9,18 +9,26 @@ export function SectionSwitcher() {
   const pathname = usePathname();
   const section = sectionFromPathname(pathname);
 
-  // Preserve the current sub-page when switching sections. A dashboard
-  // (/facebook or /youtube) stays a dashboard; sub-pages keep their path.
-  const rawRest = pathname.replace(/^\/(facebook|youtube)/, '');
-  const rest = rawRest === '' || rawRest === '/' ? '' : rawRest;
-
+  // Switching sides always lands on that side's account picker. Accounts are
+  // side-specific, so carrying a Facebook account id into YouTube would be
+  // meaningless (and is rejected by the API).
   return (
-    <div className="flex items-center gap-2">
-      <Button asChild variant={section === 'facebook' ? 'default' : 'outline'} size="sm">
-        <Link href={sectionPath('facebook', rest)}>Facebook</Link>
+    <div className="flex items-center gap-1 rounded-lg border border-sidebar-border/60 p-0.5">
+      <Button
+        asChild
+        variant={section === 'facebook' ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-7 px-2.5 text-xs"
+      >
+        <Link href={sectionPath('facebook')}>Facebook</Link>
       </Button>
-      <Button asChild variant={section === 'youtube' ? 'default' : 'outline'} size="sm">
-        <Link href={sectionPath('youtube', rest)}>YouTube</Link>
+      <Button
+        asChild
+        variant={section === 'youtube' ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-7 px-2.5 text-xs"
+      >
+        <Link href={sectionPath('youtube')}>YouTube</Link>
       </Button>
     </div>
   );

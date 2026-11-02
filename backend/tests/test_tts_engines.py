@@ -1,4 +1,4 @@
-"""Tests for the optional Qwen3-TTS engine integration.
+﻿"""Tests for the optional Qwen3-TTS engine integration.
 
 No GPU is required: the engine subprocess is never started here.  Availability
 checks, dispatch and persistence are exercised with mocks so the suite runs on
@@ -228,7 +228,7 @@ class AudioEngineDispatchTests(APITestCase):
         self.assertAlmostEqual(self.segment.audio_duration, 1.75)
         self.assertTrue(
             self.segment.audio_file.name.startswith(
-                f'Facebook/{self.project.id}/audio/'
+                f'Facebook/{self.project.account_id}/{self.project.id}/audio/'
             )
         )
 
@@ -268,7 +268,7 @@ class AudioEngineDispatchTests(APITestCase):
             'engine': 'qwen',
         }
         self.segment.audio_file.name = (
-            f'Facebook/{self.project.id}/audio/{self.segment.id}.wav'
+            f'Facebook/{self.project.account_id}/{self.project.id}/audio/{self.segment.id}.wav'
         )
         self.segment.audio_engine = 'kokoro'
         self.segment.save()
@@ -323,3 +323,4 @@ class AudioEngineDispatchTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         self.assertIn('Qwen', response.data['error'])
+

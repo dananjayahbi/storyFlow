@@ -1,1 +1,5 @@
-export { default } from '@/app/facebook/page';
+import { AccountListPage } from '@/components/AccountListPage';
+
+export default function YouTubeAccountsPage() {
+  return <AccountListPage />;
+}

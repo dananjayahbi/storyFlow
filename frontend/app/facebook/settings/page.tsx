@@ -14,9 +14,63 @@ import {
 } from 'lucide-react';
 import { useSettingsStore } from '@/store/settingsStore';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { SettingsSkeleton } from '@/components/skeletons';
 
+type SettingsTab =
+  | 'tester'
+  | 'engines'
+  | 'voices'
+  | 'subtitles'
+  | 'logos'
+  | 'outros';
+
+const SETTINGS_TABS: Array<{
+  id: SettingsTab;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+}> = [
+  {
+    id: 'tester',
+    label: 'Audio Tester',
+    description: 'Try voices before rendering',
+    icon: Volume2,
+  },
+  {
+    id: 'engines',
+    label: 'TTS Engines',
+    description: 'Kokoro & Qwen status',
+    icon: Cpu,
+  },
+  {
+    id: 'voices',
+    label: 'Voice References',
+    description: 'Clips for voice cloning',
+    icon: Mic,
+  },
+  {
+    id: 'subtitles',
+    label: 'Subtitles',
+    description: 'Font, size and position',
+    icon: Type,
+  },
+  {
+    id: 'logos',
+    label: 'Logos',
+    description: 'Watermarks for renders',
+    icon: ImageIcon,
+  },
+  {
+    id: 'outros',
+    label: 'Outros',
+    description: 'Clips appended at the end',
+    icon: Film,
+  },
+];
+
 export default function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>('tester');
   // TTS Tester state
   const [ttsText, setTtsText] = useState('Hello! This is a test of the StoryFlow text to speech engine.');
   const [ttsVoice, setTtsVoice] = useState('af_bella');
@@ -221,16 +275,72 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="max-w-3xl">
+    <div className="mx-auto w-full max-w-6xl">
       {/* Page header */}
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure and test TTS audio before generating for your story segments.
-        </p>
+      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Configure voices, rendering defaults and shared media assets.
+          </p>
+        </div>
+        <span className="text-xs text-muted-foreground rounded-full border px-3 py-1 self-start sm:self-auto">
+          Changes apply to new projects
+        </span>
       </div>
 
+      <div className="grid items-start gap-6 lg:grid-cols-[236px_minmax(0,1fr)]">
+        {/* Settings section rail */}
+        <aside className="lg:sticky lg:top-6">
+          <nav className="flex gap-1 overflow-x-auto rounded-xl border bg-card p-1.5 lg:flex-col lg:overflow-visible">
+            {SETTINGS_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={cn(
+                    'group flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors lg:w-full',
+                    active
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors',
+                      active
+                        ? 'border-primary/30 bg-primary/10'
+                        : 'border-border bg-background group-hover:border-primary/20',
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium whitespace-nowrap">
+                      {tab.label}
+                    </span>
+                    <span className="hidden text-[11px] text-muted-foreground lg:block">
+                      {tab.description}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+          <div className="mt-4 hidden rounded-xl border border-dashed bg-muted/20 p-4 lg:block">
+            <p className="text-xs font-medium">Local-first</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+              Models, voices and rendered media never leave this machine.
+            </p>
+          </div>
+        </aside>
+
+        {/* Active settings panel */}
+        <div className="min-w-0">
       {/* TTS Tester Card */}
+      {activeTab === 'tester' && (
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -507,9 +617,11 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* ── TTS Engine Status Card ── */}
-      <Card className="mt-6">
+      {activeTab === 'engines' && (
+      <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
@@ -579,9 +691,11 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* ── Voice References Card (Qwen cloning) ── */}
-      <Card className="mt-6">
+      {activeTab === 'voices' && (
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Mic className="h-5 w-5" />
@@ -704,9 +818,11 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Subtitle Settings Card */}
-      <Card className="mt-6">
+      {activeTab === 'subtitles' && (
+      <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
@@ -827,8 +943,10 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* ── Logo Management Card ── */}
+      {activeTab === 'logos' && (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -941,8 +1059,10 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* ── Outro Video Management Card ── */}
+      {activeTab === 'outros' && (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -1050,6 +1170,9 @@ export default function SettingsPage() {
           )}
         </CardContent>
       </Card>
+      )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,20 @@
+export interface Account {
+  id: string;
+  name: string;
+  section: 'facebook' | 'youtube';
+  description: string;
+  project_count: number;
+  gallery_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Project {
   id: string;
   title: string;
   section?: 'facebook' | 'youtube';
+  account?: string | null;
+  account_name?: string | null;
   created_at: string;
   updated_at: string;
   status: 'DRAFT' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -159,12 +172,14 @@ export interface GenerateAudioOptions {
 export interface CreateProjectPayload {
   title: string;
   section?: 'facebook' | 'youtube';
+  account?: string;
 }
 
 export interface ImportProjectRequest {
   format: 'json' | 'text';
   title: string;
   section?: 'facebook' | 'youtube';
+  account?: string;
   segments?: Array<{ text_content: string; image_prompt?: string }>;
   raw_text?: string;
 }

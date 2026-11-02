@@ -1,11 +1,19 @@
 from django.contrib import admin
-from .models import Project, Segment, GlobalSettings
+from .models import Account, Project, Segment, GlobalSettings
+
+
+@admin.register(Account)
+class AccountAdmin(admin.ModelAdmin):
+    list_display = ['name', 'section', 'created_at', 'updated_at']
+    list_filter = ['section', 'created_at']
+    search_fields = ['name', 'description']
+    readonly_fields = ['id', 'created_at', 'updated_at']
 
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ['title', 'status', 'created_at', 'updated_at']
-    list_filter = ['status', 'created_at']
+    list_display = ['title', 'account', 'section', 'status', 'created_at', 'updated_at']
+    list_filter = ['section', 'status', 'created_at']
     search_fields = ['title']
     readonly_fields = ['id', 'created_at', 'updated_at']
 

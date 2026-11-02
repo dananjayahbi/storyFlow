@@ -4,8 +4,8 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .models import (
-    Project, Segment, GlobalSettings, Logo, OutroVideo, VoiceReference,
-    SECTION_CHOICES,
+    Account, Project, Segment, GlobalSettings, Logo, OutroVideo,
+    VoiceReference, SECTION_CHOICES,
 )
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
@@ -84,20 +84,73 @@ class TtsEngineValidationMixin:
         return value
 
 
+class AccountSerializer(serializers.ModelSerializer):
+    project_count = serializers.SerializerMethodField()
+    gallery_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Account
+        fields = [
+            'id', 'name', 'section', 'description', 'project_count',
+            'gallery_count', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_project_count(self, obj):
+        return obj.projects.count()
+
+    def get_gallery_count(self, obj):
+        return obj.projects.filter(status='COMPLETED').count()
+
+    def validate_name(self, value):
+        name = (value or '').strip()
+        if not name:
+            raise serializers.ValidationError('Account name is required.')
+        return name
+
+    def validate_section(self, value):
+        """Accounts cannot be moved between Facebook and YouTube."""
+        if self.instance and value != self.instance.section:
+            raise serializers.ValidationError(
+                'An account cannot move to a different workspace section.'
+            )
+        return value
+
+    def validate(self, attrs):
+        name = attrs.get('name', getattr(self.instance, 'name', ''))
+        section = attrs.get(
+            'section', getattr(self.instance, 'section', 'facebook')
+        )
+        duplicates = Account.objects.filter(section=section, name=name)
+        if self.instance:
+            duplicates = duplicates.exclude(pk=self.instance.pk)
+        if duplicates.exists():
+            raise serializers.ValidationError({
+                'name': 'An account with this name already exists in this section.'
+            })
+        return attrs
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     segment_count = serializers.SerializerMethodField()
+    account_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'section', 'created_at', 'updated_at',
-            'status', 'resolution_width', 'resolution_height',
-            'framerate', 'segment_count',
+            'id', 'title', 'section', 'account', 'account_name',
+            'created_at', 'updated_at', 'status', 'resolution_width',
+            'resolution_height', 'framerate', 'segment_count',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'status']
+        read_only_fields = [
+            'id', 'account', 'created_at', 'updated_at', 'status',
+        ]
 
     def get_segment_count(self, obj):
         return obj.segments.count()
+
+    def get_account_name(self, obj):
+        return obj.account.name if obj.account_id else None
 
 
 class SegmentSerializer(serializers.ModelSerializer):
@@ -323,13 +376,14 @@ class GlobalSettingsSerializer(TtsEngineValidationMixin, serializers.ModelSerial
 
 class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSerializer):
     segments = SegmentSerializer(many=True, read_only=True)
+    account_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'section', 'created_at', 'updated_at',
-            'status', 'resolution_width', 'resolution_height',
-            'framerate', 'output_path', 'segments',
+            'id', 'title', 'section', 'account', 'account_name',
+            'created_at', 'updated_at', 'status', 'resolution_width',
+            'resolution_height', 'framerate', 'output_path', 'segments',
             # ── Per-project settings ──
             'default_voice_id', 'tts_speed',
             'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
@@ -347,9 +401,15 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
             'outro_enabled', 'active_outro',
             'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
         ]
-        # A project cannot be moved between Facebook/YouTube by a PATCH;
-        # section is fixed at creation time so data never crosses sides.
-        read_only_fields = ['id', 'created_at', 'updated_at', 'custom_font_file', 'section']
+        # A project cannot be moved between Facebook/YouTube or between
+        # accounts by a PATCH; both are fixed at creation time.
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'custom_font_file', 'section',
+            'account',
+        ]
+
+    def get_account_name(self, obj):
+        return obj.account.name if obj.account_id else None
 
     # ── Field-level validators (mirror GlobalSettingsSerializer) ──
 
@@ -533,6 +593,7 @@ class ProjectImportSerializer(serializers.Serializer):
         project = Project.objects.create(
             title=parsed['title'],
             section=validated_data.get('section', 'facebook'),
+            account=validated_data.get('account'),
             status='DRAFT',
             # Copy per-project settings from global defaults
             resolution_width=gs.render_width,

@@ -14,14 +14,14 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import (
-    Project, Segment, GlobalSettings, Logo, OutroVideo, VoiceReference,
-    STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
-    SECTION_CHOICES,
+    Account, Project, Segment, GlobalSettings, Logo, OutroVideo,
+    VoiceReference, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED,
+    RENDERABLE_STATUSES, SECTION_CHOICES,
 )
 from .serializers import (
-    ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer,
-    SegmentSerializer, GlobalSettingsSerializer, LogoSerializer,
-    OutroVideoSerializer, VoiceReferenceSerializer,
+    AccountSerializer, ProjectSerializer, ProjectDetailSerializer,
+    ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer,
+    LogoSerializer, OutroVideoSerializer, VoiceReferenceSerializer,
 )
 from .parsers import ParseError
 from .storage import write_project_artifacts, save_story_json
@@ -29,6 +29,7 @@ from .storage_paths import (
     media_url,
     project_dir,
     project_relpath,
+    section_folder,
     upgrade_legacy_project_path,
 )
 from .tasks import get_task_manager, render_task_function
@@ -67,12 +68,56 @@ def get_requested_section(request):
     return section
 
 
+def get_requested_account(request):
+    """Return the account requested by the client, if any.
+
+    Every account-scoped API call carries ``?account=<uuid>`` (the frontend
+    also sends it automatically).  The account must belong to the active
+    workspace section so a Facebook page can never read YouTube content and
+    two accounts on the same side can never see each other's projects.
+    """
+    if hasattr(request, '_storyflow_account'):
+        return request._storyflow_account
+
+    raw = None
+    if hasattr(request, 'query_params'):
+        raw = request.query_params.get('account')
+    if not raw:
+        raw = request.GET.get('account')
+    if not raw:
+        raw = request.headers.get('X-StoryFlow-Account')
+
+    if not raw:
+        request._storyflow_account = None
+        return None
+
+    try:
+        account = Account.objects.get(pk=raw)
+    except (Account.DoesNotExist, ValueError, DjangoValidationError):
+        raise ValidationError({'account': 'Account not found.'})
+
+    section = get_requested_section(request)
+    if section and account.section != section:
+        raise ValidationError({
+            'account': (
+                f"Account '{account.name}' belongs to '{account.section}', "
+                f"not '{section}'."
+            )
+        })
+
+    request._storyflow_account = account
+    return account
+
+
 def scoped_projects(request):
-    """Return a Project queryset restricted to the requested section."""
+    """Return a Project queryset restricted to the requested section/account."""
     queryset = Project.objects.all()
     section = get_requested_section(request)
     if section:
         queryset = queryset.filter(section=section)
+    account = get_requested_account(request)
+    if account:
+        queryset = queryset.filter(account=account)
     return queryset
 
 
@@ -147,6 +192,49 @@ def engine_ready_response(engine):
     )
 
 
+class AccountViewSet(viewsets.ModelViewSet):
+    """CRUD for workspace accounts (Facebook pages / YouTube channels).
+
+    Accounts are always scoped by the ``section`` query parameter.  Deleting
+    an account removes every project it owns, including their asset folders.
+    """
+
+    queryset = Account.objects.all()
+    serializer_class = AccountSerializer
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        queryset = Account.objects.all()
+        section = get_requested_section(self.request)
+        if section:
+            queryset = queryset.filter(section=section)
+        return queryset
+
+    def perform_create(self, serializer):
+        section = get_requested_section(self.request)
+        data_section = serializer.validated_data.get('section')
+        if section and data_section and section != data_section:
+            raise ValidationError({
+                'section': (
+                    f"Request is scoped to '{section}' but the account was "
+                    f"created for '{data_section}'."
+                )
+            })
+        serializer.save(section=section or data_section or 'facebook')
+
+    def perform_destroy(self, instance):
+        for project in instance.projects.all():
+            shutil.rmtree(
+                project_dir(
+                    project.section,
+                    project.id,
+                    account_id=instance.id,
+                ),
+                ignore_errors=True,
+            )
+        instance.delete()
+
+
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
@@ -177,7 +265,25 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     f"created for '{data_section}'."
                 )
             })
-        serializer.save(section=section or data_section or 'facebook')
+
+        account = get_requested_account(self.request)
+        data_account = serializer.validated_data.get('account')
+        if account and data_account and account != data_account:
+            raise ValidationError({
+                'account': (
+                    "Request is scoped to a different account than the "
+                    "project payload."
+                )
+            })
+        effective_section = section or data_section or 'facebook'
+        account = account or data_account or Account.default_for_section(
+            effective_section
+        )
+        if account.section != effective_section:
+            raise ValidationError({
+                'account': 'Account does not belong to this workspace section.'
+            })
+        serializer.save(section=effective_section, account=account)
 
     def perform_destroy(self, instance):
         """Delete project with its complete section-scoped asset folder.
@@ -188,7 +294,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         # 1. Remove the project's self-contained asset folder
         shutil.rmtree(
-            project_dir(instance.section, instance.id),
+            project_dir(
+                instance.section,
+                instance.id,
+                account_id=instance.account_id,
+            ),
             ignore_errors=True,
         )
 
@@ -615,6 +725,10 @@ class SegmentViewSet(viewsets.ModelViewSet):
         if section:
             # Hard section boundary: segments only exist through a project.
             queryset = queryset.filter(project__section=section)
+        account = get_requested_account(self.request)
+        if account:
+            # Hard account boundary inside the section.
+            queryset = queryset.filter(project__account=account)
 
         project_id = self.request.query_params.get('project')
         if project_id is not None:
@@ -907,10 +1021,21 @@ def import_project(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    effective_section = requested_section or payload_section or 'facebook'
+    account = get_requested_account(request) or Account.default_for_section(
+        effective_section
+    )
+    if account.section != effective_section:
+        return Response(
+            {'error': 'Account does not belong to this workspace section.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     try:
         serializer.is_valid(raise_exception=True)
         project = serializer.save(
-            section=requested_section or payload_section or 'facebook'
+            section=effective_section,
+            account=account,
         )
     except ParseError as e:
         return Response(
@@ -1581,15 +1706,37 @@ def _resolve_video_path(project):
     if project.output_path:
         stored = project.output_path
         candidates.append(stored)
-        # Legacy relative paths (projects/<id>/output/final.mp4)
-        upgraded = upgrade_legacy_project_path(stored.replace('\\', '/'), project.section)
+        # Legacy relative paths (projects/<id>/... or <Section>/<id>/...)
+        upgraded = upgrade_legacy_project_path(
+            stored.replace('\\', '/'),
+            project.section,
+            project.id,
+            project.account_id,
+        )
         candidates.append(upgraded)
         candidates.append(os.path.join(settings.MEDIA_ROOT, upgraded))
 
-    # Conventional section-scoped path
+    # Conventional account-scoped path
     candidates.append(
         os.path.join(
-            project_dir(project.section, project.id), 'output', 'final.mp4'
+            project_dir(
+                project.section,
+                project.id,
+                account_id=project.account_id,
+            ),
+            'output',
+            'final.mp4',
+        )
+    )
+
+    # Pre-account layout, kept for stores that have not been migrated yet
+    candidates.append(
+        os.path.join(
+            settings.MEDIA_ROOT,
+            section_folder(project.section),
+            str(project.id),
+            'output',
+            'final.mp4',
         )
     )
 

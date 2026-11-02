@@ -74,10 +74,16 @@ def project_snapshot(project: Project, assets: dict | None = None) -> dict:
         'id': str(project.id),
         'title': project.title,
         'section': project.section,
+        'account_id': str(project.account_id) if project.account_id else None,
+        'account_name': project.account.name if project.account_id else None,
         'status': project.status,
         'created_at': _json_value(project.created_at),
         'updated_at': _json_value(project.updated_at),
-        'storage_folder': project_relpath(project.section, project.id),
+        'storage_folder': project_relpath(
+            project.section,
+            project.id,
+            account_id=project.account_id,
+        ),
         'assets': assets or {},
         'project': _model_dict(project),
         'segments': [_model_dict(segment) for segment in segments],
@@ -136,7 +142,11 @@ def _copy_related_assets(project: Project, directory: Path) -> dict:
             shutil.copy2(source, target)
 
         copied[key] = project_relpath(
-            project.section, project.id, ASSETS_DIR, source.name
+            project.section,
+            project.id,
+            ASSETS_DIR,
+            source.name,
+            account_id=project.account_id,
         )
 
     return copied
@@ -144,7 +154,9 @@ def _copy_related_assets(project: Project, directory: Path) -> dict:
 
 def write_project_artifacts(project: Project) -> None:
     """Write/refresh ``project.json`` and ``script.txt`` for a project."""
-    directory = ensure_project_dir(project.section, project.id)
+    directory = ensure_project_dir(
+        project.section, project.id, account_id=project.account_id
+    )
     assets = _copy_related_assets(project, directory)
     snapshot = project_snapshot(project, assets=assets)
 
@@ -160,7 +172,9 @@ def write_project_artifacts(project: Project) -> None:
 
 def save_story_json(project: Project, story: dict) -> None:
     """Persist the imported source story (draft input) next to the project."""
-    directory = ensure_project_dir(project.section, project.id)
+    directory = ensure_project_dir(
+        project.section, project.id, account_id=project.account_id
+    )
     payload = {
         'title': project.title,
         'section': project.section,
@@ -211,7 +225,14 @@ def _segment_deleted(sender, instance, **kwargs):
 @receiver(post_delete, sender=Project)
 def _project_deleted(sender, instance, **kwargs):
     try:
-        shutil.rmtree(project_dir(instance.section, instance.id), ignore_errors=True)
+        shutil.rmtree(
+            project_dir(
+                instance.section,
+                instance.id,
+                account_id=instance.account_id,
+            ),
+            ignore_errors=True,
+        )
     except Exception:
         logger.warning('Could not remove project storage for %s', instance.pk, exc_info=True)
 
@@ -289,13 +310,23 @@ def migrate_legacy_storage(legacy_root: Path | None = None, dry_run: bool = Fals
             changed = False
             if segment.image_file:
                 relative = _legacy_relative(segment.image_file.name, legacy_root)
-                new_name = upgrade_legacy_project_path(relative, project.section)
+                new_name = upgrade_legacy_project_path(
+                    relative,
+                    project.section,
+                    project.id,
+                    project.account_id,
+                )
                 if new_name != segment.image_file.name:
                     segment.image_file.name = new_name
                     changed = True
             if segment.audio_file:
                 relative = _legacy_relative(segment.audio_file.name, legacy_root)
-                new_name = upgrade_legacy_project_path(relative, project.section)
+                new_name = upgrade_legacy_project_path(
+                    relative,
+                    project.section,
+                    project.id,
+                    project.account_id,
+                )
                 if new_name != segment.audio_file.name:
                     segment.audio_file.name = new_name
                     changed = True
@@ -311,7 +342,12 @@ def migrate_legacy_storage(legacy_root: Path | None = None, dry_run: bool = Fals
 
         if project.output_path:
             relative = _legacy_relative(project.output_path, legacy_root)
-            new_relative = upgrade_legacy_project_path(relative, project.section)
+            new_relative = upgrade_legacy_project_path(
+                relative,
+                project.section,
+                project.id,
+                project.account_id,
+            )
             if new_relative != project.output_path:
                 report['projects_updated'] += 1
                 if not dry_run:
@@ -331,3 +367,92 @@ def migrate_legacy_storage(legacy_root: Path | None = None, dry_run: bool = Fals
                 report['files_moved'] += _move_tree(source, root / folder)
 
     return report
+
+
+def migrate_project_folders_to_accounts(dry_run: bool = False) -> dict:
+    """Move ``Storage/<Section>/<project-id>`` folders into account folders.
+
+    Earlier releases stored projects directly under the section folder.  Since
+    accounts were introduced, the canonical layout is
+    ``Storage/<Section>/<account-id>/<project-id>``.  This helper moves the
+    existing directories, rewrites stored relative paths, and refreshes the
+    project snapshots.  It is idempotent and safe to run repeatedly.
+    """
+    from api.storage_paths import section_folder
+
+    report = {
+        'projects': 0,
+        'folders_moved': 0,
+        'segments_updated': 0,
+        'projects_updated': 0,
+        'dry_run': dry_run,
+    }
+
+    for project in Project.objects.select_related('account').all():
+        if not project.account_id:
+            from api.models import Account
+
+            project.account = Account.default_for_section(project.section)
+            if not dry_run:
+                Project.objects.filter(pk=project.pk).update(
+                    account=project.account
+                )
+
+        old_dir = (
+            storage_root() / section_folder(project.section) / str(project.id)
+        )
+        new_dir = project_dir(
+            project.section, project.id, account_id=project.account_id
+        )
+        if old_dir.exists() and old_dir != new_dir:
+            report['projects'] += 1
+            if not dry_run:
+                report['folders_moved'] += _move_tree(old_dir, new_dir)
+                shutil.rmtree(old_dir, ignore_errors=True)
+
+        updates = []
+        for segment in Segment.objects.filter(project=project):
+            changed = False
+            for field_name in ('image_file', 'audio_file'):
+                field = getattr(segment, field_name)
+                if not field or not field.name:
+                    continue
+                new_name = upgrade_legacy_project_path(
+                    field.name,
+                    project.section,
+                    project.id,
+                    project.account_id,
+                )
+                if new_name != field.name:
+                    field.name = new_name
+                    changed = True
+            if changed:
+                updates.append(segment)
+
+        if updates:
+            report['segments_updated'] += len(updates)
+            if not dry_run:
+                Segment.objects.bulk_update(
+                    updates, ['image_file', 'audio_file']
+                )
+
+        if project.output_path:
+            new_relative = upgrade_legacy_project_path(
+                project.output_path,
+                project.section,
+                project.id,
+                project.account_id,
+            )
+            if new_relative != project.output_path:
+                report['projects_updated'] += 1
+                if not dry_run:
+                    Project.objects.filter(pk=project.pk).update(
+                        output_path=new_relative
+                    )
+                    project.output_path = new_relative
+
+        if not dry_run:
+            write_project_artifacts(project)
+
+    return report
+

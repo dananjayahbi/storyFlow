@@ -512,11 +512,26 @@ The Django project lives in `backend/storyflow_backend/` and is configured for *
 └─────────────────────────────────────────────────────────────┘
 ```
 
+#### Account Model
+
+An `Account` is a Facebook page or YouTube channel owned by one workspace
+section. It is the top-level content container:
+
+- `id` (UUID, also used as the storage folder name)
+- `name` (unique per section), `description`
+- `section` (`facebook` / `youtube`, fixed after creation)
+- timestamps and reverse relation `projects`
+
+Deleting an account cascades to its projects, segments and asset folder.
+A `Default Account` is created for both sides by data migration so existing
+projects are adopted automatically.
+
 #### Project Model (Core Entity)
 
 The `Project` model is the central entity representing a single video production. It stores:
 - **Identity:** UUID primary key, title, timestamps
 - **Workspace section:** `facebook` (Facebook Reels) or `youtube` (YouTube Videos). Fixed at creation and enforced by every API endpoint.
+- **Account:** FK to `Account`; fixed at creation and enforced by every API endpoint. `Project.save()` assigns the section's default account when one is not supplied (legacy/test safety).
 - **Status lifecycle:** `DRAFT` → `PROCESSING` → `COMPLETED` or `FAILED`
 - **Render settings:** Resolution (width × height), framerate
 - **TTS settings:** Default voice ID (Kokoro), speech speed
@@ -568,6 +583,19 @@ default `tts_engine`, `qwen_mode`, `qwen_speaker`, `qwen_language`,
 ### 6.3 REST API Layer
 
 The API is built with Django REST Framework and exposes the following endpoint groups:
+
+#### Account Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/accounts/?section=<side>` | List accounts for a section |
+| `POST` | `/api/accounts/?section=<side>` | Create a page/channel account |
+| `GET` | `/api/accounts/<id>/?section=<side>` | Account detail + project counts |
+| `PATCH` | `/api/accounts/<id>/?section=<side>` | Rename/describe an account |
+| `DELETE` | `/api/accounts/<id>/?section=<side>` | Delete account, projects and assets |
+
+All project, segment and gallery endpoints additionally accept
+`?account=<uuid>` to scope the request to one account.
 
 #### Project Endpoints
 
@@ -738,11 +766,12 @@ The parsers normalize both formats into a common internal structure and validate
 ### 6.7 Asset Storage Layout
 
 `MEDIA_ROOT` points at `backend/Storage/`. Every project owns a
-self-contained folder named after its workspace section and UUID:
+self-contained folder named after its workspace section, account UUID and
+project UUID:
 
 ```
 backend/Storage/
-├── Facebook/<project-uuid>/
+├── Facebook/<account-uuid>/<project-uuid>/
 │   ├── project.json      # Metadata + full segment snapshot (the draft)
 │   ├── story.json        # Imported source story (JSON/text source)
 │   ├── script.txt        # Human-readable narration script
@@ -751,7 +780,7 @@ backend/Storage/
 │   ├── output/           # final.mp4
 │   ├── upscaled_images/  # Real-ESRGAN output (when enabled)
 │   └── assets/           # Copies of the logo/outro/font used by the project
-├── YouTube/<project-uuid>/   # Identical structure
+├── YouTube/<account-uuid>/<project-uuid>/  # Identical structure
 ├── logos/                    # Shared logo assets
 ├── outros/                   # Shared outro videos
 ├── fonts/                    # Shared subtitle fonts
@@ -763,11 +792,14 @@ backend/Storage/
 signals whenever a project or segment changes (including renames, settings
 patches and segment edits). Imports additionally write `story.json`.
 Model upload paths, TTS audio paths and render output paths are all derived
-from the project's section, so Facebook and YouTube assets can never be
-mixed.
+from the project's section and account, so assets from different sides or
+different pages/channels can never be mixed.
 
-Existing installations can move the pre-Issue-#7 `backend/media` tree into
-the new layout with:
+Data migration `0013_seed_default_accounts` creates the first account for each
+side, adopts all existing projects and moves
+`Storage/<Section>/<project-id>` into
+`Storage/<Section>/<account-id>/<project-id>`. The same move can be re-run
+manually for an older store:
 
 ```bash
 python manage.py migrate_storage          # add --dry-run to preview
@@ -1115,40 +1147,50 @@ it) and is shown immediately after login.
 | Route | Page | Description |
 |-------|------|-------------|
 | `/select` | Workspace Selection | Choose Facebook Reels or YouTube Videos |
-| `/{section}` | Dashboard | Stats cards + 5 most recent projects for that section |
+| `/{section}` | **Account Picker** | List/create/edit/delete Facebook pages or YouTube accounts |
+| `/{section}/dashboard` | Account Dashboard | Stats cards + recent projects for the selected account |
 | `/{section}/projects` | Project List | Full CRUD table with search, sort, import |
 | `/{section}/projects/[id]` | **Timeline Editor** | Core workspace for segment editing |
-| `/{section}/gallery` | Video Gallery | Masonry grid of rendered videos |
-| `/{section}/settings` | Global Settings | TTS, subtitle, logo, outro, upscale config |
+| `/{section}/gallery` | Video Gallery | Masonry grid of rendered videos for the selected account |
+| `/{section}/settings` | Global Settings | Tabbed TTS, subtitle, logo, outro, upscale config |
 | `/{section}/bulk-create` | Bulk Render | Select & queue multiple projects for rendering |
 
-`{section}` is either `facebook` or `youtube`. Both sections contain an
-identical copy of every page for now; they will diverge as platform-specific
-tools are added. Legacy root routes (`/projects`, `/gallery`, `/settings`,
-`/bulk-create`, `/facebook-reels`, `/fb`, `/youtube-videos`) redirect to the
-selection page (or the matching section dashboard) so no page can be used
-outside a section.
+`{section}` is either `facebook` or `youtube`. Entering a section always shows
+its account picker first; after choosing an account, every sub-page is scoped
+to that account via `?account=<uuid>`. Both sections contain an identical copy
+of every page for now; they will diverge as platform-specific tools are added.
+Legacy root routes (`/projects`, `/gallery`, `/settings`, `/bulk-create`,
+`/facebook-reels`, `/fb`, `/youtube-videos`) redirect to the selection page (or
+the matching section account picker) so no page can be used outside a section.
 
 Every route has a dedicated `loading.tsx` with skeleton components for optimal loading UX.
 
 ---
 
-### 8.1.1 Section Data Isolation
+### 8.1.1 Section & Account Data Isolation
 
-All project-scoped API calls send `?section=facebook` or `?section=youtube`.
-The frontend attaches the section automatically through an Axios request
-interceptor based on the current URL, and the backend:
+All project-scoped API calls send `?section=facebook|youtube` and, once an
+account is selected, `?account=<uuid>`. The frontend attaches both
+automatically through an Axios request interceptor: the section comes from the
+URL, the account from `?account=` (falling back to the per-section localStorage
+selection). The backend then:
 
-- filters `Project` and `Segment` querysets by `project__section`
-- returns 404 when a project/segment UUID is accessed from the other section
-- filters the gallery list and rejects cross-section stream/download URLs
-- stores `section` on imported projects and rejects mismatched payloads
-- makes `section` read-only after creation, so a project cannot be moved
-  between workspaces accidentally
+- filters `Project` and `Segment` querysets by `project__section` and
+  `project__account`
+- returns 404 when a project/segment UUID is accessed from the other section or
+  another account on the same side
+- filters the gallery list and rejects cross-section/cross-account
+  stream/download URLs
+- stores `section` and `account` on imported projects and rejects mismatched
+  payloads
+- makes `section` and `account` read-only after creation, so a project cannot
+  be moved between workspaces or accounts accidentally
+- resolves storage paths from both the section and the account UUID, so two
+  accounts can never share or overwrite assets
 
 Global settings and shared assets (logos, outro videos) remain app-wide for
-now; per-section settings can be layered on later without changing route
-contracts.
+now; per-section/per-account settings can be layered on later without changing
+route contracts.
 
 ---
 
@@ -1160,21 +1202,27 @@ contracts.
 │  ├── TooltipProvider (Radix)                                 │
 │  ├── ErrorBoundary (React class component)                   │
 │  ├── AppShell                                                │
-│  │   ├── Collapsible Sidebar (section-scoped links)            │
+│  │   ├── Top Navigation Bar (always visible)                  │
+│  │   │   ├── Brand → /select                                   │
+│  │   │   ├── Accounts                                          │
 │  │   │   ├── Dashboard                                         │
 │  │   │   ├── Projects                                          │
 │  │   │   ├── Bulk Create                                       │
 │  │   │   ├── Gallery                                           │
-│  │   │   └── Settings                                          │
-│  │   ├── Top Bar (current page name + section switcher)        │
+│  │   │   ├── Settings                                          │
+│  │   │   ├── Account switcher (current page/channel)           │
+│  │   │   ├── Section switcher (Facebook / YouTube)             │
+│  │   │   └── Logout                                            │
 │  │   └── Main Content Area (children)                          │
 │  ├── KeyboardShortcutProvider                                  │
 │  └── ToastProvider (Sonner, bottom-right)                      │
 └──────────────────────────────────────────────────────────────┘
 
-Special: On /{section}/projects/[id] routes, the global sidebar is HIDDEN.
-         The Timeline Editor provides its own sidebar layout.
-         /login and /select are full-page routes without the shell.
+The navigation is horizontal (not a collapsible sidebar) and unique per
+section. It is rendered on every page, including the Timeline Editor, which
+keeps its own inner editing sidebar below the global bar. Account-scoped pages
+redirect to the section account picker when no account is selected. /login and
+/select are full-page routes without the shell.
 ```
 
 ---
@@ -1327,6 +1375,20 @@ The Timeline Editor (`/projects/[id]`) is the heart of StoryFlow:
 │ └──────┘ │                                                      │
 └──────────┴──────────────────────────────────────────────────────┘
 ```
+
+#### Settings Workspace
+
+The settings page uses a two-pane layout instead of a long stacked page:
+
+- a sticky left rail (horizontal scroll on mobile) with Audio Tester, TTS
+  Engines, Voice References, Subtitles, Logos and Outros;
+- a single focused content panel on the right, so only the active section is
+  rendered at a time;
+- a responsive `lg:grid-cols-[236px_minmax(0,1fr)]` grid and a compact
+  "changes apply to new projects" hint in the header.
+
+This keeps the page short enough to scan while preserving all existing
+controls and save behaviour.
 
 #### Keyboard Shortcuts
 

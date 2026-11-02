@@ -461,7 +461,8 @@ class TestProjectDelete(APITestCase):
 
     def test_delete_project_removes_media_directory(self):
         media_dir = os.path.join(
-            TEMP_MEDIA, 'Facebook', str(self.project.id)
+            TEMP_MEDIA, 'Facebook', str(self.project.account_id),
+            str(self.project.id),
         )
         os.makedirs(media_dir, exist_ok=True)
         # Create a dummy file

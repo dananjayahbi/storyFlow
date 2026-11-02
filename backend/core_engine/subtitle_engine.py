@@ -180,17 +180,17 @@ def calculate_subtitle_timing(
         return [(0.0, total_duration)]
 
     # ── Step 3: Count characters per chunk (better speech-duration proxy) ──
-    # Character count more accurately models speech duration than word
-    # count because longer words take proportionally longer to speak.
-    char_counts = [max(len(chunk), 1) for chunk in chunks]
-    total_chars = sum(char_counts)
+    # Word count is the canonical timing signal for proportional chunk
+    # durations (matches the module contract and subtitle timing tests).
+    word_counts = [max(len(chunk.split()), 1) for chunk in chunks]
+    total_words = sum(word_counts)
 
-    if total_chars == 0:
+    if total_words == 0:
         return []
 
     # ── Step 4: Proportional durations ──────────────────────────────
     durations = [
-        (cc / total_chars) * total_duration for cc in char_counts
+        (wc / total_words) * total_duration for wc in word_counts
     ]
 
     # ── Step 5: Enforce minimum duration ────────────────────────────

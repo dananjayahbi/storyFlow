@@ -1,4 +1,4 @@
-"""Storage layout tests (Issue #7).
+﻿"""Storage layout tests (Issue #7).
 
 Assets must live under ``Storage/<Section>/<project-id>/`` with per-project
 JSON snapshots, scripts, images, audio, outputs and upscaled images.
@@ -36,7 +36,7 @@ class StorageLayoutTests(APITestCase):
 
     def test_project_folder_and_artifacts_are_created(self):
         project = self._project('youtube')
-        folder = os.path.join(self.tmp, 'YouTube', str(project.id))
+        folder = os.path.join(self.tmp, 'YouTube', str(project.account_id), str(project.id))
 
         self.assertTrue(os.path.isdir(folder))
         self.assertTrue(os.path.isfile(os.path.join(folder, 'project.json')))
@@ -56,7 +56,7 @@ class StorageLayoutTests(APITestCase):
             project=project, sequence_index=1, text_content='Second line'
         )
 
-        folder = os.path.join(self.tmp, 'Facebook', str(project.id))
+        folder = os.path.join(self.tmp, 'Facebook', str(project.account_id), str(project.id))
         with open(os.path.join(folder, 'project.json'), encoding='utf-8') as f:
             snapshot = json.load(f)
         with open(os.path.join(folder, 'script.txt'), encoding='utf-8') as f:
@@ -88,7 +88,7 @@ class StorageLayoutTests(APITestCase):
 
         segment.refresh_from_db()
         self.assertTrue(segment.image_file.name.startswith(
-            f'YouTube/{project.id}/images/'
+            f'YouTube/{project.account_id}/{project.id}/images/'
         ))
         self.assertTrue(os.path.isfile(segment.image_file.path))
 
@@ -102,7 +102,7 @@ class StorageLayoutTests(APITestCase):
             os.path.normpath(str(audio)),
             os.path.normpath(
                 os.path.join(
-                    self.tmp, 'YouTube', str(project.id), 'audio', 'seg-1.wav'
+                    self.tmp, 'YouTube', str(project.account_id), str(project.id), 'audio', 'seg-1.wav'
                 )
             ),
         )
@@ -110,7 +110,7 @@ class StorageLayoutTests(APITestCase):
             os.path.normpath(output),
             os.path.normpath(
                 os.path.join(
-                    self.tmp, 'YouTube', str(project.id), 'output', 'final.mp4'
+                    self.tmp, 'YouTube', str(project.account_id), str(project.id), 'output', 'final.mp4'
                 )
             ),
         )
@@ -131,7 +131,7 @@ class StorageLayoutTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
         project = Project.objects.get(title='Imported Story')
-        folder = os.path.join(self.tmp, 'Facebook', str(project.id))
+        folder = os.path.join(self.tmp, 'Facebook', str(project.account_id), str(project.id))
         self.assertTrue(os.path.isfile(os.path.join(folder, 'story.json')))
 
         with open(os.path.join(folder, 'story.json'), encoding='utf-8') as f:
@@ -159,7 +159,7 @@ class StorageLayoutTests(APITestCase):
         project.save(update_fields=['active_logo'])
 
         copied = os.path.join(
-            self.tmp, 'Facebook', str(project.id), 'assets', 'brand.png'
+            self.tmp, 'Facebook', str(project.account_id), str(project.id), 'assets', 'brand.png'
         )
         self.assertTrue(os.path.isfile(copied))
 
@@ -197,21 +197,22 @@ class StorageLayoutTests(APITestCase):
         project.refresh_from_db()
         self.assertEqual(
             segment.image_file.name,
-            f'Facebook/{project.id}/images/old.jpg',
+            f'Facebook/{project.account_id}/{project.id}/images/old.jpg',
         )
         self.assertEqual(
             segment.audio_file.name,
-            f'Facebook/{project.id}/audio/old.wav',
+            f'Facebook/{project.account_id}/{project.id}/audio/old.wav',
         )
         self.assertEqual(
             project.output_path,
-            f'Facebook/{project.id}/output/final.mp4',
+            f'Facebook/{project.account_id}/{project.id}/output/final.mp4',
         )
         self.assertTrue(os.path.isfile(segment.image_file.path))
         self.assertTrue(os.path.isfile(segment.audio_file.path))
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, 'logos', 'logo.png')))
         self.assertTrue(
             os.path.isfile(
-                os.path.join(self.tmp, 'Facebook', str(project.id), 'project.json')
+                os.path.join(self.tmp, 'Facebook', str(project.account_id), str(project.id), 'project.json')
             )
         )
+

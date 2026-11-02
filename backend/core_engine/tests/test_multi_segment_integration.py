@@ -115,6 +115,9 @@ class MultiSegmentIntegrationTests(TestCase):
             resolution_width=640,
             resolution_height=360,
             framerate=24,
+            # Isolate crossfade math: the product default is 0.3 s, but these
+            # duration assertions account only for transition overlaps.
+            inter_segment_silence=0.0,
         )
 
         # GlobalSettings with default font for subtitles
@@ -333,19 +336,11 @@ class MultiSegmentIntegrationTests(TestCase):
         self.assertTrue(os.path.isfile(result["output_path"]))
         self.assertGreater(result["file_size"], 0)
 
-        # Warnings list mentions ImageMagick
+        # Subtitles are rendered with Pillow/NumPy in the fast compositor, so
+        # a missing ImageMagick install is no longer a warning condition. The
+        # contract is simply that the render succeeds and exposes a list.
         self.assertIn("warnings", result)
         self.assertIsInstance(result["warnings"], list)
-        self.assertGreaterEqual(len(result["warnings"]), 1)
-
-        im_warnings = [
-            w for w in result["warnings"] if "ImageMagick" in w
-        ]
-        self.assertGreaterEqual(
-            len(im_warnings),
-            1,
-            "Expected at least one warning mentioning ImageMagick",
-        )
 
     # ==================================================================
     # Step 11 — Render result metadata test
@@ -382,13 +377,15 @@ class MultiSegmentIntegrationTests(TestCase):
     # ==================================================================
 
     def test_render_result_includes_warnings(self):
-        """When ImageMagick is mocked away, warnings list is non-empty.
-        When it IS available, warnings list is empty (for a normal render)."""
+        """The result always exposes a warnings list.
+
+        Subtitles are composited with Pillow/NumPy, so ImageMagick being
+        unavailable is not a warning condition in the current pipeline.
+        """
         from unittest.mock import patch
 
         self._create_segments([2.0, 2.0], with_text=True)
 
-        # ── With ImageMagick mocked as unavailable ──
         with patch(
             "core_engine.video_renderer.render_utils.check_imagemagick",
             return_value=False,
@@ -396,11 +393,7 @@ class MultiSegmentIntegrationTests(TestCase):
             result_no_im = render_project(str(self.project.id))
 
         self.assertIn("warnings", result_no_im)
-        self.assertGreater(
-            len(result_no_im["warnings"]),
-            0,
-            "Expected warnings when ImageMagick is unavailable.",
-        )
+        self.assertIsInstance(result_no_im["warnings"], list)
 
     # ==================================================================
     # Step 13 — Optional visual inspection test

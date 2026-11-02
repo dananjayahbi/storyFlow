@@ -47,6 +47,51 @@ SECTION_CHOICES = [
     ('youtube', 'YouTube Videos'),
 ]
 
+DEFAULT_ACCOUNT_NAME = 'Default Account'
+
+
+class Account(models.Model):
+    """A Facebook page or YouTube account owned by one workspace section.
+
+    Accounts are the top-level content containers: every project belongs to
+    exactly one account, and each account has its own gallery, storage folder
+    and (in the future) its own side-specific tools and rules.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    section = models.CharField(
+        max_length=20,
+        choices=SECTION_CHOICES,
+        default='facebook',
+        db_index=True,
+    )
+    description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['section', 'name'],
+                name='unique_account_name_per_section',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.name} ({self.section})'
+
+    @classmethod
+    def default_for_section(cls, section):
+        """Return the fallback account for *section*, creating it if needed."""
+        account, _ = cls.objects.get_or_create(
+            section=section or 'facebook',
+            name=DEFAULT_ACCOUNT_NAME,
+        )
+        return account
+
+
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=255)
@@ -54,6 +99,13 @@ class Project(models.Model):
         max_length=20,
         choices=SECTION_CHOICES,
         default='facebook',
+    )
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='projects',
+        null=True,
+        blank=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -155,6 +207,15 @@ class Project(models.Model):
     )
     upscale_denoise_strength = models.FloatField(default=0.5)
 
+    def save(self, *args, **kwargs):
+        """Guarantee every project has an account (legacy/test compatibility)."""
+        if not self.account_id:
+            self.account = Account.default_for_section(self.section)
+            update_fields = kwargs.get('update_fields')
+            if update_fields is not None:
+                kwargs['update_fields'] = set(update_fields) | {'account'}
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.title
 
@@ -163,13 +224,25 @@ class Project(models.Model):
 
 
 def segment_image_path(instance, filename):
-    """Store images in Storage/<Section>/<project-id>/images/."""
-    return project_relpath(instance.project.section, instance.project.id, 'images', filename)
+    """Store images in Storage/<Section>/<account-id>/<project-id>/images/."""
+    return project_relpath(
+        instance.project.section,
+        instance.project.id,
+        'images',
+        filename,
+        account_id=instance.project.account_id,
+    )
 
 
 def segment_audio_path(instance, filename):
-    """Store generated audio in Storage/<Section>/<project-id>/audio/."""
-    return project_relpath(instance.project.section, instance.project.id, 'audio', filename)
+    """Store generated audio in Storage/<Section>/<account-id>/<project-id>/audio/."""
+    return project_relpath(
+        instance.project.section,
+        instance.project.id,
+        'audio',
+        filename,
+        account_id=instance.project.account_id,
+    )
 
 
 class Segment(models.Model):
@@ -178,8 +251,14 @@ class Segment(models.Model):
     sequence_index = models.IntegerField(default=0)
     text_content = models.TextField(blank=True, default='')
     image_prompt = models.TextField(blank=True, default='')
-    image_file = models.ImageField(upload_to=segment_image_path, blank=True, null=True)
-    audio_file = models.FileField(upload_to=segment_audio_path, blank=True, null=True)
+    # 500 chars: account UUID + project UUID + section + filename can exceed
+    # Django's 100-char default and would otherwise raise SuspiciousFileOperation.
+    image_file = models.ImageField(
+        upload_to=segment_image_path, blank=True, null=True, max_length=500,
+    )
+    audio_file = models.FileField(
+        upload_to=segment_audio_path, blank=True, null=True, max_length=500,
+    )
     audio_duration = models.FloatField(null=True, blank=True)
     # Which engine produced the current audio ("kokoro" or "qwen"), so the UI
     # can show whether a segment is still on the fast draft voice.

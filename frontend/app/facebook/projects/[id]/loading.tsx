@@ -1,8 +1,8 @@
-import { Skeleton } from '@/components/ui/skeleton';
+﻿import { Skeleton } from '@/components/ui/skeleton';
 
 export default function TimelineEditorLoading() {
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-[calc(100vh-3.5rem)] bg-background">
       {/* Skeleton sidebar */}
       <aside className="w-56 border-r bg-sidebar shrink-0 p-4 space-y-4">
         <Skeleton className="h-8 w-8 rounded-lg" />
@@ -26,3 +26,4 @@ export default function TimelineEditorLoading() {
     </div>
   );
 }
+

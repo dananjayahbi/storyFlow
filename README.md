@@ -59,6 +59,27 @@ start-all.bat
 
 ---
 
+## Workspaces & Accounts
+
+StoryFlow has two independent workspaces: **Facebook Reels** and **YouTube
+Videos**. Each workspace can hold multiple accounts (Facebook pages or YouTube
+channels):
+
+1. Open a workspace from `/select` (`/facebook` or `/youtube`).
+2. The account picker lists every page/channel on that side with project and
+   render counts. Create, rename or delete accounts here.
+3. Click an account to enter its dashboard. Projects, gallery, bulk rendering
+   and settings are then scoped to that account.
+4. Switch accounts from the account chip in the top navigation; switch
+   workspaces with the Facebook/YouTube buttons.
+
+Storage mirrors this hierarchy:
+`backend/Storage/<Section>/<account-id>/<project-id>/`. Migration
+`0013_seed_default_accounts` creates a default account on each side and moves
+existing projects into it automatically.
+
+---
+
 ## Directory Structure
 
 ```
@@ -71,9 +92,11 @@ StoryFlow/
 │   │   └── qwen_engine.py   # GPU worker, runs under Python 3.11
 │   ├── qwen_tts/.venv/      # Isolated Qwen GPU env (git-ignored, ~5 GB)
 │   ├── storyflow_backend/   # Django project settings
-│   ├── Storage/             # Section-scoped project assets (git-ignored)
-│   │   ├── Facebook/<id>/   # project.json, story.json, script.txt,
-│   │   ├── YouTube/<id>/    # images/, audio/, output/, assets/
+│   ├── Storage/             # Account-scoped project assets (git-ignored)
+│   │   ├── Facebook/<account-id>/<project-id>/
+│   │   ├── YouTube/<account-id>/<project-id>/
+│   │   │                    # project.json, story.json, script.txt,
+│   │   │                    # images/, audio/, output/, assets/
 │   │   └── logos/ outros/ fonts/ voice_references/
 │   ├── requirements.txt     # Python dependencies
 │   └── manage.py

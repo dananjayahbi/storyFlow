@@ -410,6 +410,8 @@ class SubtitleIntegrationTests(TestCase):
             resolution_width=640,
             resolution_height=360,
             framerate=24,
+            # Isolate crossfade math from the 0.3 s inter-segment silence.
+            inter_segment_silence=0.0,
         )
 
         # GlobalSettings with bundled default font
