@@ -460,7 +460,9 @@ class TestProjectDelete(APITestCase):
         self.assertEqual(Segment.objects.count(), 0)
 
     def test_delete_project_removes_media_directory(self):
-        media_dir = os.path.join(TEMP_MEDIA, 'projects', str(self.project.id))
+        media_dir = os.path.join(
+            TEMP_MEDIA, 'Facebook', str(self.project.id)
+        )
         os.makedirs(media_dir, exist_ok=True)
         # Create a dummy file
         with open(os.path.join(media_dir, 'test.jpg'), 'w') as f:

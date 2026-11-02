@@ -18,6 +18,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from api.models import GlobalSettings, Project, Segment, STATUS_PROCESSING
+from api.storage_paths import project_dir, project_relpath
 
 # ── Temp media root for file-based tests ──
 TEMP_MEDIA_ROOT = tempfile.mkdtemp()
@@ -64,10 +65,11 @@ class EndToEndWorkflowTests(APITestCase):
 
     def _provision_segment_files(self, project_id):
         """Create dummy image + audio files for every segment in *project_id*."""
+        project = Project.objects.get(pk=project_id)
         segments = Segment.objects.filter(project_id=project_id).order_by(
             'sequence_index'
         )
-        proj_dir = os.path.join(TEMP_MEDIA_ROOT, 'projects', str(project_id))
+        proj_dir = str(project_dir(project.section, project_id))
         img_dir = os.path.join(proj_dir, 'images')
         aud_dir = os.path.join(proj_dir, 'audio')
         os.makedirs(img_dir, exist_ok=True)
@@ -79,14 +81,18 @@ class EndToEndWorkflowTests(APITestCase):
             img_path = os.path.join(img_dir, img_name)
             with open(img_path, 'wb') as f:
                 f.write(b'\x89PNG\r\n\x1a\n' + b'\x00' * 50)
-            seg.image_file.name = f'projects/{project_id}/images/{img_name}'
+            seg.image_file.name = project_relpath(
+                project.section, project_id, 'images', img_name
+            )
 
             # Audio file
             aud_name = f'{seg.id}.wav'
             aud_path = os.path.join(aud_dir, aud_name)
             with open(aud_path, 'wb') as f:
                 f.write(b'RIFF' + b'\x00' * 40)
-            seg.audio_file.name = f'projects/{project_id}/audio/{aud_name}'
+            seg.audio_file.name = project_relpath(
+                project.section, project_id, 'audio', aud_name
+            )
             seg.audio_duration = 3.5
             seg.save()
 
@@ -225,8 +231,9 @@ class EndToEndWorkflowTests(APITestCase):
         project_id = resp.json()['id']
 
         # Only provision images, NOT audio
+        project = Project.objects.get(pk=project_id)
         segments = Segment.objects.filter(project_id=project_id)
-        proj_dir = os.path.join(TEMP_MEDIA_ROOT, 'projects', str(project_id))
+        proj_dir = str(project_dir(project.section, project_id))
         img_dir = os.path.join(proj_dir, 'images')
         os.makedirs(img_dir, exist_ok=True)
 
@@ -235,7 +242,9 @@ class EndToEndWorkflowTests(APITestCase):
             img_path = os.path.join(img_dir, img_name)
             with open(img_path, 'wb') as f:
                 f.write(b'\x89PNG' + b'\x00' * 50)
-            seg.image_file.name = f'projects/{project_id}/images/{img_name}'
+            seg.image_file.name = project_relpath(
+                project.section, project_id, 'images', img_name
+            )
             seg.save()
 
         render_resp = self.client.post(

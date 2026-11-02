@@ -1,0 +1,26 @@
+# Qwen3-TTS (optional GPU engine) — isolated Python 3.11 environment
+#
+# These packages are NOT installed into backend/venv because Django runs on
+# Python 3.14 while `qwen-tts` only supports Python 3.10-3.12.  The engine runs
+# in the dedicated environment at backend/qwen_tts/.venv.
+#
+# Fastest setup (reuses the experiment venv, no re-download):
+#   powershell -ExecutionPolicy Bypass -File scripts\setup_qwen_tts.ps1
+#
+# Fresh setup instead:
+#   uv venv --python 3.11 backend\qwen_tts\.venv
+#   uv pip install --python backend\qwen_tts\.venv\Scripts\python.exe `
+#       "torch==2.6.0+cu124" "torchaudio==2.6.0+cu124" `
+#       --index-url https://download.pytorch.org/whl/cu124 --index-strategy unsafe-best-match
+#   uv pip install --python backend\qwen_tts\.venv\Scripts\python.exe -r backend\qwen_tts\requirements-qwen.txt
+#
+# Tuned for a GTX 1660 Ti (6 GB). bfloat16 is required; float16 trips a
+# device-side assert in the code predictor's sampling step.
+
+qwen-tts
+transformers==4.57.3
+accelerate==1.12.0
+huggingface_hub
+soundfile
+librosa
+numpy

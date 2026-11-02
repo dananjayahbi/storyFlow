@@ -96,7 +96,7 @@ describe('Zustand Audio Actions', () => {
 
     // After completion
     expect(useProjectStore.getState().audioGenerationStatus['seg-1']?.status).toBe('completed');
-    expect(mockApi.generateSegmentAudio).toHaveBeenCalledWith('seg-1');
+    expect(mockApi.generateSegmentAudio).toHaveBeenCalledWith('seg-1', {});
   });
 
   it('generateAudio sets failed status on API error', async () => {

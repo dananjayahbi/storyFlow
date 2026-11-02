@@ -198,6 +198,46 @@ def validate_import_data(data: dict) -> dict:
     return data
 
 
+# ── Voice reference upload constants (Qwen voice cloning) ──
+ALLOWED_VOICE_REFERENCE_EXTENSIONS = [
+    '.wav', '.mp3', '.m4a', '.mp4', '.flac', '.ogg', '.opus', '.webm',
+]
+MAX_VOICE_REFERENCE_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+def validate_voice_reference_upload(file):
+    """Validate a voice-cloning reference clip.
+
+    Qwen3-TTS accepts any ffmpeg-readable container; 3-10 seconds of clean
+    speech works best.  This only checks the extension/size so the engine can
+    do the actual decoding.
+
+    Returns the validated file with pointer reset to 0.
+    """
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in ALLOWED_VOICE_REFERENCE_EXTENSIONS:
+        raise ValidationError({
+            'error': 'Invalid voice reference file',
+            'details': (
+                'Accepted formats: '
+                + ', '.join(ALLOWED_VOICE_REFERENCE_EXTENSIONS)
+                + f'. Got: {ext or "(no extension)"}'
+            ),
+        })
+
+    if file.size > MAX_VOICE_REFERENCE_SIZE:
+        raise ValidationError({
+            'error': 'File too large',
+            'details': (
+                'Voice reference clips must be under 25 MB. Got: '
+                f'{file.size / (1024 * 1024):.1f}MB'
+            ),
+        })
+
+    file.seek(0)
+    return file
+
+
 def validate_font_upload(file):
     """Validate an uploaded font file (.ttf or .otf).
 

@@ -17,6 +17,18 @@ urlpatterns = [
     path('tasks/<str:task_id>/status/', views.task_status_view, name='task-status'),
     path('settings/', views.global_settings_view, name='global-settings'),
     path('settings/voices/', views.available_voices_view, name='available-voices'),
+    path('settings/tts-engines/', views.tts_engines_view, name='tts-engines'),
+    path('settings/tts-engines/qwen/unload/', views.qwen_unload_view, name='qwen-unload'),
+    path(
+        'settings/voice-references/',
+        views.voice_references_view,
+        name='voice-references',
+    ),
+    path(
+        'settings/voice-references/<str:reference_id>/',
+        views.voice_reference_detail_view,
+        name='voice-reference-detail',
+    ),
     path('settings/font/upload/', views.upload_font_view, name='upload-font'),
     path('settings/tts-test/', views.tts_test_view, name='tts-test'),
     path('settings/logos/', views.logos_view, name='logos-list'),

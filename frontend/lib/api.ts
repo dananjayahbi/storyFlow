@@ -15,6 +15,9 @@ import {
   GalleryItem,
   Logo,
   OutroVideo,
+  VoiceReference,
+  TtsEnginesResponse,
+  GenerateAudioOptions,
 } from './types';
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
@@ -147,10 +150,12 @@ export async function deleteProject(id: string): Promise<void> {
 // ── Audio Generation & Task Tracking ──
 
 export async function generateSegmentAudio(
-  segmentId: string
+  segmentId: string,
+  options: GenerateAudioOptions = {}
 ): Promise<TaskResponse> {
   const response = await api.post<TaskResponse>(
-    `/api/segments/${segmentId}/generate-audio/`
+    `/api/segments/${segmentId}/generate-audio/`,
+    options
   );
   return response.data;
 }
@@ -162,6 +167,10 @@ export async function generateAllAudio(
   const body = {
     skip_locked: options.skip_locked ?? true,
     force_regenerate: options.force_regenerate ?? false,
+    ...(options.engine ? { engine: options.engine } : {}),
+    ...(options.voice_reference_id
+      ? { voice_reference_id: options.voice_reference_id }
+      : {}),
   };
   const response = await api.post<BulkTaskResponse>(
     `/api/projects/${projectId}/generate-all-audio/`,
@@ -256,6 +265,57 @@ export async function getVoices(): Promise<Voice[]> {
   return data;
 }
 
+// ── TTS engines (Kokoro default + optional Qwen GPU) ──
+
+export async function getTtsEngines(): Promise<TtsEnginesResponse> {
+  const { data } = await api.get<TtsEnginesResponse>('/api/settings/tts-engines/');
+  return data;
+}
+
+export async function unloadQwenEngine(): Promise<{ ok: boolean; message?: string }> {
+  const { data } = await api.post('/api/settings/tts-engines/qwen/unload/');
+  return data;
+}
+
+// ── Voice references (Qwen cloning) ──
+
+export async function getVoiceReferences(): Promise<VoiceReference[]> {
+  const { data } = await api.get<VoiceReference[]>('/api/settings/voice-references/');
+  return data;
+}
+
+export async function uploadVoiceReference(
+  file: File,
+  name?: string,
+  transcript?: string
+): Promise<VoiceReference> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (name) formData.append('name', name);
+  if (transcript) formData.append('transcript', transcript);
+  const { data } = await api.post<VoiceReference>(
+    '/api/settings/voice-references/',
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  );
+  return data;
+}
+
+export async function updateVoiceReference(
+  id: string,
+  data: { name?: string; transcript?: string }
+): Promise<VoiceReference> {
+  const response = await api.patch<VoiceReference>(
+    `/api/settings/voice-references/${id}/`,
+    data
+  );
+  return response.data;
+}
+
+export async function deleteVoiceReference(id: string): Promise<void> {
+  await api.delete(`/api/settings/voice-references/${id}/`);
+}
+
 // ── Font Upload (Task 05.03.03) ──
 
 export async function uploadFont(
@@ -271,14 +331,26 @@ export async function uploadFont(
 
 // ── TTS Test ──
 
+export interface TestTTSOptions {
+  voice?: string;
+  speed?: number;
+  engine?: 'kokoro' | 'qwen';
+  mode?: 'custom_voice' | 'clone';
+  speaker?: string;
+  language?: string;
+  instruct?: string;
+  max_new_tokens?: number;
+  voice_reference_id?: string | null;
+  x_vector_only?: boolean;
+}
+
 export async function testTTS(
   text: string,
-  voice?: string,
-  speed?: number
+  options: TestTTSOptions = {}
 ): Promise<Blob> {
   const response = await api.post(
     '/api/settings/tts-test/',
-    { text, voice, speed },
+    { text, ...options },
     { responseType: 'blob' }
   );
   return response.data;

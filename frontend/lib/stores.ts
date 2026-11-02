@@ -29,6 +29,12 @@ import {
   getOutroVideos as apiGetOutroVideos,
   uploadOutroVideo as apiUploadOutroVideo,
   deleteOutroVideo as apiDeleteOutroVideo,
+  getTtsEngines as apiGetTtsEngines,
+  unloadQwenEngine as apiUnloadQwenEngine,
+  getVoiceReferences as apiGetVoiceReferences,
+  uploadVoiceReference as apiUploadVoiceReference,
+  updateVoiceReference as apiUpdateVoiceReference,
+  deleteVoiceReference as apiDeleteVoiceReference,
 } from './api';
 import type {
   ProjectDetail,
@@ -41,6 +47,10 @@ import type {
   GlobalSettings,
   Logo,
   OutroVideo,
+  VoiceReference,
+  TtsEngineInfo,
+  GenerateAudioOptions,
+  GenerateAllAudioOptions,
 } from './types';
 import { type Voice, AVAILABLE_VOICES } from './constants';
 
@@ -59,6 +69,9 @@ interface ProjectStore {
 
   /** Bulk generation progress (null when idle). */
   bulkGenerationProgress: BulkGenerationProgress | null;
+
+  /** Human-readable bulk generation error (e.g. Qwen unavailable). */
+  bulkError: string | null;
 
   /** Session-only Set of segment IDs whose text was edited after audio generation. */
   staleAudioSegments: Set<string>;
@@ -89,10 +102,10 @@ interface ProjectStore {
   removeAudio: (segmentId: string) => Promise<void>;
 
   /** Trigger audio generation for a single segment. */
-  generateAudio: (segmentId: string) => Promise<void>;
+  generateAudio: (segmentId: string, options?: GenerateAudioOptions) => Promise<void>;
 
   /** Trigger audio generation for all unlocked segments. */
-  generateAllAudio: () => Promise<void>;
+  generateAllAudio: (options?: GenerateAllAudioOptions) => Promise<void>;
 
   /** Cancel bulk audio generation polling (client-side only). */
   cancelGeneration: () => void;
@@ -105,6 +118,9 @@ interface ProjectStore {
 
   /** Reset bulk generation progress to null. */
   clearBulkProgress: () => void;
+
+  /** Clear the bulk generation error banner. */
+  clearBulkError: () => void;
 
   /** Mark a segment's audio as stale (text edited after audio generated). */
   markAudioStale: (segmentId: string) => void;
@@ -152,6 +168,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
   audioTaskId: null,
   audioGenerationStatus: {} as Record<string, AudioGenerationState>,
   bulkGenerationProgress: null,
+  bulkError: null,
   staleAudioSegments: new Set<string>(),
   renderTaskId: null,
   renderStatus: 'idle' as RenderStatus,
@@ -490,6 +507,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       audioTaskId: null,
       audioGenerationStatus: {},
       bulkGenerationProgress: null,
+      bulkError: null,
       staleAudioSegments: new Set<string>(),
       renderTaskId: null,
       renderStatus: 'idle' as RenderStatus,
@@ -498,14 +516,14 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     });
   },
 
-  generateAudio: async (segmentId) => {
+  generateAudio: async (segmentId, options = {}) => {
     const { setSegmentAudioStatus, refreshSegmentAudio, clearAudioStale } = get();
     // Clear any stale warning and set generating state
     clearAudioStale(segmentId);
     setSegmentAudioStatus(segmentId, { status: 'generating' as const });
     try {
       // Fire the API call (returns task_id)
-      const taskResponse = await generateSegmentAudio(segmentId);
+      const taskResponse = await generateSegmentAudio(segmentId, options);
       // Store task ID and update status with taskId
       set({ audioTaskId: taskResponse.task_id });
       setSegmentAudioStatus(segmentId, { status: 'generating' as const, taskId: taskResponse.task_id });
@@ -532,17 +550,33 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     }
   },
 
-  generateAllAudio: async () => {
+  generateAllAudio: async (options = {}) => {
     const { project, setSegmentAudioStatus, refreshSegmentAudio } = get();
     if (!project) return;
 
+    set({ bulkError: null });
+
     try {
-      const bulkResponse = await apiGenerateAllAudio(project.id);
+      const bulkResponse = await apiGenerateAllAudio(project.id, options);
+
+      // The backend returns 200 without a task when there is nothing to do
+      // (e.g. every segment already uses the requested engine).
+      if (!bulkResponse.task_id) {
+        set({
+          audioTaskId: null,
+          bulkGenerationProgress: null,
+          bulkError: bulkResponse.message || 'Nothing to generate.',
+        });
+        return;
+      }
+
+      const taskId = bulkResponse.task_id;
+
       // Seed initial progress state
       set({
-        audioTaskId: bulkResponse.task_id,
+        audioTaskId: taskId,
         bulkGenerationProgress: {
-          task_id: bulkResponse.task_id,
+          task_id: taskId,
           status: bulkResponse.status,
           total: bulkResponse.segments_to_process,
           completed: 0,
@@ -560,7 +594,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       await new Promise<void>((resolve, reject) => {
         bulkPollingTimer = setInterval(async () => {
           try {
-            const taskStatus = await getTaskStatus(bulkResponse.task_id);
+            const taskStatus = await getTaskStatus(taskId);
             consecutiveFailures = 0; // Reset on successful poll
 
             // Process newly completed segments
@@ -601,7 +635,9 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
               set({ audioTaskId: null });
 
               if (taskStatus.status === 'FAILED' && taskStatus.errors.length > 0) {
-                set({ error: `Bulk audio generation completed with ${taskStatus.errors.length} error(s)` });
+                set({
+                  bulkError: `Bulk audio generation completed with ${taskStatus.errors.length} error(s)`,
+                });
               }
               // Clear progress after a brief delay for UI feedback
               setTimeout(() => set({ bulkGenerationProgress: null }), 3000);
@@ -622,8 +658,18 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
         }, 2000);
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Bulk audio generation failed';
-      set({ error: message, bulkGenerationProgress: null, audioTaskId: null });
+      const axiosErr = err as {
+        response?: { data?: { error?: string; message?: string } };
+      };
+      const message =
+        axiosErr?.response?.data?.error ||
+        axiosErr?.response?.data?.message ||
+        (err instanceof Error ? err.message : 'Bulk audio generation failed');
+      set({
+        bulkError: message,
+        bulkGenerationProgress: null,
+        audioTaskId: null,
+      });
     }
   },
 
@@ -704,6 +750,10 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
   clearBulkProgress: () => {
     set({ bulkGenerationProgress: null });
   },
+
+  clearBulkError: () => {
+    set({ bulkError: null });
+  },
 }));
 
 // ===================================================================
@@ -776,6 +826,41 @@ interface SettingsStore {
 
   /** Delete an outro video by ID. */
   deleteOutroVideo: (outroId: string) => Promise<void>;
+
+  // ── TTS engines + Qwen voice references ──
+
+  /** Capability/status of Kokoro and Qwen. */
+  ttsEngines: TtsEngineInfo[];
+
+  /** True while engine status is loading. */
+  isTtsEnginesLoading: boolean;
+
+  /** Fetch engine capabilities from GET /api/settings/tts-engines/. */
+  fetchTtsEngines: () => Promise<void>;
+
+  /** Unload the Qwen checkpoint (frees VRAM). */
+  unloadQwen: () => Promise<string>;
+
+  /** Uploaded reference clips for Qwen voice cloning. */
+  voiceReferences: VoiceReference[];
+
+  /** True while references are loading. */
+  isVoiceReferencesLoading: boolean;
+
+  /** True while a reference clip is uploading. */
+  isVoiceReferenceUploading: boolean;
+
+  /** Fetch all voice references. */
+  fetchVoiceReferences: () => Promise<void>;
+
+  /** Upload a reference clip (optionally with a name/transcript). */
+  uploadVoiceReference: (file: File, name?: string, transcript?: string) => Promise<VoiceReference>;
+
+  /** Rename/retranscribe a reference clip. */
+  updateVoiceReference: (id: string, data: { name?: string; transcript?: string }) => Promise<void>;
+
+  /** Delete a reference clip. */
+  deleteVoiceReference: (id: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsStore>()((set, get) => ({
@@ -791,6 +876,11 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
   outroVideos: [],
   isOutrosLoading: false,
   isOutroUploading: false,
+  ttsEngines: [],
+  isTtsEnginesLoading: false,
+  voiceReferences: [],
+  isVoiceReferencesLoading: false,
+  isVoiceReferenceUploading: false,
 
   fetchSettings: async () => {
     set({ isSettingsLoading: true, settingsError: null });
@@ -943,6 +1033,73 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
       }
     } catch {
       throw new Error('Failed to delete outro video');
+    }
+  },
+
+  // ── TTS engines ──
+
+  fetchTtsEngines: async () => {
+    set({ isTtsEnginesLoading: true });
+    try {
+      const response = await apiGetTtsEngines();
+      set({ ttsEngines: response.engines, isTtsEnginesLoading: false });
+    } catch {
+      set({ isTtsEnginesLoading: false });
+    }
+  },
+
+  unloadQwen: async () => {
+    const result = await apiUnloadQwenEngine();
+    if (!result.ok) throw new Error(result.message || 'Could not unload Qwen');
+    return result.message || 'Qwen unloaded — VRAM freed.';
+  },
+
+  // ── Voice references ──
+
+  fetchVoiceReferences: async () => {
+    set({ isVoiceReferencesLoading: true });
+    try {
+      const voiceReferences = await apiGetVoiceReferences();
+      set({ voiceReferences, isVoiceReferencesLoading: false });
+    } catch {
+      set({ isVoiceReferencesLoading: false });
+    }
+  },
+
+  uploadVoiceReference: async (file, name, transcript) => {
+    set({ isVoiceReferenceUploading: true });
+    try {
+      const reference = await apiUploadVoiceReference(file, name, transcript);
+      set((state) => ({
+        voiceReferences: [reference, ...state.voiceReferences],
+        isVoiceReferenceUploading: false,
+      }));
+      return reference;
+    } catch {
+      set({ isVoiceReferenceUploading: false });
+      throw new Error('Failed to upload voice reference');
+    }
+  },
+
+  updateVoiceReference: async (id, data) => {
+    const updated = await apiUpdateVoiceReference(id, data);
+    set((state) => ({
+      voiceReferences: state.voiceReferences.map((ref) =>
+        ref.id === id ? updated : ref
+      ),
+    }));
+  },
+
+  deleteVoiceReference: async (id) => {
+    await apiDeleteVoiceReference(id);
+    set((state) => ({
+      voiceReferences: state.voiceReferences.filter((ref) => ref.id !== id),
+    }));
+
+    // Detach from global settings if it was active
+    const gs = get().globalSettings;
+    if (gs && gs.active_voice_reference === id) {
+      set({ globalSettings: { ...gs, active_voice_reference: null } });
     }
   },
 }));

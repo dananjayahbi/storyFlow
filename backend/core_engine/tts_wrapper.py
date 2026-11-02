@@ -70,12 +70,22 @@ SPEED_MAX = 2.0
 # --------------------------------------------------------------------------
 
 
+def _project_section(project_id):
+    """Resolve a project's workspace section for storage paths."""
+    try:
+        from api.models import Project
+
+        return Project.objects.values_list('section', flat=True).get(pk=project_id)
+    except Exception:
+        return 'facebook'
+
+
 def construct_audio_path(project_id, segment_id):
     """
     Build an absolute filesystem path for a segment's WAV file.
 
     The path follows the pattern:
-        {MEDIA_ROOT}/projects/{project_id}/audio/{segment_id}.wav
+        {MEDIA_ROOT}/<Section>/{project_id}/audio/{segment_id}.wav
 
     Automatically creates the parent directory if it doesn't exist.
 
@@ -87,11 +97,15 @@ def construct_audio_path(project_id, segment_id):
         pathlib.Path: Absolute path to the WAV file.
     """
     from django.conf import settings
+    from api.storage_paths import project_relpath
 
-    audio_dir = Path(settings.MEDIA_ROOT) / "projects" / str(project_id) / "audio"
-    os.makedirs(audio_dir, exist_ok=True)
+    relative = project_relpath(
+        _project_section(project_id), project_id, 'audio', f'{segment_id}.wav'
+    )
+    audio_path = Path(settings.MEDIA_ROOT) / relative
+    os.makedirs(audio_path.parent, exist_ok=True)
 
-    return audio_dir / f"{segment_id}.wav"
+    return audio_path
 
 
 def construct_audio_url(project_id, segment_id):
@@ -99,7 +113,7 @@ def construct_audio_url(project_id, segment_id):
     Build a URL-relative path for serving a segment's WAV file.
 
     The URL follows the pattern:
-        /media/projects/{project_id}/audio/{segment_id}.wav
+        /media/<Section>/{project_id}/audio/{segment_id}.wav
 
     This path is stored in the Segment model's audio_file field and
     served by Django's media file handling in development.
@@ -111,7 +125,12 @@ def construct_audio_url(project_id, segment_id):
     Returns:
         str: URL-relative path to the WAV file.
     """
-    return f"/media/projects/{project_id}/audio/{segment_id}.wav"
+    from api.storage_paths import project_relpath
+
+    relative = project_relpath(
+        _project_section(project_id), project_id, 'audio', f'{segment_id}.wav'
+    )
+    return f"/media/{relative}"
 
 
 # --------------------------------------------------------------------------

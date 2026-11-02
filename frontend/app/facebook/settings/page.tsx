@@ -8,7 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon, Trash2, Upload, Film } from 'lucide-react';
+import {
+  Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon,
+  Trash2, Upload, Film, Cpu, Mic, AlertTriangle, CheckCircle2,
+} from 'lucide-react';
 import { useSettingsStore } from '@/store/settingsStore';
 import { toast } from 'sonner';
 import { SettingsSkeleton } from '@/components/skeletons';
@@ -24,6 +27,17 @@ export default function SettingsPage() {
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [voices, setVoices] = useState<Voice[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // TTS engine selection state (Kokoro default, Qwen optional)
+  const [ttsEngine, setTtsEngine] = useState<'kokoro' | 'qwen'>('kokoro');
+  const [qwenMode, setQwenMode] = useState<'custom_voice' | 'clone'>('custom_voice');
+  const [qwenSpeaker, setQwenSpeaker] = useState('Aiden');
+  const [qwenLanguage, setQwenLanguage] = useState('English');
+  const [qwenInstruct, setQwenInstruct] = useState('');
+  const [qwenMaxTokens, setQwenMaxTokens] = useState(1024);
+  const [voiceReferenceId, setVoiceReferenceId] = useState<string>('');
+  const [xVectorOnly, setXVectorOnly] = useState(true);
+  const voiceRefInputRef = useRef<HTMLInputElement>(null);
 
   // Subtitle settings state
   const { settings, fetchSettings, saveSettings } = useSettingsStore();
@@ -47,16 +61,38 @@ export default function SettingsPage() {
     fetchOutroVideos,
     uploadOutroVideo,
     deleteOutroVideo,
+    ttsEngines,
+    isTtsEnginesLoading,
+    fetchTtsEngines,
+    unloadQwen,
+    voiceReferences,
+    isVoiceReferencesLoading,
+    isVoiceReferenceUploading,
+    fetchVoiceReferences,
+    uploadVoiceReference,
+    updateVoiceReference,
+    deleteVoiceReference,
   } = useLogoStore();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const outroInputRef = useRef<HTMLInputElement>(null);
+
+  // Derived engine capability info
+  const kokoroEngine = ttsEngines.find((e) => e.id === 'kokoro');
+  const qwenEngine = ttsEngines.find((e) => e.id === 'qwen');
+  const qwenSpeakers = qwenEngine?.speakers ?? {};
+  const qwenLanguages = qwenEngine?.languages ?? ['English'];
 
   // Fetch settings on mount
   useEffect(() => {
     fetchSettings();
     fetchLogos();
     fetchOutroVideos();
-  }, [fetchSettings, fetchLogos, fetchOutroVideos]);
+    fetchTtsEngines();
+    fetchVoiceReferences();
+  }, [
+    fetchSettings, fetchLogos, fetchOutroVideos,
+    fetchTtsEngines, fetchVoiceReferences,
+  ]);
 
   // Sync local state when settings load
   useEffect(() => {
@@ -64,6 +100,14 @@ export default function SettingsPage() {
       setSubtitleFontSize(settings.subtitle_font_size ?? 48);
       setSubtitlePosition(settings.subtitle_position ?? 'bottom');
       setSubtitleFontColor(settings.subtitle_font_color ?? '#FFFFFF');
+      setTtsEngine(settings.tts_engine ?? 'kokoro');
+      setQwenMode(settings.qwen_mode ?? 'custom_voice');
+      setQwenSpeaker(settings.qwen_speaker ?? 'Aiden');
+      setQwenLanguage(settings.qwen_language ?? 'English');
+      setQwenInstruct(settings.qwen_instruct ?? '');
+      setQwenMaxTokens(settings.qwen_max_new_tokens ?? 1024);
+      setVoiceReferenceId(settings.active_voice_reference ?? '');
+      setXVectorOnly(settings.qwen_clone_x_vector_only ?? true);
     }
   }, [settings]);
 
@@ -103,7 +147,18 @@ export default function SettingsPage() {
     }
 
     try {
-      const blob = await testTTS(ttsText, ttsVoice, ttsSpeed);
+      const blob = await testTTS(ttsText, {
+        engine: ttsEngine,
+        voice: ttsVoice,
+        speed: ttsSpeed,
+        mode: qwenMode,
+        speaker: qwenSpeaker,
+        language: qwenLanguage,
+        instruct: qwenInstruct,
+        max_new_tokens: qwenMaxTokens,
+        voice_reference_id: voiceReferenceId || null,
+        x_vector_only: xVectorOnly,
+      });
 
       // Check if the response is actually an error JSON
       if (blob.type === 'application/json') {
@@ -191,45 +246,192 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-5">
-          {/* Voice selector */}
+          {/* Engine selector */}
           <div className="space-y-2">
-            <label htmlFor="tts-voice" className="text-sm font-medium">
-              Voice
+            <label htmlFor="tts-engine" className="text-sm font-medium">
+              Engine
             </label>
             <select
-              id="tts-voice"
-              value={ttsVoice}
-              onChange={(e) => setTtsVoice(e.target.value)}
+              id="tts-engine"
+              value={ttsEngine}
+              onChange={(e) => setTtsEngine(e.target.value as 'kokoro' | 'qwen')}
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name} ({v.gender}{v.accent ? `, ${v.accent}` : ''})
-                </option>
-              ))}
+              <option value="kokoro" disabled={kokoroEngine ? !kokoroEngine.available : false}>
+                Kokoro — fast draft (default)
+              </option>
+              <option value="qwen" disabled={qwenEngine ? !qwenEngine.available : false}>
+                Qwen3-TTS — GPU{qwenEngine && !qwenEngine.available ? ' (unavailable)' : ''}
+              </option>
             </select>
+            <p className="text-xs text-muted-foreground">
+              {ttsEngine === 'kokoro'
+                ? 'Lightweight CPU engine. Build a full draft video quickly, then regenerate with Qwen.'
+                : qwenEngine?.available
+                  ? `GPU: ${qwenEngine.device}. Only one checkpoint is resident at a time.`
+                  : qwenEngine?.error || 'Qwen requires a CUDA GPU and the dedicated Python 3.11 environment.'}
+            </p>
           </div>
 
-          {/* Speed control — using Slider */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">Speed</label>
-              <span className="text-sm font-medium tabular-nums text-muted-foreground">
-                {ttsSpeed.toFixed(1)}x
-              </span>
-            </div>
-            <Slider
-              value={[ttsSpeed]}
-              min={0.5}
-              max={2.0}
-              step={0.1}
-              onValueChange={(values) => setTtsSpeed(values[0])}
-            />
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">0.5x</span>
-              <span className="text-xs text-muted-foreground">2.0x</span>
-            </div>
-          </div>
+          {ttsEngine === 'kokoro' ? (
+            <>
+              {/* Kokoro voice selector */}
+              <div className="space-y-2">
+                <label htmlFor="tts-voice" className="text-sm font-medium">
+                  Voice
+                </label>
+                <select
+                  id="tts-voice"
+                  value={ttsVoice}
+                  onChange={(e) => setTtsVoice(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {voices.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name} ({v.gender}{v.accent ? `, ${v.accent}` : ''})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Speed control — using Slider */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Speed</label>
+                  <span className="text-sm font-medium tabular-nums text-muted-foreground">
+                    {ttsSpeed.toFixed(1)}x
+                  </span>
+                </div>
+                <Slider
+                  value={[ttsSpeed]}
+                  min={0.5}
+                  max={2.0}
+                  step={0.1}
+                  onValueChange={(values) => setTtsSpeed(values[0])}
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">0.5x</span>
+                  <span className="text-xs text-muted-foreground">2.0x</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Qwen mode */}
+              <div className="space-y-2">
+                <label htmlFor="qwen-mode" className="text-sm font-medium">
+                  Voice mode
+                </label>
+                <select
+                  id="qwen-mode"
+                  value={qwenMode}
+                  onChange={(e) => setQwenMode(e.target.value as 'custom_voice' | 'clone')}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                >
+                  <option value="custom_voice">Preset voice</option>
+                  <option value="clone">Voice cloning (reference clip)</option>
+                </select>
+              </div>
+
+              {qwenMode === 'custom_voice' ? (
+                <div className="space-y-2">
+                  <label htmlFor="qwen-speaker" className="text-sm font-medium">
+                    Speaker
+                  </label>
+                  <select
+                    id="qwen-speaker"
+                    value={qwenSpeaker}
+                    onChange={(e) => setQwenSpeaker(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  >
+                    {Object.entries(qwenSpeakers).map(([id, label]) => (
+                      <option key={id} value={id}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label htmlFor="qwen-reference" className="text-sm font-medium">
+                    Reference voice
+                  </label>
+                  <select
+                    id="qwen-reference"
+                    value={voiceReferenceId}
+                    onChange={(e) => setVoiceReferenceId(e.target.value)}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                  >
+                    <option value="">Select a reference clip…</option>
+                    {voiceReferences.map((ref) => (
+                      <option key={ref.id} value={ref.id}>
+                        {ref.name}{ref.duration ? ` (${ref.duration.toFixed(1)}s)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={xVectorOnly}
+                      onChange={(e) => setXVectorOnly(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-primary"
+                    />
+                    Speaker-embedding only (no transcript needed)
+                  </label>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label htmlFor="qwen-language" className="text-sm font-medium">
+                  Language
+                </label>
+                <select
+                  id="qwen-language"
+                  value={qwenLanguage}
+                  onChange={(e) => setQwenLanguage(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                >
+                  {qwenLanguages.map((lang) => (
+                    <option key={lang} value={lang}>{lang}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">Max new tokens</label>
+                  <span className="text-sm font-medium tabular-nums text-muted-foreground">
+                    {qwenMaxTokens}
+                  </span>
+                </div>
+                <Slider
+                  value={[qwenMaxTokens]}
+                  min={256}
+                  max={2048}
+                  step={128}
+                  onValueChange={(values) => setQwenMaxTokens(values[0])}
+                />
+                <p className="text-xs text-muted-foreground">
+                  ~40 s of speech at 1024. Raise only if you have VRAM headroom.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="qwen-instruct" className="text-sm font-medium">
+                  Style instruction <span className="text-muted-foreground">(optional)</span>
+                </label>
+                <textarea
+                  id="qwen-instruct"
+                  value={qwenInstruct}
+                  onChange={(e) => setQwenInstruct(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. calm documentary narration"
+                  className="flex min-h-14 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm resize-y"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ignored by the 0.6B checkpoint; supported by the 1.7B build.
+                </p>
+              </div>
+            </>
+          )}
 
           <Separator />
 
@@ -301,6 +503,203 @@ export default function SettingsPage() {
           {ttsError && (
             <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
               {ttsError}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── TTS Engine Status Card ── */}
+      <Card className="mt-6">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
+              <Cpu className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-lg">TTS Engines</CardTitle>
+              <CardDescription>
+                Kokoro is the default. Qwen3-TTS is optional, GPU-only, and supports voice cloning.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {isTtsEnginesLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Checking engines…
+            </div>
+          ) : (
+            ttsEngines.map((engine) => (
+              <div
+                key={engine.id}
+                className="flex items-start gap-3 border rounded-lg p-3"
+              >
+                <div className="mt-0.5">
+                  {engine.available ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium">{engine.label}</p>
+                    {engine.supports_cloning && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                        voice cloning
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {engine.available ? engine.device : (engine.error || 'Unavailable')}
+                  </p>
+                  {engine.description && (
+                    <p className="text-xs text-muted-foreground mt-1">{engine.description}</p>
+                  )}
+                </div>
+                {engine.id === 'qwen' && engine.available && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs shrink-0"
+                    onClick={async () => {
+                      try {
+                        const message = await unloadQwen();
+                        toast.success(message);
+                      } catch {
+                        toast.error('Could not unload Qwen');
+                      }
+                    }}
+                  >
+                    Unload VRAM
+                  </Button>
+                )}
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Voice References Card (Qwen cloning) ── */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Mic className="h-5 w-5" />
+            Voice References
+          </CardTitle>
+          <CardDescription>
+            Upload clean 3–10 second speech clips. Qwen can clone any of them when generating audio.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <input
+              ref={voiceRefInputRef}
+              type="file"
+              accept=".wav,.mp3,.m4a,.mp4,.flac,.ogg,.opus,.webm,audio/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 25 * 1024 * 1024) {
+                  toast.error('Reference clips must be under 25 MB');
+                  return;
+                }
+                try {
+                  await uploadVoiceReference(file);
+                  toast.success('Voice reference uploaded');
+                } catch {
+                  toast.error('Failed to upload voice reference');
+                }
+                if (voiceRefInputRef.current) voiceRefInputRef.current.value = '';
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => voiceRefInputRef.current?.click()}
+              disabled={isVoiceReferenceUploading}
+            >
+              {isVoiceReferenceUploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Uploading…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Reference Clip
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground mt-1">
+              WAV/MP3/M4A/FLAC. 3–10s of one speaker, minimal background noise. Max 25 MB.
+            </p>
+          </div>
+
+          <Separator />
+
+          {isVoiceReferencesLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading references…
+            </div>
+          ) : voiceReferences.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No reference clips yet. Upload one to enable Qwen voice cloning.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {voiceReferences.map((ref) => (
+                <div key={ref.id} className="border rounded-lg p-3 space-y-2 group">
+                  <div className="flex items-center gap-3">
+                    <Mic className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{ref.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {ref.duration ? `${ref.duration.toFixed(1)}s · ` : ''}
+                        Uploaded {new Date(ref.uploaded_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    {ref.audio_url && (
+                      <audio controls src={`http://localhost:8765${ref.audio_url}`} className="h-8 max-w-[180px]" />
+                    )}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="h-7 w-7 p-0 shrink-0"
+                      onClick={async () => {
+                        try {
+                          await deleteVoiceReference(ref.id);
+                          toast.success('Voice reference deleted');
+                        } catch {
+                          toast.error('Failed to delete voice reference');
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="pl-7">
+                    <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      Reference transcript (optional, improves cloning accuracy)
+                    </label>
+                    <textarea
+                      defaultValue={ref.transcript}
+                      rows={2}
+                      placeholder="Exact words spoken in the clip…"
+                      className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs resize-y"
+                      onBlur={async (e) => {
+                        if (e.target.value === ref.transcript) return;
+                        try {
+                          await updateVoiceReference(ref.id, { transcript: e.target.value });
+                          toast.success('Transcript saved');
+                        } catch {
+                          toast.error('Failed to save transcript');
+                        }
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

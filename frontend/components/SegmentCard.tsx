@@ -103,6 +103,19 @@ function SegmentCardComponent({
             audioDuration={segment.audio_duration}
             generationStatus={generationStatus}
           />
+          {segment.audio_file && segment.audio_engine && (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 h-4 uppercase tracking-wide"
+              title={
+                segment.audio_engine === 'qwen'
+                  ? 'Final audio generated with Qwen3-TTS'
+                  : 'Draft audio generated with Kokoro'
+              }
+            >
+              {segment.audio_engine === 'qwen' ? 'Qwen' : 'Kokoro'}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-1">
           {/* Lock toggle */}

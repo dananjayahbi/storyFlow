@@ -43,7 +43,10 @@ function getInitialCollapsed(): boolean {
 
 export function GlobalSettingsPanel() {
   const { project, isLoading: isProjectLoading, updateProjectSettings } = useProjectStore();
-  const { outroVideos, fetchOutroVideos, logos, fetchLogos } = useSettingsStore();
+  const {
+    outroVideos, fetchOutroVideos, logos, fetchLogos,
+    ttsEngines, fetchTtsEngines, voiceReferences, fetchVoiceReferences,
+  } = useSettingsStore();
 
   const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
 
@@ -68,7 +71,14 @@ export function GlobalSettingsPanel() {
   useEffect(() => {
     fetchOutroVideos();
     fetchLogos();
-  }, [fetchOutroVideos, fetchLogos]);
+    fetchTtsEngines();
+    fetchVoiceReferences();
+  }, [fetchOutroVideos, fetchLogos, fetchTtsEngines, fetchVoiceReferences]);
+
+  // Derived Qwen capability info
+  const qwenEngine = ttsEngines.find((e) => e.id === 'qwen');
+  const qwenSpeakers = qwenEngine?.speakers ?? {};
+  const qwenLanguages = qwenEngine?.languages ?? ['English'];
 
   // Sync local slider value when project loads/changes
   useEffect(() => {
@@ -240,15 +250,130 @@ export function GlobalSettingsPanel() {
       {/* ── Expanded Panel Body ── */}
       {!isCollapsed && (
         <div className="space-y-6">
-          {/* ── Voice Settings Section ── */}
+          {/* ── Voice / TTS Engine Section ── */}
           <section>
-            {/* Voice Selector (Task 05.03.02) */}
-            <VoiceSelector
-              value={project.default_voice_id}
-              onChange={handleSettingChange}
-            />
+            {/* Engine selector: Kokoro draft vs Qwen final */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">TTS Engine</label>
+              <Select
+                value={project.tts_engine ?? 'kokoro'}
+                onValueChange={(val) =>
+                  handleSettingChange({ tts_engine: val as 'kokoro' | 'qwen' })
+                }
+              >
+                <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="kokoro">Kokoro — fast draft</SelectItem>
+                  <SelectItem value="qwen" disabled={!qwenEngine?.available}>
+                    Qwen3-TTS — GPU final
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground">
+                {(project.tts_engine ?? 'kokoro') === 'kokoro'
+                  ? 'Build the full draft video quickly, then switch to Qwen and regenerate the audio.'
+                  : qwenEngine?.available
+                    ? `Heavy GPU engine${qwenEngine.device ? ` (${qwenEngine.device})` : ''}. Generates the final narration.`
+                    : qwenEngine?.error || 'Qwen is unavailable. See Settings → TTS Engines.'}
+              </p>
+            </div>
 
-            {/* TTS Speed Slider */}
+            {(project.tts_engine ?? 'kokoro') === 'qwen' ? (
+              <div className="space-y-2.5 mt-3">
+                {/* Qwen mode */}
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Voice mode</label>
+                  <Select
+                    value={project.qwen_mode ?? 'custom_voice'}
+                    onValueChange={(val) =>
+                      handleSettingChange({
+                        qwen_mode: val as 'custom_voice' | 'clone',
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="custom_voice">Preset voice</SelectItem>
+                      <SelectItem value="clone">Voice cloning</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {(project.qwen_mode ?? 'custom_voice') === 'custom_voice' ? (
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Speaker</label>
+                    <Select
+                      value={project.qwen_speaker ?? 'Aiden'}
+                      onValueChange={(val) => handleSettingChange({ qwen_speaker: val })}
+                    >
+                      <SelectTrigger className="w-full h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(qwenSpeakers).map(([id, label]) => (
+                          <SelectItem key={id} value={id}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-muted-foreground">Reference voice</label>
+                    <Select
+                      value={project.active_voice_reference ?? ''}
+                      onValueChange={(val) =>
+                        handleSettingChange({ active_voice_reference: val || null })
+                      }
+                    >
+                      <SelectTrigger className="w-full h-8 text-xs">
+                        <SelectValue placeholder="Select reference…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {voiceReferences.map((ref) => (
+                          <SelectItem key={ref.id} value={ref.id}>{ref.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {voiceReferences.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        No reference clips. Upload one in Settings → Voice References.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Language</label>
+                  <Select
+                    value={project.qwen_language ?? 'English'}
+                    onValueChange={(val) => handleSettingChange({ qwen_language: val })}
+                  >
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {qwenLanguages.map((lang) => (
+                        <SelectItem key={lang} value={lang}>{lang}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                {/* Kokoro Voice Selector (Task 05.03.02) */}
+                <VoiceSelector
+                  value={project.default_voice_id}
+                  onChange={handleSettingChange}
+                />
+              </div>
+            )}
+
+            {/* TTS Speed Slider (applies to both engines) */}
             <div className="space-y-1.5 mt-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs text-muted-foreground">

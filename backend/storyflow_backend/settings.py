@@ -11,6 +11,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+import sys
+import tempfile
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -128,9 +131,30 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-# Media files (user-uploaded content)
+# Media files (user-uploaded content + generated assets)
+# All project assets are stored under Storage/<Section>/<project-id>/.
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = BASE_DIR / 'Storage'
+
+# Test runs must never write into the real asset store.
+if any(arg in ('test', 'pytest') for arg in sys.argv):
+    MEDIA_ROOT = Path(tempfile.mkdtemp(prefix='storyflow-test-storage-'))
+
+# ---------------------------------------------------------------------------
+# Qwen3-TTS (optional GPU engine, default is still Kokoro)
+# ---------------------------------------------------------------------------
+# Django runs on Python 3.14, but qwen-tts requires Python 3.10-3.12.  The GPU
+# engine therefore lives in its own virtualenv and is driven as a child
+# process.  Run scripts/setup_qwen_tts.ps1 to copy the TTS-test venv instead
+# of re-downloading ~5 GB of torch/CUDA wheels.
+QWEN_TTS_PYTHON = os.environ.get(
+    'QWEN_TTS_PYTHON',
+    str(BASE_DIR / 'qwen_tts' / '.venv' / 'Scripts' / 'python.exe'),
+)
+# Fraction of VRAM the worker may reserve.  The 1660 Ti has 6 GB and Windows
+# needs ~1.1 GB for the desktop, so 0.72 leaves headroom and makes PyTorch
+# raise a clean OOM instead of spilling into shared GPU memory.
+QWEN_TTS_VRAM_FRACTION = os.environ.get('QWEN_TTS_VRAM_FRACTION', '0.72')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

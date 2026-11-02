@@ -235,6 +235,16 @@ def resize_image_to_resolution(
 # ---------------------------------------------------------------------------
 
 
+def _project_section(project_id: str) -> str:
+    """Resolve a project's workspace section for its output folder."""
+    try:
+        from api.models import Project
+
+        return Project.objects.values_list('section', flat=True).get(pk=project_id)
+    except Exception:
+        return 'facebook'
+
+
 def get_output_path(project_id: str) -> str:
     """
     Return the output file path for a rendered video and ensure the
@@ -242,7 +252,7 @@ def get_output_path(project_id: str) -> str:
 
     The path is constructed relative to ``settings.MEDIA_ROOT``::
 
-        <MEDIA_ROOT>/projects/<project_id>/output/final.mp4
+        <MEDIA_ROOT>/<Section>/<project_id>/output/final.mp4
 
     Args:
         project_id: The unique identifier of the project.
@@ -254,6 +264,7 @@ def get_output_path(project_id: str) -> str:
         ValueError: If ``MEDIA_ROOT`` is not configured.
     """
     from django.conf import settings  # noqa: E402 — deferred import
+    from api.storage_paths import project_relpath
 
     media_root = getattr(settings, "MEDIA_ROOT", None)
     if not media_root:
@@ -262,10 +273,12 @@ def get_output_path(project_id: str) -> str:
             "This setting is required for video output path resolution."
         )
 
-    output_dir = Path(media_root) / "projects" / str(project_id) / "output"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    relative = project_relpath(
+        _project_section(str(project_id)), project_id, 'output', 'final.mp4'
+    )
+    output_path = Path(media_root) / relative
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    output_path = output_dir / "final.mp4"
     logger.debug("Output path for project %s: %s", project_id, output_path)
     return str(output_path)
 

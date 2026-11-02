@@ -18,6 +18,33 @@ export interface GlobalSettings {
   /** Default Kokoro TTS voice identifier (e.g. "af_bella"). */
   default_voice_id: string;
 
+  /** TTS engine used by default ("kokoro" is fast/CPU, "qwen" is GPU). */
+  tts_engine?: 'kokoro' | 'qwen';
+
+  /** Qwen voice mode. */
+  qwen_mode?: 'custom_voice' | 'clone';
+
+  /** Qwen preset speaker id. */
+  qwen_speaker?: string;
+
+  /** Qwen language. */
+  qwen_language?: string;
+
+  /** Optional Qwen style instruction (1.7B only). */
+  qwen_instruct?: string;
+
+  /** Qwen generation token ceiling (256-2048). */
+  qwen_max_new_tokens?: number;
+
+  /** Use speaker-embedding-only cloning (no transcript needed). */
+  qwen_clone_x_vector_only?: boolean;
+
+  /** Active Qwen cloning reference UUID. */
+  active_voice_reference?: string | null;
+
+  /** TTS speed multiplier (Kokoro). */
+  tts_speed?: number;
+
   /** Subtitle font family name (e.g. "Arial" or a custom uploaded font). */
   subtitle_font_family: string;
 

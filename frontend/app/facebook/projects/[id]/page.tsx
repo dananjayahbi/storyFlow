@@ -17,8 +17,11 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrowLeft, Volume2, Film, Loader2, X, FileUp, Download, CheckCircle, AlertCircle,
-  Settings, ChevronLeft, ChevronRight, Info, Sliders, Home, Layers, Calendar, FolderOpen, Pencil, Check, BookOpen,
+  Settings, ChevronLeft, ChevronRight, ChevronDown, Info, Sliders, Home, Layers, Calendar, FolderOpen, Pencil, Check, BookOpen, Sparkles, Zap,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 // ── Sidebar collapsed state persistence ──
@@ -69,7 +72,8 @@ export default function TimelineEditorPage() {
     project, segments, isLoading, error,
     fetchProject, addSegment, importSegmentsToProject, updateSegment, deleteSegment,
     uploadImage, removeImage, reset,
-    bulkGenerationProgress, generateAllAudio, cancelGeneration,
+    bulkGenerationProgress, bulkError, clearBulkError,
+    generateAllAudio, cancelGeneration,
     renameProject,
     // Render pipeline
     renderStatus, renderProgress, outputUrl,
@@ -524,7 +528,7 @@ export default function TimelineEditorPage() {
                         variant="outline"
                         size="sm"
                         className="w-full justify-start text-xs"
-                        onClick={generateAllAudio}
+                        onClick={() => generateAllAudio()}
                         disabled={!!bulkGenerationProgress}
                       >
                         {isGenerating ? (
@@ -681,8 +685,21 @@ export default function TimelineEditorPage() {
           {/* ── Action Bar ── */}
           <footer className="border-t bg-background shrink-0 py-4">
             {/* Progress / Status indicators (only when active) */}
-            {(bulkGenerationProgress || isRendering || renderStatus === 'completed' || renderStatus === 'failed') && (
+            {(bulkGenerationProgress || bulkError || isRendering || renderStatus === 'completed' || renderStatus === 'failed') && (
               <div className="px-4 sm:px-6 space-y-1">
+                {/* Bulk audio generation error (e.g. Qwen unavailable) */}
+                {bulkError && !bulkGenerationProgress && (
+                  <div className="flex items-center gap-2 text-xs text-destructive">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    <span className="flex-1">{bulkError}</span>
+                    <button
+                      className="underline hover:no-underline"
+                      onClick={clearBulkError}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
                 {/* Audio generation progress */}
                 {bulkGenerationProgress && (
                   <div className="space-y-1">
@@ -749,7 +766,7 @@ export default function TimelineEditorPage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={generateAllAudio}
+                  onClick={() => generateAllAudio()}
                   disabled={!!bulkGenerationProgress}
                   className="h-8 text-xs"
                 >
@@ -760,6 +777,35 @@ export default function TimelineEditorPage() {
                   )}
                   {isGenerating ? 'Generating…' : 'Generate All Audio'}
                 </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 px-2"
+                      disabled={!!bulkGenerationProgress}
+                      title="Choose TTS engine"
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem
+                      onClick={() => generateAllAudio({ engine: 'kokoro' })}
+                    >
+                      <Zap className="h-4 w-4 mr-2" />
+                      Kokoro — draft audio
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() =>
+                        generateAllAudio({ engine: 'qwen', force_regenerate: true })
+                      }
+                    >
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Qwen — finalize audio
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {isGenerating && (
                   <Button variant="ghost" size="sm" onClick={cancelGeneration} className="h-8 text-xs px-2">
                     <X className="h-3.5 w-3.5" />

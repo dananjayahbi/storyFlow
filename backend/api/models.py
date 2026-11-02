@@ -1,6 +1,18 @@
 import uuid
 from django.db import models
 
+from core_engine.tts import (
+    ENGINE_CHOICES,
+    ENGINE_KOKORO,
+    QWEN_DEFAULT_LANGUAGE,
+    QWEN_DEFAULT_SPEAKER,
+    QWEN_MAX_TOKENS_DEFAULT,
+    QWEN_MODE_CHOICES,
+    QWEN_MODE_CUSTOM,
+)
+
+from .storage_paths import project_relpath
+
 STATUS_DRAFT = "DRAFT"
 STATUS_PROCESSING = "PROCESSING"
 STATUS_COMPLETED = "COMPLETED"
@@ -56,6 +68,29 @@ class Project(models.Model):
     # TTS
     default_voice_id = models.CharField(max_length=100, default='af_bella')
     tts_speed = models.FloatField(default=1.0)
+
+    # TTS engine selection ("kokoro" is fast/CPU, "qwen" is GPU + cloning)
+    tts_engine = models.CharField(
+        max_length=20, choices=ENGINE_CHOICES, default=ENGINE_KOKORO,
+    )
+    qwen_mode = models.CharField(
+        max_length=20, choices=QWEN_MODE_CHOICES, default=QWEN_MODE_CUSTOM,
+    )
+    qwen_speaker = models.CharField(
+        max_length=40, default=QWEN_DEFAULT_SPEAKER,
+    )
+    qwen_language = models.CharField(
+        max_length=40, default=QWEN_DEFAULT_LANGUAGE,
+    )
+    qwen_instruct = models.TextField(blank=True, default='')
+    qwen_max_new_tokens = models.PositiveIntegerField(
+        default=QWEN_MAX_TOKENS_DEFAULT,
+    )
+    qwen_clone_x_vector_only = models.BooleanField(default=True)
+    active_voice_reference = models.ForeignKey(
+        'VoiceReference', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='projects_using',
+    )
 
     # Subtitle styling
     subtitle_font_family = models.CharField(max_length=200, default='Arial')
@@ -128,11 +163,13 @@ class Project(models.Model):
 
 
 def segment_image_path(instance, filename):
-    return f'projects/{instance.project.id}/images/{filename}'
+    """Store images in Storage/<Section>/<project-id>/images/."""
+    return project_relpath(instance.project.section, instance.project.id, 'images', filename)
 
 
 def segment_audio_path(instance, filename):
-    return f'projects/{instance.project.id}/audio/{filename}'
+    """Store generated audio in Storage/<Section>/<project-id>/audio/."""
+    return project_relpath(instance.project.section, instance.project.id, 'audio', filename)
 
 
 class Segment(models.Model):
@@ -144,6 +181,9 @@ class Segment(models.Model):
     image_file = models.ImageField(upload_to=segment_image_path, blank=True, null=True)
     audio_file = models.FileField(upload_to=segment_audio_path, blank=True, null=True)
     audio_duration = models.FloatField(null=True, blank=True)
+    # Which engine produced the current audio ("kokoro" or "qwen"), so the UI
+    # can show whether a segment is still on the fast draft voice.
+    audio_engine = models.CharField(max_length=20, blank=True, default='')
     is_locked = models.BooleanField(default=False)
 
     def __str__(self):
@@ -189,12 +229,61 @@ class OutroVideo(models.Model):
         ordering = ['-uploaded_at']
 
 
+def voice_reference_upload_path(instance, filename):
+    """Reference clips for Qwen zero-shot voice cloning."""
+    return f'voice_references/{filename}'
+
+
+class VoiceReference(models.Model):
+    """An uploaded reference clip used by Qwen3-TTS voice cloning.
+
+    Multiple references can be stored; the project/global settings pick one via
+    ``active_voice_reference``.  3-10 second clean speech clips work best.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    file = models.FileField(upload_to=voice_reference_upload_path)
+    transcript = models.TextField(blank=True, default='')
+    duration = models.FloatField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+
 class GlobalSettings(models.Model):
     """Singleton application-wide configuration record (pk always == 1)."""
 
     # ── TTS defaults ──
     default_voice_id = models.CharField(max_length=100, default='af_bella')
     tts_speed = models.FloatField(default=1.0)
+
+    # ── TTS engine defaults ──
+    tts_engine = models.CharField(
+        max_length=20, choices=ENGINE_CHOICES, default=ENGINE_KOKORO,
+    )
+    qwen_mode = models.CharField(
+        max_length=20, choices=QWEN_MODE_CHOICES, default=QWEN_MODE_CUSTOM,
+    )
+    qwen_speaker = models.CharField(
+        max_length=40, default=QWEN_DEFAULT_SPEAKER,
+    )
+    qwen_language = models.CharField(
+        max_length=40, default=QWEN_DEFAULT_LANGUAGE,
+    )
+    qwen_instruct = models.TextField(blank=True, default='')
+    qwen_max_new_tokens = models.PositiveIntegerField(
+        default=QWEN_MAX_TOKENS_DEFAULT,
+    )
+    qwen_clone_x_vector_only = models.BooleanField(default=True)
+    active_voice_reference = models.ForeignKey(
+        'VoiceReference', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='active_in_settings',
+    )
 
     # ── Subtitle styling ──
     subtitle_font_family = models.CharField(max_length=200, default='Arial')

@@ -4,6 +4,7 @@ import shutil
 import uuid as uuid_mod
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.storage import default_storage
 from django.db import models, transaction
 from django.http import FileResponse, StreamingHttpResponse
@@ -13,14 +14,29 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import (
-    Project, Segment, GlobalSettings, Logo, OutroVideo,
+    Project, Segment, GlobalSettings, Logo, OutroVideo, VoiceReference,
     STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
     SECTION_CHOICES,
 )
-from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer, LogoSerializer, OutroVideoSerializer
+from .serializers import (
+    ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer,
+    SegmentSerializer, GlobalSettingsSerializer, LogoSerializer,
+    OutroVideoSerializer, VoiceReferenceSerializer,
+)
 from .parsers import ParseError
+from .storage import write_project_artifacts, save_story_json
+from .storage_paths import (
+    media_url,
+    project_dir,
+    project_relpath,
+    upgrade_legacy_project_path,
+)
 from .tasks import get_task_manager, render_task_function
-from .validators import validate_image_upload, validate_project_for_render, validate_font_upload
+from .validators import (
+    validate_image_upload, validate_project_for_render, validate_font_upload,
+    validate_voice_reference_upload,
+)
+from core_engine import tts as tts_engine
 from core_engine.model_loader import KokoroModelLoader
 from core_engine.tts_wrapper import construct_audio_path, VALID_VOICE_IDS
 from core_engine import render_utils
@@ -60,6 +76,77 @@ def scoped_projects(request):
     return queryset
 
 
+# ---------------------------------------------------------------------------
+# TTS engine helpers (Kokoro default, Qwen optional)
+# ---------------------------------------------------------------------------
+
+def resolve_tts_engine(data, default='kokoro'):
+    """Validate an explicit ``engine`` in a request body and return it."""
+    requested = data.get('engine') if hasattr(data, 'get') else None
+    if requested and requested not in tts_engine.VALID_ENGINES:
+        raise ValidationError({
+            'engine': (
+                f"Invalid engine '{requested}'. Must be one of: "
+                f"{', '.join(sorted(tts_engine.VALID_ENGINES))}."
+            )
+        })
+    return tts_engine.normalize_engine(requested, default=default)
+
+
+def resolve_voice_reference(project, requested_id):
+    """Resolve an explicit voice reference, else the project's active one."""
+    if requested_id:
+        try:
+            return VoiceReference.objects.get(pk=requested_id)
+        except (
+            VoiceReference.DoesNotExist,
+            ValueError,
+            DjangoValidationError,
+        ):
+            raise ValidationError({
+                'voice_reference_id': 'Voice reference not found.'
+            })
+    return project.active_voice_reference
+
+
+def voice_reference_path(reference):
+    """Absolute path to a reference clip, or ``None`` if it is missing."""
+    if not reference or not reference.file:
+        return None
+    try:
+        path = reference.file.path
+    except (ValueError, NotImplementedError):
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def build_tts_options(project, engine, reference=None):
+    """Snapshot engine settings into plain values (thread-safe for tasks)."""
+    return {
+        'engine': engine,
+        'voice_id': project.default_voice_id,
+        'speed': project.tts_speed,
+        'qwen_mode': project.qwen_mode,
+        'qwen_speaker': project.qwen_speaker,
+        'qwen_language': project.qwen_language,
+        'qwen_instruct': project.qwen_instruct,
+        'qwen_max_new_tokens': project.qwen_max_new_tokens,
+        'qwen_x_vector_only': project.qwen_clone_x_vector_only,
+        'reference_audio_path': voice_reference_path(reference),
+        'reference_text': (reference.transcript if reference else '') or '',
+    }
+
+
+def engine_ready_response(engine):
+    """Return a 503 response when *engine* cannot run, else ``None``."""
+    if tts_engine.engine_available(engine):
+        return None
+    return Response(
+        {'error': tts_engine.unavailable_message(engine)},
+        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
     serializer_class = ProjectSerializer
@@ -93,18 +180,17 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer.save(section=section or data_section or 'facebook')
 
     def perform_destroy(self, instance):
-        """Delete project with full media directory cleanup.
+        """Delete project with its complete section-scoped asset folder.
 
         Order matters:
-          1. Delete media directory (while segment records still exist for reference)
+          1. Delete the Storage/<Section>/<project-id>/ directory
           2. Delete DB record (CASCADE removes all segments)
         """
-        # 1. Build and remove media directory
-        media_path = os.path.join(
-            settings.MEDIA_ROOT, 'projects', str(instance.id)
+        # 1. Remove the project's self-contained asset folder
+        shutil.rmtree(
+            project_dir(instance.section, instance.id),
+            ignore_errors=True,
         )
-        if os.path.isdir(media_path):
-            shutil.rmtree(media_path, ignore_errors=True)
 
         # 2. Delete database record (CASCADE handles segments)
         instance.delete()
@@ -122,8 +208,31 @@ class ProjectViewSet(viewsets.ModelViewSet):
         # 1. Parse request options
         skip_locked = request.data.get('skip_locked', True)
         force_regenerate = request.data.get('force_regenerate', False)
+        engine = resolve_tts_engine(request.data, default=project.tts_engine)
+        voice_reference = resolve_voice_reference(
+            project, request.data.get('voice_reference_id')
+        )
 
-        # 2. Fetch and filter segments
+        if engine == tts_engine.ENGINE_QWEN:
+            if project.qwen_mode == tts_engine.QWEN_MODE_CLONE and \
+                    not voice_reference_path(voice_reference):
+                return Response(
+                    {
+                        'error': (
+                            'Qwen voice cloning needs a reference voice. '
+                            'Upload one in Settings -> Voice References and '
+                            'select it for this project.'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # 2. TTS model check (per engine)
+        engine_error = engine_ready_response(engine)
+        if engine_error is not None:
+            return engine_error
+
+        # 3. Fetch and filter segments
         all_segments = Segment.objects.filter(project=project).order_by('sequence_index')
         total_segments = all_segments.count()
 
@@ -140,8 +249,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 skipped_locked += 1
                 continue
             if seg.audio_file and not force_regenerate:
-                skipped_existing += 1
-                continue
+                # Skip only audio already produced by the requested engine, so
+                # switching Kokoro draft -> Qwen final regenerates naturally.
+                current_engine = seg.audio_engine or tts_engine.ENGINE_KOKORO
+                if current_engine == engine:
+                    skipped_existing += 1
+                    continue
             segments_to_process.append(str(seg.id))
 
         # 3. Handle empty processing list
@@ -158,16 +271,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        # 4. TTS model check
-        if not KokoroModelLoader.is_model_available():
-            return Response(
-                {'error': 'TTS model not available. Please install the Kokoro ONNX model file.'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        # 5. Read project-level TTS settings (capture as plain values for thread safety)
-        voice_id = project.default_voice_id
-        speed = project.tts_speed
+        # 5. Snapshot engine settings as plain values for thread safety
+        tts_options = build_tts_options(project, engine, voice_reference)
 
         # Capture project ID as string (not ORM object)
         project_id = str(project.id)
@@ -181,8 +286,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
         # 7. Define batch task function
         def batch_task_fn():
+            from core_engine.tts import synthesize
             from core_engine.tts_wrapper import (
-                generate_audio as tts_generate,
                 construct_audio_path,
                 construct_audio_url,
             )
@@ -205,18 +310,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     seg = SegmentModel.objects.get(pk=seg_id)
 
                     output_path = str(construct_audio_path(project_id, seg_id))
-                    result = tts_generate(
-                        text=seg.text_content,
-                        voice_id=voice_id,
-                        speed=speed,
-                        output_path=output_path,
+                    result = synthesize(
+                        seg.text_content,
+                        output_path,
+                        **tts_options,
                     )
 
                     if result["success"]:
                         audio_url = construct_audio_url(project_id, seg_id)
-                        seg.audio_file.name = f"projects/{project_id}/audio/{seg_id}.wav"
+                        seg.audio_file.name = project_relpath(
+                            project.section, project_id, 'audio', f'{seg_id}.wav'
+                        )
                         seg.audio_duration = result["duration"]
-                        seg.save(update_fields=["audio_file", "audio_duration"])
+                        seg.audio_engine = result.get("engine", engine)
+                        seg.save(update_fields=[
+                            "audio_file", "audio_duration", "audio_engine",
+                        ])
 
                         task_manager.add_completed_segment(task_id, seg_id, {
                             "audio_url": audio_url,
@@ -236,6 +345,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 'task_id': task_id,
                 'project_id': project_id,
                 'status': 'PENDING',
+                'engine': engine,
                 'total_segments': total_segments,
                 'segments_to_process': len(segment_ids),
                 'skipped_locked': skipped_locked,
@@ -306,7 +416,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         # Step 4 — COMPLETED: output URL + 100 % progress
         elif project.status == STATUS_COMPLETED:
             if project.output_path:
-                data['output_url'] = f"/media/{project.output_path}"
+                data['output_url'] = media_url(project.output_path)
             data['progress'] = {
                 'current_segment': total_segments,
                 'total_segments': total_segments,
@@ -555,7 +665,12 @@ class SegmentViewSet(viewsets.ModelViewSet):
                 os.remove(old_path)
 
         # 5. Build storage path and save
-        relative_path = f'projects/{segment.project_id}/images/{segment.id}_{file.name}'
+        relative_path = project_relpath(
+            segment.project.section,
+            segment.project_id,
+            'images',
+            f'{segment.id}_{file.name}',
+        )
         saved_path = default_storage.save(relative_path, file)
 
         # 6. Update model field
@@ -665,46 +780,64 @@ class SegmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # 3. TTS model check
-        if not KokoroModelLoader.is_model_available():
+        # 3. Resolve the engine (per-request override or project default)
+        project = segment.project
+        engine = resolve_tts_engine(request.data, default=project.tts_engine)
+        voice_reference = resolve_voice_reference(
+            project, request.data.get('voice_reference_id')
+        )
+
+        if engine == tts_engine.ENGINE_QWEN and \
+                project.qwen_mode == tts_engine.QWEN_MODE_CLONE and \
+                not voice_reference_path(voice_reference):
             return Response(
-                {'error': 'TTS model not available. Please install the Kokoro ONNX model file.'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                {
+                    'error': (
+                        'Qwen voice cloning needs a reference voice. Upload '
+                        'one in Settings -> Voice References and select it.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 4. Read project-level TTS settings
-        project = segment.project
-        voice_id = project.default_voice_id
-        speed = project.tts_speed
+        # 4. Model availability check (per engine)
+        engine_error = engine_ready_response(engine)
+        if engine_error is not None:
+            return engine_error
 
-        # 5. Define background task
+        # 5. Snapshot engine settings as plain values for the worker thread
+        tts_options = build_tts_options(project, engine, voice_reference)
+        section = project.section
+        text_content = segment.text_content
+
+        # 6. Define background task
         segment_id = str(segment.id)
         project_id = str(project.id)
 
         def task_fn():
+            from core_engine.tts import synthesize
             from core_engine.tts_wrapper import (
-                generate_audio as tts_generate,
                 construct_audio_path,
                 construct_audio_url,
             )
 
             output_path = str(construct_audio_path(project_id, segment_id))
-            result = tts_generate(
-                text=segment.text_content,
-                voice_id=voice_id,
-                speed=speed,
-                output_path=output_path,
-            )
+            result = synthesize(text_content, output_path, **tts_options)
 
             if result["success"]:
                 seg = Segment.objects.get(pk=segment_id)
-                seg.audio_file.name = f"projects/{project_id}/audio/{segment_id}.wav"
+                seg.audio_file.name = project_relpath(
+                    section, project_id, 'audio', f'{segment_id}.wav'
+                )
                 seg.audio_duration = result["duration"]
-                seg.save(update_fields=["audio_file", "audio_duration"])
+                seg.audio_engine = result.get("engine", engine)
+                seg.save(update_fields=[
+                    "audio_file", "audio_duration", "audio_engine",
+                ])
             else:
                 raise Exception(result["error"])
 
-        # 6. Submit and return 202
+        # 7. Submit and return 202
         hex8 = uuid_mod.uuid4().hex[:8]
         task_id = f"tts_{segment_id}_{hex8}"
         get_task_manager().submit_task(task_fn, task_id=task_id)
@@ -714,6 +847,7 @@ class SegmentViewSet(viewsets.ModelViewSet):
                 'task_id': task_id,
                 'segment_id': segment_id,
                 'status': 'PENDING',
+                'engine': engine,
                 'message': 'Audio generation started.',
             },
             status=status.HTTP_202_ACCEPTED,
@@ -783,6 +917,19 @@ def import_project(request):
             {'error': e.message, 'details': e.details},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+    # Persist the imported draft/story and refresh project.json + script.txt.
+    # Segments are bulk-created by the serializer, so signals do not fire
+    # for each one — sync explicitly here.
+    save_story_json(
+        project,
+        {
+            'format': request.data.get('format', 'json'),
+            'segments': request.data.get('segments', []),
+            'raw_text': request.data.get('raw_text', ''),
+        },
+    )
+    write_project_artifacts(project)
 
     # Serialize response with full project + nested segments
     response_serializer = ProjectDetailSerializer(project)
@@ -869,6 +1016,9 @@ def import_segments(request, project_id):
         ]
         Segment.objects.bulk_create(segment_objects)
 
+    # Refresh project.json + script.txt (bulk_create bypasses signals)
+    write_project_artifacts(project)
+
     # 6. Return all segments for the project
     all_segments = project.segments.order_by('sequence_index')
     serializer = SegmentSerializer(all_segments, many=True)
@@ -935,6 +1085,9 @@ def reorder_segments(request):
             seg.sequence_index = new_index
             segments_to_update.append(seg)
         Segment.objects.bulk_update(segments_to_update, ['sequence_index'])
+
+    # Keep the project snapshot/script in sync (bulk_update bypasses signals)
+    write_project_artifacts(project)
 
     # 5. Return updated order
     return Response({
@@ -1137,16 +1290,25 @@ def upload_font_view(request):
 
 @api_view(['POST'])
 def tts_test_view(request):
-    """Generate a test audio clip from arbitrary text.
+    """Generate a test audio clip from arbitrary text with any engine.
 
-    Request body:
+    Request body::
+
         {
             "text": "Hello world, this is a test.",
-            "voice": "af_bella",   // optional, defaults to settings
-            "speed": 1.0           // optional, defaults to settings
+            "engine": "kokoro" | "qwen",      # optional, defaults to settings
+            "voice": "af_bella",              # Kokoro voice
+            "speed": 1.0,
+            "mode": "custom_voice" | "clone", # Qwen mode
+            "speaker": "Aiden",               # Qwen preset speaker
+            "language": "English",
+            "instruct": "",
+            "max_new_tokens": 1024,
+            "voice_reference_id": "<uuid>",   # Qwen cloning reference
+            "x_vector_only": true
         }
 
-    Returns the generated WAV file as an audio/wav response.
+    Returns the generated WAV file as an ``audio/wav`` response.
     """
     text = request.data.get('text', '').strip()
     if not text:
@@ -1156,8 +1318,26 @@ def tts_test_view(request):
         )
 
     settings_obj = GlobalSettings.load()
+    engine = resolve_tts_engine(request.data, default=settings_obj.tts_engine)
+    engine_error = engine_ready_response(engine)
+    if engine_error is not None:
+        return engine_error
+
     voice = request.data.get('voice', settings_obj.default_voice_id)
     speed = float(request.data.get('speed', settings_obj.tts_speed))
+
+    mode = request.data.get('mode', settings_obj.qwen_mode)
+    reference = resolve_voice_reference(
+        settings_obj, request.data.get('voice_reference_id')
+    )
+    reference_path = voice_reference_path(reference)
+
+    if engine == tts_engine.ENGINE_QWEN and mode == tts_engine.QWEN_MODE_CLONE \
+            and not reference_path:
+        return Response(
+            {'error': 'Voice cloning needs a reference voice. Upload one first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     # Generate audio to a temporary file
     import tempfile
@@ -1165,12 +1345,32 @@ def tts_test_view(request):
         output_path = tmp.name
 
     try:
-        from core_engine.tts_wrapper import generate_audio as tts_generate
-        result = tts_generate(
-            text=text,
-            output_path=output_path,
+        from core_engine.tts import synthesize
+
+        result = synthesize(
+            text,
+            output_path,
+            engine=engine,
             voice_id=voice,
             speed=speed,
+            qwen_mode=mode,
+            qwen_speaker=request.data.get(
+                'speaker', settings_obj.qwen_speaker
+            ),
+            qwen_language=request.data.get(
+                'language', settings_obj.qwen_language
+            ),
+            qwen_instruct=request.data.get(
+                'instruct', settings_obj.qwen_instruct
+            ),
+            qwen_max_new_tokens=int(request.data.get(
+                'max_new_tokens', settings_obj.qwen_max_new_tokens
+            )),
+            qwen_x_vector_only=bool(request.data.get(
+                'x_vector_only', settings_obj.qwen_clone_x_vector_only
+            )),
+            reference_audio_path=reference_path,
+            reference_text=(reference.transcript if reference else ''),
         )
 
         if not result.get('success'):
@@ -1196,6 +1396,174 @@ def tts_test_view(request):
         )
 
 
+# ===================================================================
+# TTS Engines (Kokoro default + optional Qwen3-TTS on GPU)
+# ===================================================================
+
+@api_view(['GET'])
+def tts_engines_view(request):
+    """Report availability and capabilities of both speech engines.
+
+    ``available`` for Qwen additionally requires a working CUDA device, since
+    the engine never falls back to CPU.
+    """
+    from core_engine import qwen_client
+
+    kokoro_ready = tts_engine.kokoro_available()
+    qwen_installed = tts_engine.qwen_available()
+    qwen_info = qwen_client.probe() if qwen_installed else {}
+
+    qwen_cuda = bool(qwen_info.get('cuda'))
+    qwen_ready = bool(qwen_installed and qwen_info.get('ok') and qwen_cuda)
+
+    qwen_error = qwen_info.get('error')
+    if qwen_installed and qwen_info.get('ok') and not qwen_cuda:
+        qwen_error = (
+            'No CUDA GPU detected. Qwen3-TTS runs on the GPU only and never '
+            'falls back to CPU.'
+        )
+
+    engines = [
+        {
+            'id': tts_engine.ENGINE_KOKORO,
+            'label': 'Kokoro (fast, default)',
+            'available': kokoro_ready,
+            'device': 'CPU (ONNX runtime)',
+            'supports_cloning': False,
+            'description': (
+                'Lightweight Kokoro-82M ONNX voice. Fast enough to build a '
+                'complete draft video, then finalize the audio with Qwen.'
+            ),
+        },
+        {
+            'id': tts_engine.ENGINE_QWEN,
+            'label': 'Qwen3-TTS (GPU)',
+            'available': qwen_ready,
+            'installed': qwen_installed,
+            'device': qwen_info.get('device', 'unavailable'),
+            'cuda': qwen_cuda,
+            'python': qwen_client.resolve_qwen_python(),
+            'base_model': qwen_info.get('base_model'),
+            'custom_voice_model': qwen_info.get('custom_voice_model'),
+            'supports_cloning': True,
+            'error': qwen_error,
+            'speakers': qwen_info.get('speakers') or {
+                name: name for name in tts_engine.QWEN_SPEAKERS
+            },
+            'languages': qwen_info.get('languages') or tts_engine.QWEN_LANGUAGES,
+            'modes': [
+                {'id': mode, 'label': label}
+                for mode, label in tts_engine.QWEN_MODE_CHOICES
+            ],
+            'description': (
+                'Qwen3-TTS 0.6B on the GPU. High quality and zero-shot voice '
+                'cloning from uploaded reference clips. Heavy: only one '
+                'checkpoint is resident at a time.'
+            ),
+        },
+    ]
+
+    return Response({
+        'default_engine': tts_engine.ENGINE_KOKORO,
+        'engines': engines,
+    })
+
+
+@api_view(['POST'])
+def qwen_unload_view(request):
+    """Unload the Qwen checkpoint to release VRAM."""
+    from core_engine import qwen_client
+
+    result = qwen_client.unload()
+    if not result.get('ok'):
+        return Response(
+            {'error': result.get('error', 'Could not unload Qwen.')},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return Response(result)
+
+
+# ===================================================================
+# Voice references (Qwen zero-shot cloning)
+# ===================================================================
+
+@api_view(['GET', 'POST'])
+def voice_references_view(request):
+    """List or upload reference clips used by Qwen voice cloning."""
+    if request.method == 'GET':
+        refs = VoiceReference.objects.all()
+        return Response(VoiceReferenceSerializer(refs, many=True).data)
+
+    file = request.FILES.get('file') or request.FILES.get('audio')
+    if not file:
+        return Response(
+            {'error': 'No reference audio file provided.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    validate_voice_reference_upload(file)
+
+    raw_name = request.data.get('name') or os.path.splitext(
+        os.path.basename(file.name)
+    )[0]
+    name = (raw_name or 'Voice reference').strip()[:255]
+
+    reference = VoiceReference.objects.create(
+        name=name,
+        file=file,
+        transcript=request.data.get('transcript', '') or '',
+    )
+
+    # Best-effort duration for the UI.  Any codec soundfile cannot read is
+    # still usable by the engine (it decodes via ffmpeg).
+    try:
+        from core_engine.audio_utils import get_audio_duration
+
+        reference.duration = get_audio_duration(reference.file.path)
+        reference.save(update_fields=['duration'])
+    except Exception:
+        logger.debug('Could not read voice reference duration', exc_info=True)
+
+    return Response(
+        VoiceReferenceSerializer(reference).data,
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['PATCH', 'DELETE'])
+def voice_reference_detail_view(request, reference_id):
+    """Rename/retranscribe or delete a reference clip."""
+    try:
+        reference = VoiceReference.objects.get(pk=reference_id)
+    except (VoiceReference.DoesNotExist, ValueError, DjangoValidationError):
+        return Response(
+            {'error': 'Voice reference not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == 'PATCH':
+        if 'name' in request.data:
+            reference.name = (request.data.get('name') or '').strip()[:255] or reference.name
+        if 'transcript' in request.data:
+            reference.transcript = request.data.get('transcript') or ''
+        reference.save(update_fields=['name', 'transcript'])
+        return Response(VoiceReferenceSerializer(reference).data)
+
+    # DELETE — detach from settings/projects, then remove the file
+    GlobalSettings.objects.filter(active_voice_reference=reference).update(
+        active_voice_reference=None
+    )
+    Project.objects.filter(active_voice_reference=reference).update(
+        active_voice_reference=None
+    )
+    try:
+        reference.file.delete(save=False)
+    except Exception:
+        logger.debug('Could not delete voice reference file', exc_info=True)
+    reference.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 # ── Gallery API ──
 
 
@@ -1203,26 +1571,41 @@ def _resolve_video_path(project):
     """Resolve the absolute path to a project's rendered video.
 
     Checks:
-    1. The stored output_path (may be absolute)
-    2. The conventional path: <MEDIA_ROOT>/projects/<id>/output/final.mp4
+    1. The stored output_path (absolute or relative to MEDIA_ROOT)
+    2. The conventional path: <MEDIA_ROOT>/<Section>/<id>/output/final.mp4
+    3. The legacy media/projects/<id>/output/final.mp4 path
     Returns the path if it exists on disk, or None.
     """
-    # Try stored path first
-    if project.output_path:
-        p = project.output_path
-        if os.path.isfile(p):
-            return p
-        # Maybe it was stored as a relative path
-        full = os.path.join(settings.MEDIA_ROOT, p)
-        if os.path.isfile(full):
-            return full
+    candidates = []
 
-    # Fall back to conventional path
-    conventional = os.path.join(
-        settings.MEDIA_ROOT, 'projects', str(project.id), 'output', 'final.mp4'
+    if project.output_path:
+        stored = project.output_path
+        candidates.append(stored)
+        # Legacy relative paths (projects/<id>/output/final.mp4)
+        upgraded = upgrade_legacy_project_path(stored.replace('\\', '/'), project.section)
+        candidates.append(upgraded)
+        candidates.append(os.path.join(settings.MEDIA_ROOT, upgraded))
+
+    # Conventional section-scoped path
+    candidates.append(
+        os.path.join(
+            project_dir(project.section, project.id), 'output', 'final.mp4'
+        )
     )
-    if os.path.isfile(conventional):
-        return conventional
+
+    # Legacy location, kept for stores that have not been migrated yet
+    candidates.append(
+        os.path.join(
+            settings.BASE_DIR, 'media', 'projects',
+            str(project.id), 'output', 'final.mp4',
+        )
+    )
+
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if os.path.isfile(candidate):
+            return candidate
 
     return None
 

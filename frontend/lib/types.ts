@@ -19,6 +19,14 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   // ── Per-project settings ──
   default_voice_id: string;
   tts_speed: number;
+  tts_engine?: 'kokoro' | 'qwen';
+  qwen_mode?: 'custom_voice' | 'clone';
+  qwen_speaker?: string;
+  qwen_language?: string;
+  qwen_instruct?: string;
+  qwen_max_new_tokens?: number;
+  qwen_clone_x_vector_only?: boolean;
+  active_voice_reference?: string | null;
   subtitle_font_family: string;
   subtitle_font_size: number;
   subtitle_font_color: string;
@@ -54,12 +62,22 @@ export interface Segment {
   image_file: string | null;
   audio_file: string | null;
   audio_duration: number | null;
+  /** Which engine produced the current audio ('kokoro' | 'qwen' | ''). */
+  audio_engine?: 'kokoro' | 'qwen' | '';
   is_locked: boolean;
 }
 
 export interface GlobalSettings {
   default_voice_id: string;
   tts_speed: number;
+  tts_engine: 'kokoro' | 'qwen';
+  qwen_mode: 'custom_voice' | 'clone';
+  qwen_speaker: string;
+  qwen_language: string;
+  qwen_instruct: string;
+  qwen_max_new_tokens: number;
+  qwen_clone_x_vector_only: boolean;
+  active_voice_reference: string | null;
   zoom_intensity: number;
   subtitle_font: string;
   subtitle_color: string;
@@ -96,6 +114,46 @@ export interface OutroVideo {
   name: string;
   file: string;      // URL path to the outro video
   uploaded_at: string;
+}
+
+/** A reference clip used by Qwen3-TTS zero-shot voice cloning. */
+export interface VoiceReference {
+  id: string;
+  name: string;
+  file: string;
+  file_url: string | null;
+  audio_url: string | null;
+  transcript: string;
+  duration: number | null;
+  uploaded_at: string;
+}
+
+/** Capability/status entry for one TTS engine. */
+export interface TtsEngineInfo {
+  id: 'kokoro' | 'qwen';
+  label: string;
+  available: boolean;
+  installed?: boolean;
+  device: string;
+  cuda?: boolean;
+  python?: string | null;
+  supports_cloning: boolean;
+  error?: string | null;
+  description?: string;
+  speakers?: Record<string, string>;
+  languages?: string[];
+  modes?: Array<{ id: 'custom_voice' | 'clone'; label: string }>;
+}
+
+export interface TtsEnginesResponse {
+  default_engine: 'kokoro';
+  engines: TtsEngineInfo[];
+}
+
+/** Optional per-request TTS overrides for audio generation. */
+export interface GenerateAudioOptions {
+  engine?: 'kokoro' | 'qwen';
+  voice_reference_id?: string | null;
 }
 
 export interface CreateProjectPayload {
@@ -144,18 +202,22 @@ export interface TaskResponse {
   task_id: string;
   segment_id: string;
   status: TaskStatus;
+  engine?: 'kokoro' | 'qwen';
   message: string;
 }
 
 export interface GenerateAllAudioOptions {
   skip_locked?: boolean;
   force_regenerate?: boolean;
+  engine?: 'kokoro' | 'qwen';
+  voice_reference_id?: string | null;
 }
 
 export interface BulkTaskResponse {
-  task_id: string;
+  task_id?: string;
   project_id: string;
   status: TaskStatus;
+  engine?: 'kokoro' | 'qwen';
   total_segments: number;
   segments_to_process: number;
   message: string;

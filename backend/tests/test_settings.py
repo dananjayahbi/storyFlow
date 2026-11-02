@@ -94,6 +94,10 @@ class GlobalSettingsAPITests(APITestCase):
 
         expected_fields = {
             'default_voice_id', 'tts_speed',
+            # TTS engine selection (Kokoro / Qwen)
+            'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
+            'qwen_instruct', 'qwen_max_new_tokens',
+            'qwen_clone_x_vector_only', 'active_voice_reference',
             'subtitle_font_family', 'subtitle_font_size',
             'subtitle_font_color', 'subtitle_position',
             'subtitle_y_position',

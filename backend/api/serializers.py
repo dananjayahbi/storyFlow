@@ -3,9 +3,20 @@ import re
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Project, Segment, GlobalSettings, Logo, OutroVideo, SECTION_CHOICES
+from .models import (
+    Project, Segment, GlobalSettings, Logo, OutroVideo, VoiceReference,
+    SECTION_CHOICES,
+)
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
+from core_engine.tts import (
+    ENGINE_CHOICES,
+    QWEN_LANGUAGES,
+    QWEN_MODE_CHOICES,
+    QWEN_MAX_TOKENS_MAX,
+    QWEN_MAX_TOKENS_MIN,
+    QWEN_SPEAKERS,
+)
 
 # ── Allowed resolution presets (width × height) ──
 ALLOWED_RESOLUTIONS = {
@@ -31,6 +42,48 @@ ALLOWED_RESOLUTIONS = {
 ALLOWED_FPS = {24, 30, 60}
 
 
+class TtsEngineValidationMixin:
+    """Shared validation for the TTS-engine fields on settings/projects."""
+
+    def validate_tts_engine(self, value):
+        allowed = {choice[0] for choice in ENGINE_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Engine must be one of: {", ".join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_qwen_mode(self, value):
+        allowed = {choice[0] for choice in QWEN_MODE_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError(
+                f'Qwen mode must be one of: {", ".join(sorted(allowed))}.'
+            )
+        return value
+
+    def validate_qwen_speaker(self, value):
+        if value not in QWEN_SPEAKERS:
+            raise serializers.ValidationError(
+                f'Unknown Qwen speaker. Choose one of: {", ".join(QWEN_SPEAKERS)}.'
+            )
+        return value
+
+    def validate_qwen_language(self, value):
+        if value not in QWEN_LANGUAGES:
+            raise serializers.ValidationError(
+                f'Unknown Qwen language. Choose one of: {", ".join(QWEN_LANGUAGES)}.'
+            )
+        return value
+
+    def validate_qwen_max_new_tokens(self, value):
+        if value < QWEN_MAX_TOKENS_MIN or value > QWEN_MAX_TOKENS_MAX:
+            raise serializers.ValidationError(
+                f'Max new tokens must be between {QWEN_MAX_TOKENS_MIN} and '
+                f'{QWEN_MAX_TOKENS_MAX}.'
+            )
+        return value
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     segment_count = serializers.SerializerMethodField()
 
@@ -53,12 +106,41 @@ class SegmentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'project', 'sequence_index', 'text_content',
             'image_prompt', 'image_file', 'audio_file',
-            'audio_duration', 'is_locked',
+            'audio_duration', 'audio_engine', 'is_locked',
         ]
         read_only_fields = [
             'id', 'project', 'sequence_index',
-            'image_file', 'audio_file', 'audio_duration',
+            'image_file', 'audio_file', 'audio_duration', 'audio_engine',
         ]
+
+
+class VoiceReferenceSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VoiceReference
+        fields = [
+            'id', 'name', 'file', 'file_url', 'audio_url',
+            'transcript', 'duration', 'uploaded_at',
+        ]
+        read_only_fields = [
+            'id', 'file', 'uploaded_at', 'duration', 'file_url', 'audio_url',
+        ]
+
+    def _url(self, obj):
+        if not obj.file:
+            return None
+        try:
+            return obj.file.url
+        except Exception:
+            return None
+
+    def get_file_url(self, obj):
+        return self._url(obj)
+
+    def get_audio_url(self, obj):
+        return self._url(obj)
 
 
 class LogoSerializer(serializers.ModelSerializer):
@@ -75,11 +157,14 @@ class OutroVideoSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'uploaded_at']
 
 
-class GlobalSettingsSerializer(serializers.ModelSerializer):
+class GlobalSettingsSerializer(TtsEngineValidationMixin, serializers.ModelSerializer):
     class Meta:
         model = GlobalSettings
         fields = [
             'default_voice_id', 'tts_speed',
+            'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
+            'qwen_instruct', 'qwen_max_new_tokens',
+            'qwen_clone_x_vector_only', 'active_voice_reference',
             'subtitle_font_family', 'subtitle_font_size',
             'subtitle_font_color', 'subtitle_position',
             'subtitle_y_position',
@@ -236,7 +321,7 @@ class GlobalSettingsSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class ProjectDetailSerializer(serializers.ModelSerializer):
+class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSerializer):
     segments = SegmentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -247,6 +332,9 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             'framerate', 'output_path', 'segments',
             # ── Per-project settings ──
             'default_voice_id', 'tts_speed',
+            'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
+            'qwen_instruct', 'qwen_max_new_tokens',
+            'qwen_clone_x_vector_only', 'active_voice_reference',
             'subtitle_font_family', 'subtitle_font_size',
             'subtitle_font_color', 'subtitle_position',
             'subtitle_y_position',
@@ -452,6 +540,14 @@ class ProjectImportSerializer(serializers.Serializer):
             framerate=gs.render_fps,
             default_voice_id=gs.default_voice_id,
             tts_speed=gs.tts_speed,
+            tts_engine=gs.tts_engine,
+            qwen_mode=gs.qwen_mode,
+            qwen_speaker=gs.qwen_speaker,
+            qwen_language=gs.qwen_language,
+            qwen_instruct=gs.qwen_instruct,
+            qwen_max_new_tokens=gs.qwen_max_new_tokens,
+            qwen_clone_x_vector_only=gs.qwen_clone_x_vector_only,
+            active_voice_reference=gs.active_voice_reference,
             subtitle_font_family=gs.subtitle_font_family,
             subtitle_font_size=gs.subtitle_font_size,
             subtitle_font_color=gs.subtitle_font_color,

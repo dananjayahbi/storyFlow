@@ -11,9 +11,13 @@ class ApiConfig(AppConfig):
 
     def ready(self):
         """
-        Run on Django startup. Checks TTS model availability and
-        logs a warning if the model file is not found.
+        Run on Django startup. Registers asset-store signal handlers and
+        checks TTS model availability, logging a warning if the model file
+        is not found.
         """
+        # Keep Storage/<Section>/<project>/project.json + script.txt in sync.
+        from . import storage  # noqa: F401  (registers signals)
+
         try:
             from core_engine.model_loader import KokoroModelLoader
 

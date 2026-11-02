@@ -12,6 +12,19 @@ venv/
 # Django
 # ========================
 db.sqlite3
+# User-generated project assets (keep the section folders themselves)
+backend/Storage/Facebook/*
+!backend/Storage/Facebook/.gitkeep
+backend/Storage/YouTube/*
+!backend/Storage/YouTube/.gitkeep
+backend/Storage/logos/
+backend/Storage/outros/
+backend/Storage/fonts/
+backend/Storage/voice_references/
+backend/Storage/qwen_tts_engine.log
+# Dedicated Python 3.11 GPU env for Qwen3-TTS (copied, not committed)
+backend/qwen_tts/.venv/
+# Legacy media root (pre-Issue #7)
 backend/media/projects/
 backend/media/outros/
 backend/media/logos/

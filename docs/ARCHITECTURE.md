@@ -40,6 +40,7 @@
     - [7.2 Fast Compositor](#72-fast-compositor)
     - [7.3 Ken Burns Effect Engine](#73-ken-burns-effect-engine)
     - [7.4 Text-to-Speech (TTS) Wrapper](#74-text-to-speech-tts-wrapper)
+    - [7.4.1 Optional Qwen3-TTS Engine (GPU + voice cloning)](#741-optional-qwen3-tts-engine-gpu--voice-cloning)
     - [7.5 Subtitle Engine](#75-subtitle-engine)
     - [7.6 Image Upscaler (Real-ESRGAN)](#76-image-upscaler-real-esrgan)
     - [7.7 Audio Utilities](#77-audio-utilities)
@@ -146,11 +147,12 @@ StoryFlow follows a **client-server architecture** with two independent processe
 │                                          └───────────────────┘
 │                                                             │
 │  ┌──────────────────┐                ┌──────────────────────┐
-│  │  models/           │              │  backend/media/       │
-│  │  kokoro-v0_19.onnx │              │  projects/<id>/       │
+│  │  models/           │              │  backend/Storage/     │
+│  │  kokoro-v0_19.onnx │              │  Facebook/<id>/       │
 │  │  voices/           │              │    images/            │
 │  │  upscalers/        │              │    audio/             │
 │  └──────────────────┘                │    output/            │
+│                                      │  YouTube/<id>/        │
 │                                      │  logos/               │
 │                                      │  outros/              │
 │                                      └──────────────────────┘
@@ -317,17 +319,27 @@ StoryFlow/
 │   ├── fonts/                          # Bundled default font (+ LICENSE)
 │   │   └── LICENSE.txt
 │   │
-│   ├── media/                          # Generated media storage (git-ignored)
+│   ├── Storage/                        # All user/generated assets (git-ignored)
+│   │   ├── Facebook/
+│   │   │   └── <project-uuid>/         # Self-contained project folder
+│   │   │       ├── project.json        # Metadata + segment snapshot (draft)
+│   │   │       ├── story.json          # Imported source story (when imported)
+│   │   │       ├── script.txt          # Narration script
+│   │   │       ├── images/             # Uploaded segment images
+│   │   │       ├── audio/              # Generated TTS audio (WAV)
+│   │   │       ├── output/             # Rendered final video (MP4)
+│   │   │       ├── upscaled_images/    # GAN-upscaled images
+│   │   │       └── assets/             # Referenced logo/outro/font copies
+│   │   ├── YouTube/
+│   │   │   └── <project-uuid>/         # Same layout as Facebook
 │   │   ├── logos/                      # Uploaded logo images
 │   │   ├── outros/                     # Uploaded outro videos
-│   │   └── projects/                   # Per-project media
-│   │       └── <project-uuid>/
-│   │           ├── images/             # Uploaded segment images
-│   │           ├── audio/              # Generated TTS audio (WAV)
-│   │           └── output/             # Rendered final video (MP4)
+│   │   └── fonts/                      # Uploaded subtitle fonts
 │   │
 │   └── tests/                          # Backend integration tests
 │       ├── test_e2e.py
+│       ├── test_sections.py
+│       ├── test_storage.py
 │       └── test_settings.py
 │
 ├── frontend/                           # Next.js React application
@@ -440,7 +452,7 @@ The Django project lives in `backend/storyflow_backend/` and is configured for *
 | ALLOWED_HOSTS | `localhost`, `127.0.0.1` |
 | Database | SQLite3 (`db.sqlite3`) |
 | CORS Origin | `http://localhost:3000` |
-| Media Root | `backend/media/` |
+| Media Root | `backend/Storage/` |
 | Static URL | `/static/` |
 | Media URL | `/media/` |
 | REST Framework | AllowAny permissions, JSON + Browsable renderers |
@@ -508,6 +520,9 @@ The `Project` model is the central entity representing a single video production
 - **Status lifecycle:** `DRAFT` → `PROCESSING` → `COMPLETED` or `FAILED`
 - **Render settings:** Resolution (width × height), framerate
 - **TTS settings:** Default voice ID (Kokoro), speech speed
+- **TTS engine:** `tts_engine` (`kokoro` default / `qwen`), plus Qwen mode,
+  speaker, language, instruct, token budget, cloning flag and active
+  `VoiceReference` FK. Copied from GlobalSettings at import time.
 - **Subtitle settings:** Font family, size, color (hex), position, custom font file, enabled toggle
 - **Ken Burns effect:** Zoom intensity, transition duration
 - **Audio settings:** Inter-segment silence duration
@@ -522,6 +537,8 @@ Each `Segment` belongs to a `Project` and represents one narration unit:
 - **Order:** `sequence_index` for timeline ordering
 - **Content:** `text_content` (narration text), `image_prompt` (AI prompt used to generate the image)
 - **Media:** `image_file` (uploaded image), `audio_file` (generated TTS WAV), `audio_duration`
+- **Engine provenance:** `audio_engine` records whether the current WAV came
+  from `kokoro` or `qwen`, so switching engines regenerates cleanly
 - **Lock:** `is_locked` flag prevents accidental editing during rendering
 
 #### GlobalSettings Model (Singleton)
@@ -531,6 +548,20 @@ A singleton model (always `pk=1`) that stores application-wide defaults. When a 
 #### Logo & OutroVideo Models
 
 Simple asset models for uploaded logo images and outro video clips, referenced by both `Project` and `GlobalSettings` via foreign keys.
+
+#### VoiceReference Model
+
+Stores an uploaded reference clip for Qwen zero-shot voice cloning:
+`id`, `name`, `file` (`Storage/voice_references/...`), optional `transcript`
+(used for ICL cloning), `duration`, `uploaded_at`. Multiple references can be
+stored and selected per project or globally.
+
+#### GlobalSettings Model (Qwen fields)
+
+In addition to Kokoro's `default_voice_id`/`tts_speed`, the singleton stores the
+default `tts_engine`, `qwen_mode`, `qwen_speaker`, `qwen_language`,
+`qwen_instruct`, `qwen_max_new_tokens`, `qwen_clone_x_vector_only` and
+`active_voice_reference`. New projects inherit all of them.
 
 ---
 
@@ -701,6 +732,46 @@ The parsers normalize both formats into a common internal structure and validate
 - Non-empty segments array
 - Per-segment `text_content` required, `image_prompt` optional
 - Contiguous sequence indices starting from 0
+
+---
+
+### 6.7 Asset Storage Layout
+
+`MEDIA_ROOT` points at `backend/Storage/`. Every project owns a
+self-contained folder named after its workspace section and UUID:
+
+```
+backend/Storage/
+├── Facebook/<project-uuid>/
+│   ├── project.json      # Metadata + full segment snapshot (the draft)
+│   ├── story.json        # Imported source story (JSON/text source)
+│   ├── script.txt        # Human-readable narration script
+│   ├── images/           # Segment images
+│   ├── audio/            # Generated TTS WAV files
+│   ├── output/           # final.mp4
+│   ├── upscaled_images/  # Real-ESRGAN output (when enabled)
+│   └── assets/           # Copies of the logo/outro/font used by the project
+├── YouTube/<project-uuid>/   # Identical structure
+├── logos/                    # Shared logo assets
+├── outros/                   # Shared outro videos
+├── fonts/                    # Shared subtitle fonts
+├── voice_references/         # Qwen cloning reference clips
+└── qwen_tts_engine.log       # GPU worker stderr (created on first run)
+```
+
+`project.json` and `script.txt` are refreshed automatically by Django
+signals whenever a project or segment changes (including renames, settings
+patches and segment edits). Imports additionally write `story.json`.
+Model upload paths, TTS audio paths and render output paths are all derived
+from the project's section, so Facebook and YouTube assets can never be
+mixed.
+
+Existing installations can move the pre-Issue-#7 `backend/media` tree into
+the new layout with:
+
+```bash
+python manage.py migrate_storage          # add --dry-run to preview
+```
 
 ---
 
@@ -883,6 +954,59 @@ Step 9: ──► Return {success, audio_path, duration, sample_rate}
 | British Male | `bm_george`, `bm_lewis`, `bm_daniel` |
 
 **Design:** Never raises exceptions — always returns a result dict with `success: true/false`.
+
+---
+
+### 7.4.1 Optional Qwen3-TTS Engine (GPU + voice cloning)
+
+**Files:**
+
+| File | Runs in | Responsibility |
+| ---- | ------- | -------------- |
+| `core_engine/tts.py` | Django | Engine dispatcher; both engines return the same result dict |
+| `core_engine/qwen_client.py` | Django | RPC client + interpreter discovery (**never imports torch**) |
+| `core_engine/qwen_engine.py` | Python 3.11 + CUDA | All torch/qwen-tts inference, WAV writing, VRAM management |
+| `backend/qwen_tts/.venv` | — | Dedicated GPU environment (copied from the experiment venv) |
+
+**Why a separate process and interpreter:** Django runs on Python 3.14, while
+`qwen-tts` supports only Python 3.10–3.12. Sampling also holds the GIL for long
+stretches and inflates the CUDA context, which freezes the dev server and the
+Windows compositor if run in-process. The client talks newline-delimited JSON
+over stdin/stdout; audio is written by the child directly to the project's
+`audio/` folder and never crosses the pipe.
+
+```
+Django (3.14) ──JSON lines──▶ qwen_engine.py --serve (3.11 + torch)
+      ▲                                   │
+      └──────── result / error ◀──────────┘
+```
+
+**Hardware policy (GTX 1660 Ti, 6 GB):**
+- **GPU only.** `torch.cuda.is_available()` is a hard requirement; there is no
+  CPU fallback. A missing GPU surfaces as a clear 503/error.
+- `bfloat16` — float16 trips a device-side assert in the code predictor.
+- `sdpa` attention — no prebuilt FlashAttention-2 Windows wheels.
+- VRAM capped via `QWEN_TTS_VRAM_FRACTION` (default `0.72`); PyTorch raises a
+  clean OOM instead of spilling into shared GPU memory. Only one checkpoint is
+  resident; `empty_cache()` runs after each job and on `--unload`.
+- Long narration is split at sentence boundaries (≤360 chars per call) to stay
+  inside the `max_new_tokens` budget.
+
+**Modes:**
+- `custom_voice` — one of the 9 built-in speakers (Aiden, Ryan, …), optional
+  instruct (ignored by the 0.6B checkpoint).
+- `clone` — zero-shot cloning from a `VoiceReference`; speaker-embedding-only
+  by default, or ICL when a reference transcript is supplied.
+
+**Draft → final workflow:** Kokoro is the default and fast enough to build a
+complete draft. `Segment.audio_engine` records provenance, so requesting audio
+with a different engine regenerates every segment automatically. The editor
+exposes this as a split button: *Kokoro — draft audio* / *Qwen — finalize
+audio*.
+
+**Setup:** `scripts/setup_qwen_tts.ps1` copies the existing TTS-test venv
+(~5 GB of torch/CUDA wheels) instead of re-downloading. `QWEN_TTS_PYTHON` can
+override the interpreter path.
 
 ---
 
@@ -1289,9 +1413,9 @@ User Action                   Frontend                      Backend
                               │                             │
                               ▼                             ▼
                       Response: {task_id}           For each segment:
-                              │                     ├── Skip locked/empty/existing
-                              │                     ├── tts_wrapper.generate_audio()
-                      Poll every 2s:                │   ├── Kokoro.create(text, voice)
+                              │                     ├── Skip locked/empty/already-on-this-engine
+                              │                     ├── core_engine.tts.synthesize()
+                      Poll every 2s:                │   ├── kokoro → Kokoro.create; qwen → GPU worker RPC
                       GET /api/tasks/{id}/status/   │   ├── Save WAV file
                               │                     │   └── Update segment.audio_file
                               │                     └── Report progress
@@ -1488,6 +1612,12 @@ POST   /api/segments/{id}/generate-audio/      → {task_id: string}
 GET    /api/settings/                          → GlobalSettings
 PATCH  /api/settings/                          → GlobalSettings
 GET    /api/settings/voices/                   → Voice[]
+GET    /api/settings/tts-engines/              → {default_engine, engines[]}
+POST   /api/settings/tts-engines/qwen/unload/  → {ok, message}
+GET    /api/settings/voice-references/         → VoiceReference[]
+POST   /api/settings/voice-references/         → VoiceReference (multipart)
+PATCH  /api/settings/voice-references/{id}/    → VoiceReference
+DELETE /api/settings/voice-references/{id}/    → 204 No Content
 POST   /api/settings/font/upload/              → {path: string}
 POST   /api/settings/tts-test/                 → audio/wav (binary)
 GET    /api/settings/logos/                     → Logo[]
@@ -1613,6 +1743,8 @@ Each layer of StoryFlow employs a distinct error handling approach:
 | Real-ESRGAN x4plus | `models/upscalers/RealESRGAN_x4plus.pth` | 64MB | 4× photo upscale |
 | Real-ESRGAN x2plus | `models/upscalers/RealESRGAN_x2plus.pth` | 64MB | 2× photo upscale |
 | Real-ESRGAN x4plus anime | `models/upscalers/RealESRGAN_x4plus_anime_6B.pth` | 17MB | 4× anime upscale |
+| Qwen3-TTS 0.6B Base | Hugging Face cache (`Qwen/Qwen3-TTS-12Hz-0.6B-Base`) | 0.6B params | Optional GPU TTS + voice cloning |
+| Qwen3-TTS 0.6B CustomVoice | Hugging Face cache (`Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice`) | 0.6B params | Optional GPU preset voices |
 
 ### C. Development Phase Documentation
 

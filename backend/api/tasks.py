@@ -21,14 +21,29 @@ errors because the background thread holds an open connection.
 """
 
 import logging
+import os
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from django.conf import settings
 from django.db import connection
 
 logger = logging.getLogger(__name__)
+
+
+def _media_relative_path(path):
+    """Store output paths relative to MEDIA_ROOT when possible."""
+    if not path:
+        return ''
+    try:
+        relative = os.path.relpath(path, settings.MEDIA_ROOT)
+    except (TypeError, ValueError):
+        return path
+    if relative.startswith('..'):
+        return path
+    return relative.replace('\\', '/')
 
 # --------------------------------------------------------------------------
 # Task status constants
@@ -417,7 +432,7 @@ def render_task_function(project_id: str, task_id: str) -> None:
         # Step 5 — success: update Project model
         project = Project.objects.get(id=project_id)
         project.status = STATUS_COMPLETED
-        project.output_path = result.get("output_path", "")
+        project.output_path = _media_relative_path(result.get("output_path", ""))
         project.save(update_fields=["status", "output_path"])
 
         # Store result data in TaskManager progress for the status endpoint

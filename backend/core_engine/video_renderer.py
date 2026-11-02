@@ -874,8 +874,11 @@ def render_project(
                 from core_engine.image_upscaler import upscale_images_batch
 
                 image_paths = [sd["image_path"] for sd in segment_data_list]
+                # Keep generated assets inside the project folder:
+                # <project>/upscaled_images/ (output/ is a sibling folder)
                 upscale_output_dir = os.path.join(
-                    os.path.dirname(output_path), "upscaled_images",
+                    os.path.dirname(os.path.dirname(output_path)),
+                    "upscaled_images",
                 )
                 logger.info(
                     "Upscaling %d images with %s (denoise=%.2f)…",
