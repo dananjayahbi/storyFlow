@@ -1,6 +1,7 @@
 export interface Project {
   id: string;
   title: string;
+  section?: 'facebook' | 'youtube';
   created_at: string;
   updated_at: string;
   status: 'DRAFT' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -99,11 +100,13 @@ export interface OutroVideo {
 
 export interface CreateProjectPayload {
   title: string;
+  section?: 'facebook' | 'youtube';
 }
 
 export interface ImportProjectRequest {
   format: 'json' | 'text';
   title: string;
+  section?: 'facebook' | 'youtube';
   segments?: Array<{ text_content: string; image_prompt?: string }>;
   raw_text?: string;
 }

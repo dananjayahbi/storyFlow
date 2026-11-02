@@ -58,6 +58,7 @@ MIDDLEWARE = [
 # CORS Configuration
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:3847",
 ]
 
 ROOT_URLCONF = "storyflow_backend.urls"

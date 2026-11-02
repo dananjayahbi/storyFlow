@@ -504,6 +504,7 @@ The Django project lives in `backend/storyflow_backend/` and is configured for *
 
 The `Project` model is the central entity representing a single video production. It stores:
 - **Identity:** UUID primary key, title, timestamps
+- **Workspace section:** `facebook` (Facebook Reels) or `youtube` (YouTube Videos). Fixed at creation and enforced by every API endpoint.
 - **Status lifecycle:** `DRAFT` → `PROCESSING` → `COMPLETED` or `FAILED`
 - **Render settings:** Resolution (width × height), framerate
 - **TTS settings:** Default voice ID (Kokoro), speech speed
@@ -983,18 +984,47 @@ Thread-safe singleton for ONNX runtime session management:
 
 ### 8.1 Routing & Pages
 
-StoryFlow uses the Next.js App Router with 5 main routes:
+StoryFlow uses the Next.js App Router with two fully isolated workspace
+sections. `/select` is the application home page (the `/` route redirects to
+it) and is shown immediately after login.
 
 | Route | Page | Description |
 |-------|------|-------------|
-| `/` | Dashboard | Stats cards + 5 most recent projects |
-| `/projects` | Project List | Full CRUD table with search, sort, import |
-| `/projects/[id]` | **Timeline Editor** | Core workspace for segment editing |
-| `/gallery` | Video Gallery | Masonry grid of rendered videos |
-| `/settings` | Global Settings | TTS, subtitle, logo, outro, upscale config |
-| `/bulk-create` | Bulk Render | Select & queue multiple projects for rendering |
+| `/select` | Workspace Selection | Choose Facebook Reels or YouTube Videos |
+| `/{section}` | Dashboard | Stats cards + 5 most recent projects for that section |
+| `/{section}/projects` | Project List | Full CRUD table with search, sort, import |
+| `/{section}/projects/[id]` | **Timeline Editor** | Core workspace for segment editing |
+| `/{section}/gallery` | Video Gallery | Masonry grid of rendered videos |
+| `/{section}/settings` | Global Settings | TTS, subtitle, logo, outro, upscale config |
+| `/{section}/bulk-create` | Bulk Render | Select & queue multiple projects for rendering |
+
+`{section}` is either `facebook` or `youtube`. Both sections contain an
+identical copy of every page for now; they will diverge as platform-specific
+tools are added. Legacy root routes (`/projects`, `/gallery`, `/settings`,
+`/bulk-create`, `/facebook-reels`, `/fb`, `/youtube-videos`) redirect to the
+selection page (or the matching section dashboard) so no page can be used
+outside a section.
 
 Every route has a dedicated `loading.tsx` with skeleton components for optimal loading UX.
+
+---
+
+### 8.1.1 Section Data Isolation
+
+All project-scoped API calls send `?section=facebook` or `?section=youtube`.
+The frontend attaches the section automatically through an Axios request
+interceptor based on the current URL, and the backend:
+
+- filters `Project` and `Segment` querysets by `project__section`
+- returns 404 when a project/segment UUID is accessed from the other section
+- filters the gallery list and rejects cross-section stream/download URLs
+- stores `section` on imported projects and rejects mismatched payloads
+- makes `section` read-only after creation, so a project cannot be moved
+  between workspaces accidentally
+
+Global settings and shared assets (logos, outro videos) remain app-wide for
+now; per-section settings can be layered on later without changing route
+contracts.
 
 ---
 
@@ -1006,20 +1036,21 @@ Every route has a dedicated `loading.tsx` with skeleton components for optimal l
 │  ├── TooltipProvider (Radix)                                 │
 │  ├── ErrorBoundary (React class component)                   │
 │  ├── AppShell                                                │
-│  │   ├── Collapsible Sidebar (56px collapsed / 224px expanded)│
-│  │   │   ├── Dashboard                                       │
-│  │   │   ├── Projects                                        │
-│  │   │   ├── Bulk Create                                     │
-│  │   │   ├── Gallery                                         │
-│  │   │   └── Settings                                        │
-│  │   ├── Top Bar (current page name)                         │
-│  │   └── Main Content Area (children)                        │
-│  ├── KeyboardShortcutProvider                                │
-│  └── ToastProvider (Sonner, bottom-right)                    │
+│  │   ├── Collapsible Sidebar (section-scoped links)            │
+│  │   │   ├── Dashboard                                         │
+│  │   │   ├── Projects                                          │
+│  │   │   ├── Bulk Create                                       │
+│  │   │   ├── Gallery                                           │
+│  │   │   └── Settings                                          │
+│  │   ├── Top Bar (current page name + section switcher)        │
+│  │   └── Main Content Area (children)                          │
+│  ├── KeyboardShortcutProvider                                  │
+│  └── ToastProvider (Sonner, bottom-right)                      │
 └──────────────────────────────────────────────────────────────┘
 
-Special: On /projects/[id] routes, the global sidebar is HIDDEN.
+Special: On /{section}/projects/[id] routes, the global sidebar is HIDDEN.
          The Timeline Editor provides its own sidebar layout.
+         /login and /select are full-page routes without the shell.
 ```
 
 ---
@@ -1415,15 +1446,20 @@ User Action                   Frontend                      Backend
 
 ## 11. API Reference Summary
 
+> **Section scoping:** every project-scoped endpoint accepts
+> `?section=facebook|youtube`. When present, the response is limited to that
+> workspace and cross-section UUIDs return `404`. The frontend sends it
+> automatically on every request.
+
 ### Projects API
 
 ```
-GET    /api/projects/                          → PaginatedResponse<Project>
-POST   /api/projects/                          → Project
-GET    /api/projects/{id}/                     → ProjectDetail (with segments)
-PATCH  /api/projects/{id}/                     → ProjectDetail
-DELETE /api/projects/{id}/                     → 204 No Content
-POST   /api/projects/import/                   → ProjectDetail
+GET    /api/projects/?section={section}        → PaginatedResponse<Project>
+POST   /api/projects/?section={section}        → Project
+GET    /api/projects/{id}/?section={section}   → ProjectDetail (with segments)
+PATCH  /api/projects/{id}/?section={section}   → ProjectDetail
+DELETE /api/projects/{id}/?section={section}   → 204 No Content
+POST   /api/projects/import/?section={section} → ProjectDetail
 POST   /api/projects/{id}/import-segments/     → {segments: Segment[]}
 POST   /api/projects/{id}/generate-all-audio/  → {task_id: string}
 POST   /api/projects/{id}/render/              → {task_id: string}
@@ -1434,7 +1470,7 @@ POST   /api/projects/{id}/cancel-render/       → {status: "cancelled"}
 ### Segments API
 
 ```
-GET    /api/segments/?project={id}             → Segment[]
+GET    /api/segments/?project={id}&section={section} → Segment[]
 POST   /api/segments/                          → Segment
 GET    /api/segments/{id}/                     → Segment
 PATCH  /api/segments/{id}/                     → Segment
@@ -1466,9 +1502,9 @@ DELETE /api/settings/outros/{id}/             → 204 No Content
 
 ```
 GET    /api/tasks/{task_id}/status/            → TaskStatusResponse
-GET    /api/gallery/                           → GalleryItem[]
-GET    /api/gallery/{id}/stream/               → video/mp4 (streaming)
-GET    /api/gallery/{id}/download/             → video/mp4 (attachment)
+GET    /api/gallery/?section={section}         → GalleryItem[]
+GET    /api/gallery/{id}/stream/?section={section}   → video/mp4 (streaming)
+GET    /api/gallery/{id}/download/?section={section} → video/mp4 (attachment)
 ```
 
 ---

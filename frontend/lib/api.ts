@@ -17,13 +17,28 @@ import {
   OutroVideo,
 } from './types';
 import { Voice } from './constants';
+import { getCurrentSection, type Section } from './section';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: 'http://localhost:8765',
 });
 
-export async function getProjects(): Promise<PaginatedResponse<Project>> {
-  const response = await api.get<PaginatedResponse<Project>>('/api/projects/');
+// Every request is scoped to the workspace encoded in the current URL.
+// This prevents the Facebook side from ever listing or mutating YouTube data
+// (and vice versa) even if a component forgets to pass the section.
+api.interceptors.request.use((config) => {
+  const section = getCurrentSection();
+  config.params = { ...(config.params ?? {}) };
+  if (!config.params.section) {
+    config.params.section = section;
+  }
+  return config;
+});
+
+export async function getProjects(section?: Section): Promise<PaginatedResponse<Project>> {
+  const response = await api.get<PaginatedResponse<Project>>('/api/projects/', {
+    params: section ? { section } : undefined,
+  });
   return response.data;
 }
 
@@ -271,19 +286,21 @@ export async function testTTS(
 
 // ── Gallery ──
 
-export async function getGalleryItems(): Promise<GalleryItem[]> {
-  const { data } = await api.get<GalleryItem[]>('/api/gallery/');
+export async function getGalleryItems(section?: Section): Promise<GalleryItem[]> {
+  const { data } = await api.get<GalleryItem[]>('/api/gallery/', {
+    params: section ? { section } : undefined,
+  });
   return data;
 }
 
-export function getStreamUrl(projectId: string): string {
-  const base = api.defaults.baseURL || 'http://localhost:8000';
-  return `${base}/api/gallery/${projectId}/stream/`;
+export function getStreamUrl(projectId: string, section: Section = getCurrentSection()): string {
+  const base = api.defaults.baseURL || 'http://localhost:8765';
+  return `${base}/api/gallery/${projectId}/stream/?section=${section}`;
 }
 
-export function getDownloadUrl(projectId: string): string {
-  const base = api.defaults.baseURL || 'http://localhost:8000';
-  return `${base}/api/gallery/${projectId}/download/`;
+export function getDownloadUrl(projectId: string, section: Section = getCurrentSection()): string {
+  const base = api.defaults.baseURL || 'http://localhost:8765';
+  return `${base}/api/gallery/${projectId}/download/?section=${section}`;
 }
 
 // ── Logos ──

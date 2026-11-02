@@ -96,11 +96,19 @@ class GlobalSettingsAPITests(APITestCase):
             'default_voice_id', 'tts_speed',
             'subtitle_font_family', 'subtitle_font_size',
             'subtitle_font_color', 'subtitle_position',
+            'subtitle_y_position',
             'subtitle_font', 'subtitle_color',
             'render_width', 'render_height', 'render_fps',
             'ken_burns_zoom', 'transition_duration', 'zoom_intensity',
             'custom_font_file',
             'inter_segment_silence', 'subtitles_enabled',
+            # Logo watermark
+            'logo_enabled', 'active_logo', 'logo_scale',
+            'logo_position', 'logo_opacity', 'logo_margin',
+            # Outro video
+            'outro_enabled', 'active_outro',
+            # Image upscaling
+            'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
             'created_at', 'updated_at',
         }
         self.assertEqual(set(data.keys()), expected_fields)

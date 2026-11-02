@@ -12,7 +12,11 @@ from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .models import Project, Segment, GlobalSettings, Logo, OutroVideo, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES
+from .models import (
+    Project, Segment, GlobalSettings, Logo, OutroVideo,
+    STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
+    SECTION_CHOICES,
+)
 from .serializers import ProjectSerializer, ProjectDetailSerializer, ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer, LogoSerializer, OutroVideoSerializer
 from .parsers import ParseError
 from .tasks import get_task_manager, render_task_function
@@ -22,6 +26,38 @@ from core_engine.tts_wrapper import construct_audio_path, VALID_VOICE_IDS
 from core_engine import render_utils
 
 logger = logging.getLogger(__name__)
+
+VALID_SECTIONS = {choice[0] for choice in SECTION_CHOICES}
+
+
+def get_requested_section(request):
+    """Return the workspace section requested by the client, if any.
+
+    The frontend always sends ``?section=facebook`` or ``?section=youtube``
+    on every API call.  All project-scoped endpoints use this helper so
+    Facebook and YouTube data can never be mixed, even if a client
+    accidentally knows a project UUID from the other section.
+    """
+    section = request.query_params.get('section') if hasattr(request, 'query_params') else request.GET.get('section')
+    if not section:
+        # Optional custom header for non-browser clients.
+        section = request.headers.get('X-StoryFlow-Section')
+    if not section:
+        return None
+    if section not in VALID_SECTIONS:
+        raise ValidationError({
+            'section': f"Invalid section '{section}'. Must be one of: {', '.join(sorted(VALID_SECTIONS))}."
+        })
+    return section
+
+
+def scoped_projects(request):
+    """Return a Project queryset restricted to the requested section."""
+    queryset = Project.objects.all()
+    section = get_requested_section(request)
+    if section:
+        queryset = queryset.filter(section=section)
+    return queryset
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
@@ -33,6 +69,28 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if self.action in ('retrieve', 'partial_update', 'update'):
             return ProjectDetailSerializer
         return ProjectSerializer
+
+    def get_queryset(self):
+        """Scope every project read/write to the active workspace section.
+
+        Without this filter a Facebook page could list — or open by UUID —
+        a YouTube project (and vice versa).  The section is supplied by the
+        frontend as a query parameter on every request.
+        """
+        return scoped_projects(self.request)
+
+    def perform_create(self, serializer):
+        """Keep the created project inside the section requested by the client."""
+        section = get_requested_section(self.request)
+        data_section = serializer.validated_data.get('section')
+        if section and data_section and section != data_section:
+            raise ValidationError({
+                'section': (
+                    f"Request is scoped to '{section}' but the project was "
+                    f"created for '{data_section}'."
+                )
+            })
+        serializer.save(section=section or data_section or 'facebook')
 
     def perform_destroy(self, instance):
         """Delete project with full media directory cleanup.
@@ -418,7 +476,7 @@ class SegmentViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            project = Project.objects.get(id=project_id)
+            project = scoped_projects(request).get(id=project_id)
         except Project.DoesNotExist:
             return Response(
                 {'error': 'Project not found.'},
@@ -442,7 +500,12 @@ class SegmentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def get_queryset(self):
-        queryset = Segment.objects.all()
+        queryset = Segment.objects.select_related('project')
+        section = get_requested_section(self.request)
+        if section:
+            # Hard section boundary: segments only exist through a project.
+            queryset = queryset.filter(project__section=section)
+
         project_id = self.request.query_params.get('project')
         if project_id is not None:
             queryset = queryset.filter(project_id=project_id)
@@ -697,9 +760,24 @@ def import_project(request):
     """
     serializer = ProjectImportSerializer(data=request.data)
 
+    requested_section = get_requested_section(request)
+    payload_section = request.data.get('section')
+    if requested_section and payload_section and requested_section != payload_section:
+        return Response(
+            {
+                'error': (
+                    f"Request is scoped to '{requested_section}' but the "
+                    f"import targets '{payload_section}'."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     try:
         serializer.is_valid(raise_exception=True)
-        project = serializer.save()
+        project = serializer.save(
+            section=requested_section or payload_section or 'facebook'
+        )
     except ParseError as e:
         return Response(
             {'error': e.message, 'details': e.details},
@@ -719,9 +797,9 @@ def import_segments(request, project_id):
     Appends parsed segments to the project (existing segments are preserved).
     Returns the updated list of segments.
     """
-    # 1. Validate project exists
+    # 1. Validate project exists (and belongs to the requested section)
     try:
-        project = Project.objects.get(pk=project_id)
+        project = scoped_projects(request).get(pk=project_id)
     except Project.DoesNotExist:
         return Response(
             {'error': 'Project not found'},
@@ -817,7 +895,7 @@ def reorder_segments(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
     try:
-        project = Project.objects.get(pk=project_id)
+        project = scoped_projects(request).get(pk=project_id)
     except Project.DoesNotExist:
         return Response(
             {'error': 'Project not found'},
@@ -1158,7 +1236,7 @@ def gallery_list_view(request):
 
     GET /api/gallery/
     """
-    projects = Project.objects.filter(status=STATUS_COMPLETED).order_by('-updated_at')
+    projects = scoped_projects(request).filter(status=STATUS_COMPLETED).order_by('-updated_at')
     items = []
 
     for project in projects:
@@ -1200,7 +1278,7 @@ def gallery_stream_view(request, project_id):
     GET /api/gallery/<project_id>/stream/
     """
     try:
-        project = Project.objects.get(id=project_id)
+        project = scoped_projects(request).get(id=project_id)
     except Project.DoesNotExist:
         return Response(
             {'error': 'Project not found'},
@@ -1270,7 +1348,7 @@ def gallery_download_view(request, project_id):
     GET /api/gallery/<project_id>/download/
     """
     try:
-        project = Project.objects.get(id=project_id)
+        project = scoped_projects(request).get(id=project_id)
     except Project.DoesNotExist:
         return Response(
             {'error': 'Project not found'},

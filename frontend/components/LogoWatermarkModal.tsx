@@ -190,7 +190,7 @@ export function LogoWatermarkModal({
                     <div className="w-full aspect-square rounded flex items-center justify-center overflow-hidden bg-muted/30">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={`http://localhost:8000${logo.file}`}
+                        src={`http://localhost:8765${logo.file}`}
                         alt={logo.name}
                         className="max-w-full max-h-full object-contain"
                       />
@@ -294,7 +294,7 @@ export function LogoWatermarkModal({
                   {selectedLogo && (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={`http://localhost:8000${selectedLogo.file}`}
+                      src={`http://localhost:8765${selectedLogo.file}`}
                       alt="Logo preview"
                       style={logoStyle}
                       className="pointer-events-none"

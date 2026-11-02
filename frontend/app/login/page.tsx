@@ -24,7 +24,7 @@ export default function LoginPage() {
       setError(null);
       // Simple local login: accept any non-empty credentials.
       try {
-        await fetch('http://localhost:8000/api/auth/login/', {
+        await fetch('http://localhost:8765/api/auth/login/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),

@@ -33,33 +33,28 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py runserver
+python manage.py runserver 8765
 ```
 
-The backend server will start at **http://localhost:8000**.
+The backend server will start at **http://localhost:8765**.
 
 ### Frontend (Next.js)
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- -p 3847
 ```
 
-The frontend server will start at **http://localhost:3000**.
+The frontend server will start at **http://localhost:3847**.
 
 ### Quick Start Scripts
 
-For convenience, use the provided start scripts from the project root:
+For convenience, use the provided start script from the project root:
 
 ```bash
 # Windows
-start-backend.bat    # Terminal 1
-start-frontend.bat   # Terminal 2
-
-# macOS/Linux
-bash start-backend.sh    # Terminal 1
-bash start-frontend.sh   # Terminal 2
+start-all.bat
 ```
 
 ---

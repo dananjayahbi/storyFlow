@@ -8,7 +8,7 @@ import type { GlobalSettings, Voice } from '../types/settings';
  * Mirrors the base config used by the existing project / segment API.
  */
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: 'http://localhost:8765',
   headers: { 'Content-Type': 'application/json' },
 });
 

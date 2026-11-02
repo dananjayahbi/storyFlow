@@ -193,7 +193,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
         set({ renderStatus: 'rendering' as RenderStatus });
         get().pollRenderStatus();
       } else if (project.status === 'COMPLETED' && project.output_path) {
-        const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8000';
+        const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8765';
         set({
           renderStatus: 'completed' as RenderStatus,
           outputUrl: `/media/${project.output_path}`,
@@ -456,7 +456,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     if (!outputUrl) return;
 
     // Cross-origin download via fetch → blob → object URL
-    const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8000';
+    const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8765';
     const fullUrl = `${backendBase}${outputUrl}`;
 
     fetch(fullUrl)

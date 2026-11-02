@@ -27,7 +27,7 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
 
   // audioUrl may be a relative path ("/media/...") served by Django or an absolute URL.
   // Prepend the backend base URL only if it's not already absolute (same pattern as ImageUploader).
-  const backendBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+  const backendBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8765';
   const resolvedUrl = audioUrl.startsWith('http') ? audioUrl : `${backendBase}${audioUrl}`;
   const effectiveUrl = `${resolvedUrl}?t=${cacheBuster}`;
 

@@ -1,2 +1,5 @@
 import { redirect } from 'next/navigation';
-export default function Page() { redirect('/facebook-reels'); }
+
+export default function FacebookRedirectPage() {
+  redirect('/facebook');
+}

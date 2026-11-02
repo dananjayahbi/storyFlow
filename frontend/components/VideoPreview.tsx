@@ -29,7 +29,7 @@ export default function VideoPreview() {
   // Build full video URL with cache-busting timestamp
   const backendBase =
     process.env.NEXT_PUBLIC_API_URL?.replace("/api", "") ||
-    "http://localhost:8000";
+    "http://localhost:8765";
   const videoSrc = outputUrl
     ? `${backendBase}${outputUrl}?t=${Date.now()}`
     : "";

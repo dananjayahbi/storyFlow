@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { importProject, importSegments, updateProject } from '@/lib/api';
 import { Project, ImportProjectRequest, Segment } from '@/lib/types';
+import { getCurrentSection } from '@/lib/section';
 
 interface ImportDialogProps {
   open: boolean;
@@ -154,6 +155,7 @@ export default function ImportDialog({ open, onOpenChange, onSuccess, projectId,
         const payload: ImportProjectRequest = {
           format,
           title: title.trim() || (parsed?.title) || 'Untitled Project',
+          section: getCurrentSection(),
           ...(format === 'json' ? { segments } : { raw_text: rawText }),
         };
 

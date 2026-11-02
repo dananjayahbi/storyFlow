@@ -30,9 +30,19 @@ LOGO_POSITION_CHOICES = [
 ]
 
 
+SECTION_CHOICES = [
+    ('facebook', 'Facebook Reels'),
+    ('youtube', 'YouTube Videos'),
+]
+
 class Project(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=255)
+    section = models.CharField(
+        max_length=20,
+        choices=SECTION_CHOICES,
+        default='facebook',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT)

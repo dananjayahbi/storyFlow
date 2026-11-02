@@ -3,7 +3,7 @@ import re
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Project, Segment, GlobalSettings, Logo, OutroVideo
+from .models import Project, Segment, GlobalSettings, Logo, OutroVideo, SECTION_CHOICES
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
 
@@ -37,7 +37,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'created_at', 'updated_at',
+            'id', 'title', 'section', 'created_at', 'updated_at',
             'status', 'resolution_width', 'resolution_height',
             'framerate', 'segment_count',
         ]
@@ -242,7 +242,7 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
         fields = [
-            'id', 'title', 'created_at', 'updated_at',
+            'id', 'title', 'section', 'created_at', 'updated_at',
             'status', 'resolution_width', 'resolution_height',
             'framerate', 'output_path', 'segments',
             # ── Per-project settings ──
@@ -259,7 +259,9 @@ class ProjectDetailSerializer(serializers.ModelSerializer):
             'outro_enabled', 'active_outro',
             'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'custom_font_file']
+        # A project cannot be moved between Facebook/YouTube by a PATCH;
+        # section is fixed at creation time so data never crosses sides.
+        read_only_fields = ['id', 'created_at', 'updated_at', 'custom_font_file', 'section']
 
     # ── Field-level validators (mirror GlobalSettingsSerializer) ──
 
@@ -399,6 +401,11 @@ class ProjectImportSerializer(serializers.Serializer):
 
     format = serializers.ChoiceField(choices=FORMAT_CHOICES)
     title = serializers.CharField(max_length=200)
+    section = serializers.ChoiceField(
+        choices=SECTION_CHOICES,
+        required=False,
+        default='facebook',
+    )
     segments = serializers.ListField(child=serializers.DictField(), required=False)
     raw_text = serializers.CharField(required=False)
 
@@ -437,6 +444,7 @@ class ProjectImportSerializer(serializers.Serializer):
         gs = GlobalSettings.load()
         project = Project.objects.create(
             title=parsed['title'],
+            section=validated_data.get('section', 'facebook'),
             status='DRAFT',
             # Copy per-project settings from global defaults
             resolution_width=gs.render_width,

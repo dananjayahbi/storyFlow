@@ -13,7 +13,7 @@ export function LogoutButton() {
       // ignore
     }
     try {
-      fetch('http://localhost:8000/api/auth/logout/', { method: 'POST' });
+      fetch('http://localhost:8765/api/auth/logout/', { method: 'POST' });
     } catch {
       // ignore
     }

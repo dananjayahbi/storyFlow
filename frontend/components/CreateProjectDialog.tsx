@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createProject } from '@/lib/api';
+import { getCurrentSection } from '@/lib/section';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -30,7 +31,8 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
     try {
       setLoading(true);
       setError(null);
-      await createProject({ title: title.trim() });
+      const section = getCurrentSection();
+      await createProject({ title: title.trim(), section });
       setTitle('');
       setOpen(false);
       onProjectCreated();

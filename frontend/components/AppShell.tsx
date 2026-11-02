@@ -15,6 +15,8 @@ import {
 import { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { LogoutButton } from '@/components/LogoutButton';
+import { SectionSwitcher } from '@/components/SectionSwitcher';
+import { sectionFromPathname, sectionPath, type Section } from '@/lib/section';
 import {
   Tooltip,
   TooltipContent,
@@ -33,43 +35,54 @@ function getInitialCollapsed(): boolean {
   }
 }
 
-// ── Navigation items ──
-const NAV_ITEMS = [
-  {
-    label: 'Dashboard',
-    href: '/',
-    icon: LayoutDashboard,
-    match: (path: string) => path === '/',
-  },
-  {
-    label: 'Projects',
-    href: '/projects',
-    icon: FolderOpen,
-    match: (path: string) => path === '/projects',
-  },
-  {
-    label: 'Bulk Create',
-    href: '/bulk-create',
-    icon: Layers,
-    match: (path: string) => path === '/bulk-create',
-  },
-  {
-    label: 'Gallery',
-    href: '/gallery',
-    icon: MonitorPlay,
-    match: (path: string) => path === '/gallery',
-  },
-  {
-    label: 'Settings',
-    href: '/settings',
-    icon: Settings,
-    match: (path: string) => path === '/settings',
-  },
-] as const;
+// ── Navigation items (section-scoped) ──
+interface NavItem {
+  label: string;
+  href: string;
+  icon: React.ElementType;
+  match: (path: string) => boolean;
+}
+
+function buildNavItems(section: Section): NavItem[] {
+  return [
+    {
+      label: 'Dashboard',
+      href: sectionPath(section),
+      icon: LayoutDashboard,
+      match: (path: string) => path === sectionPath(section),
+    },
+    {
+      label: 'Projects',
+      href: sectionPath(section, '/projects'),
+      icon: FolderOpen,
+      match: (path: string) => path === sectionPath(section, '/projects'),
+    },
+    {
+      label: 'Bulk Create',
+      href: sectionPath(section, '/bulk-create'),
+      icon: Layers,
+      match: (path: string) => path === sectionPath(section, '/bulk-create'),
+    },
+    {
+      label: 'Gallery',
+      href: sectionPath(section, '/gallery'),
+      icon: MonitorPlay,
+      match: (path: string) => path === sectionPath(section, '/gallery'),
+    },
+    {
+      label: 'Settings',
+      href: sectionPath(section, '/settings'),
+      icon: Settings,
+      match: (path: string) => path === sectionPath(section, '/settings'),
+    },
+  ];
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const section = sectionFromPathname(pathname);
+  const navItems = buildNavItems(section);
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -99,11 +112,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Check if we're on the Timeline Editor page (project detail)
-  const isProjectPage = pathname.startsWith('/projects/');
+  const isProjectPage = /^\/(facebook|youtube)\/projects\/[^/]+/.test(pathname);
 
-  // Hide global sidebar on auth, selection, and section landing pages
-  const isFullPage = pathname === '/login' || pathname === '/select' || pathname === '/selection'
-    || pathname.startsWith('/facebook-reels') || pathname.startsWith('/fb') || pathname.startsWith('/youtube');
+  // Hide global sidebar only on auth and workspace-selection pages.
+  // Section dashboards and every /facebook or /youtube page use the shell.
+  const isFullPage = pathname === '/login' || pathname === '/select' || pathname === '/selection';
 
   // On project pages, hide the global sidebar entirely — the page has its own layout
   if (isProjectPage || isFullPage) {
@@ -138,7 +151,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* ── Navigation ── */}
         <nav className="flex-1 px-2 py-3 space-y-1">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const isActive = item.match(pathname);
             const link = (
               <Link
@@ -207,10 +220,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <header className="flex items-center justify-between h-14 border-b bg-background px-6 shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-medium text-muted-foreground">
-              {NAV_ITEMS.find((n) => n.match(pathname))?.label || 'StoryFlow'}
+              {navItems.find((n) => n.match(pathname))?.label || 'StoryFlow'}
             </h1>
           </div>
-          <LogoutButton />
+          <div className="flex items-center gap-2">
+            <SectionSwitcher />
+            <LogoutButton />
+          </div>
         </header>
 
         {/* ── Page Content ── */}

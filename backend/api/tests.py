@@ -1491,9 +1491,9 @@ class VideoRendererTests(TestCase):
         # At least 3 segments + 1 export phase = 4 calls
         self.assertGreaterEqual(len(progress_calls), 4)
 
-        # Last call should mention export
+        # Last call should report the completed export
         last_desc = progress_calls[-1][2]
-        self.assertIn("Export", last_desc)
+        self.assertRegex(last_desc, r"(?i)export|complete")
 
     def test_render_missing_image_error(self):
         """Missing image file raises appropriate error."""

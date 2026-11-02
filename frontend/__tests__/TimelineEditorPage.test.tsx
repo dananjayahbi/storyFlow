@@ -1,12 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import TimelineEditorPage from '@/app/projects/[id]/page';
+import TimelineEditorPage from '@/app/facebook/projects/[id]/page';
 import { useProjectStore } from '@/lib/stores';
 import type { ProjectDetail, Segment } from '@/lib/types';
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
   useParams: () => ({ id: '42' }),
+  usePathname: () => '/facebook/projects/42',
 }));
 
 // Mock next/link
@@ -64,6 +65,10 @@ function renderPage() {
 describe('TimelineEditorPage', () => {
   beforeEach(() => {
     useProjectStore.getState().reset();
+    // The page fetches the project on mount. Keep that a no-op by default so
+    // tests that seed the store directly keep their fixture state.
+    useProjectStore.setState({ fetchProject: jest.fn() });
+    localStorage.clear();
     jest.clearAllMocks();
   });
 
@@ -103,19 +108,19 @@ describe('TimelineEditorPage', () => {
     });
 
     // Sidebar info
-    expect(screen.getByText('DRAFT')).toBeInTheDocument();
+    expect(screen.getAllByText('DRAFT').length).toBeGreaterThan(0);
 
     // Navigation link — sidebar has Dashboard link
     expect(
-      screen.getByRole('link', { name: /dashboard/i })
-    ).toBeInTheDocument();
+      screen.getAllByRole('link', { name: /dashboard/i }).length
+    ).toBeGreaterThan(0);
 
     // Timeline content (segment text)
     expect(screen.getByDisplayValue('Once upon a time')).toBeInTheDocument();
 
-    // Action bar buttons (disabled)
-    expect(screen.getByText('Generate All Audio')).toBeInTheDocument();
-    expect(screen.getByText('Export Video')).toBeInTheDocument();
+    // Action bar buttons (also duplicated in the sidebar)
+    expect(screen.getAllByText('Generate All Audio').length).toBeGreaterThan(0);
+    expect(screen.getByText('Export')).toBeInTheDocument();
   });
 
   it('disabled action buttons have correct tooltips', async () => {
@@ -129,12 +134,13 @@ describe('TimelineEditorPage', () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText('Generate All Audio')).toBeInTheDocument();
+      expect(screen.getAllByText('Generate All Audio').length).toBeGreaterThan(0);
     });
 
     // Generate All Audio button is now enabled (activated in Phase 03)
-    const generateButton = screen.getByText('Generate All Audio').closest('button');
-    const exportButton = screen.getByText('Export Video').closest('button');
+    const generateButtons = screen.getAllByText('Generate All Audio');
+    const generateButton = generateButtons[generateButtons.length - 1].closest('button');
+    const exportButton = screen.getByText('Export').closest('button');
     expect(generateButton).toBeEnabled();
     expect(exportButton).toBeDisabled();
   });
