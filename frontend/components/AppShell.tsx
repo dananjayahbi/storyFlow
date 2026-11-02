@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
   LayoutDashboard,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { LogoutButton } from '@/components/LogoutButton';
 import {
   Tooltip,
   TooltipContent,
@@ -68,6 +69,7 @@ const NAV_ITEMS = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -76,6 +78,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setCollapsed(getInitialCollapsed());
     setMounted(true);
   }, []);
+
+  // Simple local auth guard
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const isAuthed = localStorage.getItem('storyflow_authenticated') === 'true';
+    if (!isAuthed && pathname !== '/login') {
+      router.replace('/login');
+    }
+  }, [pathname, router]);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -90,8 +101,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Check if we're on the Timeline Editor page (project detail)
   const isProjectPage = pathname.startsWith('/projects/');
 
+  // Hide global sidebar on auth, selection, and section landing pages
+  const isFullPage = pathname === '/login' || pathname === '/select' || pathname === '/selection'
+    || pathname.startsWith('/facebook-reels') || pathname.startsWith('/fb') || pathname.startsWith('/youtube');
+
   // On project pages, hide the global sidebar entirely — the page has its own layout
-  if (isProjectPage) {
+  if (isProjectPage || isFullPage) {
     return <>{children}</>;
   }
 
@@ -189,12 +204,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* ── Main Content Area ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* ── Top Bar ── */}
-        <header className="flex items-center h-14 border-b bg-background px-6 shrink-0">
+        <header className="flex items-center justify-between h-14 border-b bg-background px-6 shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-medium text-muted-foreground">
               {NAV_ITEMS.find((n) => n.match(pathname))?.label || 'StoryFlow'}
             </h1>
           </div>
+          <LogoutButton />
         </header>
 
         {/* ── Page Content ── */}

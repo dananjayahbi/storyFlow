@@ -1469,3 +1469,27 @@ def outro_detail_view(request, outro_id):
 
     outro.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# -- Simple local auth --
+
+from rest_framework.decorators import api_view as _api_view
+
+
+@_api_view(['POST'])
+def login_view(request):
+    username = request.data.get('username') or request.data.get('email') or ''
+    password = request.data.get('password') or ''
+    if not username or not password:
+        return Response({'error': 'Username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'token': 'local-token', 'username': username}, status=status.HTTP_200_OK)
+
+
+@_api_view(['POST'])
+def logout_view(request):
+    return Response({'message': 'Logged out.'}, status=status.HTTP_200_OK)
+
+
+@_api_view(['GET'])
+def me_view(request):
+    return Response({'username': 'local-user', 'authenticated': True}, status=status.HTTP_200_OK)
