@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { testTTS, getVoices } from '@/lib/api';
+import { testTTS, getVoices, getAIConfig, updateAIConfig } from '@/lib/api';
+import type { AIConfig } from '@/lib/types';
 import { AVAILABLE_VOICES, type Voice } from '@/lib/constants';
 import { useSettingsStore as useLogoStore } from '@/lib/stores';
 import { Button } from '@/components/ui/button';
@@ -10,8 +11,18 @@ import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon,
-  Trash2, Upload, Film, Cpu, Mic, AlertTriangle, CheckCircle2,
+  Trash2, Upload, Film, Cpu, Mic, AlertTriangle, CheckCircle2, Wand2,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useSettingsStore } from '@/store/settingsStore';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -23,7 +34,8 @@ type SettingsTab =
   | 'voices'
   | 'subtitles'
   | 'logos'
-  | 'outros';
+  | 'outros'
+  | 'ai';
 
 const SETTINGS_TABS: Array<{
   id: SettingsTab;
@@ -67,6 +79,12 @@ const SETTINGS_TABS: Array<{
     description: 'Clips appended at the end',
     icon: Film,
   },
+  {
+    id: 'ai',
+    label: 'AI Model',
+    description: 'Script Craft model & prompt',
+    icon: Wand2,
+  },
 ];
 
 export default function SettingsPage() {
@@ -100,6 +118,17 @@ export default function SettingsPage() {
   const [subtitleFontColor, setSubtitleFontColor] = useState('#FFFFFF');
   const [isSavingSubtitles, setIsSavingSubtitles] = useState(false);
   const [subtitleSaveMsg, setSubtitleSaveMsg] = useState<string | null>(null);
+
+  // Script Craft AI configuration (per account, with shared endpoint config)
+  const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
+  const [aiModel, setAiModel] = useState('');
+  const [aiSystemPrompt, setAiSystemPrompt] = useState('');
+  const [aiBaseUrl, setAiBaseUrl] = useState('http://localhost:11434/v1');
+  const [aiApiKey, setAiApiKey] = useState('');
+  const [aiTemperature, setAiTemperature] = useState(0.7);
+  const [aiApplyToAll, setAiApplyToAll] = useState(false);
+  const [isSavingAI, setIsSavingAI] = useState(false);
+  const [aiConfirmOpen, setAiConfirmOpen] = useState(false);
 
   // Logo management state
   const {
@@ -147,6 +176,61 @@ export default function SettingsPage() {
     fetchSettings, fetchLogos, fetchOutroVideos,
     fetchTtsEngines, fetchVoiceReferences,
   ]);
+
+  // Load the account-specific Script Craft AI configuration.
+  useEffect(() => {
+    getAIConfig()
+      .then((config) => {
+        setAiConfig(config);
+        setAiModel(config.model || config.default_model || '');
+        setAiSystemPrompt(config.system_prompt || '');
+        setAiBaseUrl(config.base_url || 'http://localhost:11434/v1');
+        setAiApiKey(config.api_key || '');
+        setAiTemperature(config.temperature ?? 0.7);
+        setAiApplyToAll(config.apply_to_all ?? false);
+      })
+      .catch(() => {
+        // The AI tab surfaces its own error state.
+      });
+  }, []);
+
+  const saveAISettings = async () => {
+    setIsSavingAI(true);
+    try {
+      const updated = await updateAIConfig({
+        model: aiModel.trim(),
+        system_prompt: aiSystemPrompt,
+        base_url: aiBaseUrl.trim(),
+        api_key: aiApiKey.trim(),
+        temperature: aiTemperature,
+        apply_to_all: aiApplyToAll,
+      });
+      setAiConfig(updated);
+      setAiModel(updated.model || updated.default_model || '');
+      setAiApplyToAll(updated.apply_to_all);
+      toast.success(
+        updated.apply_to_all
+          ? 'AI model applied to every account'
+          : 'AI settings saved for this account'
+      );
+    } catch {
+      toast.error('Failed to save AI settings');
+    } finally {
+      setIsSavingAI(false);
+    }
+  };
+
+  const requestSaveAI = () => {
+    if (!aiModel.trim()) {
+      toast.error('Choose an AI model before saving.');
+      return;
+    }
+    if (aiApplyToAll) {
+      setAiConfirmOpen(true);
+      return;
+    }
+    saveAISettings();
+  };
 
   // Sync local state when settings load
   useEffect(() => {
@@ -281,11 +365,12 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Configure voices, rendering defaults and shared media assets.
+            Configure voices, rendering defaults and AI for this account. Each
+            account can keep different values.
           </p>
         </div>
         <span className="text-xs text-muted-foreground rounded-full border px-3 py-1 self-start sm:self-auto">
-          Changes apply to new projects
+          Saved for the selected account
         </span>
       </div>
 
@@ -1171,8 +1256,178 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
       )}
+      {/* ── Script Craft AI Configuration ── */}
+      {activeTab === 'ai' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wand2 className="h-5 w-5" />
+              Script Craft AI Model
+            </CardTitle>
+            <CardDescription>
+              Configure the AI agent that writes scripts for this account. The
+              model and system prompt are account-specific; the endpoint is
+              shared by the whole app.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="space-y-2">
+              <label htmlFor="ai-base-url" className="text-sm font-medium">
+                API base URL
+              </label>
+              <input
+                id="ai-base-url"
+                value={aiBaseUrl}
+                onChange={(event) => setAiBaseUrl(event.target.value)}
+                placeholder="http://localhost:11434/v1"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Any OpenAI-compatible endpoint: Ollama, LM Studio, llama.cpp,
+                vLLM, OpenAI, OpenRouter…
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="ai-api-key" className="text-sm font-medium">
+                API key <span className="text-muted-foreground">(optional)</span>
+              </label>
+              <input
+                id="ai-api-key"
+                type="password"
+                value={aiApiKey}
+                onChange={(event) => setAiApiKey(event.target.value)}
+                placeholder="Not needed for local servers"
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+              />
+            </div>
+
+            <Separator />
+
+            <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
+              <div className="space-y-2">
+                <label htmlFor="ai-model" className="text-sm font-medium">
+                  Model for this account
+                </label>
+                <input
+                  id="ai-model"
+                  value={aiModel}
+                  onChange={(event) => setAiModel(event.target.value)}
+                  placeholder="e.g. llama3.1:8b or gpt-4o-mini"
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                />
+                {aiConfig?.default_model && (
+                  <p className="text-xs text-muted-foreground">
+                    Workspace default: {aiConfig.default_model}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="ai-temperature" className="text-sm font-medium">
+                    Temperature
+                  </label>
+                  <span className="text-sm tabular-nums text-muted-foreground">
+                    {aiTemperature.toFixed(1)}
+                  </span>
+                </div>
+                <Slider
+                  id="ai-temperature"
+                  value={[aiTemperature]}
+                  min={0}
+                  max={1.5}
+                  step={0.1}
+                  onValueChange={(values) => setAiTemperature(values[0])}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="ai-system-prompt" className="text-sm font-medium">
+                System prompt
+              </label>
+              <textarea
+                id="ai-system-prompt"
+                value={aiSystemPrompt}
+                onChange={(event) => setAiSystemPrompt(event.target.value)}
+                rows={6}
+                placeholder="Describe the voice, style and rules for this account's scripts. Leave blank to use the StoryFlow documentary default."
+                className="flex min-h-28 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm resize-y"
+              />
+              <p className="text-xs text-muted-foreground">
+                The agent always appends the required JSON output format, so the
+                generated script can be parsed and saved to the library.
+              </p>
+            </div>
+
+            <Separator />
+
+            <div className="flex items-start gap-3 rounded-lg border p-3">
+              <input
+                id="ai-apply-all"
+                type="checkbox"
+                checked={aiApplyToAll}
+                onChange={(event) => setAiApplyToAll(event.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-primary"
+              />
+              <div>
+                <label htmlFor="ai-apply-all" className="text-sm font-medium">
+                  Use this model for all accounts
+                </label>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Off by default. When enabled and saved, every Facebook and
+                  YouTube account is switched to this model. You will be asked
+                  to confirm because existing per-account models are replaced.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button onClick={requestSaveAI} disabled={isSavingAI}>
+                {isSavingAI ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Save AI Settings
+                  </>
+                )}
+              </Button>
+              {aiApplyToAll && (
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  Saving will overwrite every account&apos;s AI model.
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
         </div>
       </div>
+
+      <AlertDialog open={aiConfirmOpen} onOpenChange={setAiConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace the model on every account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Saving with “Use this model for all accounts” enabled will set the
+              AI model of every Facebook page and YouTube channel to
+              <strong> {aiModel || 'the selected model'}</strong>. Any
+              account-specific model choices will be replaced. System prompts
+              are left untouched.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={saveAISettings}>
+              Apply to all accounts
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

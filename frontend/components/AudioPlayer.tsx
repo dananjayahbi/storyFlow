@@ -22,8 +22,9 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
 
-  // Cache-busting URL to force re-fetch after regeneration
-  const [cacheBuster, setCacheBuster] = useState(() => Date.now());
+  // Cache-busting URL to force re-fetch after regeneration. Start at 0 so
+  // server and client markup match; the effect below fills in the timestamp.
+  const [cacheBuster, setCacheBuster] = useState(0);
 
   // audioUrl may be a relative path ("/media/...") served by Django or an absolute URL.
   // Prepend the backend base URL only if it's not already absolute (same pattern as ImageUploader).

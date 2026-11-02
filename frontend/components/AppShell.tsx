@@ -12,6 +12,8 @@ import {
   UserRound,
   ChevronDown,
   Users,
+  Wand2,
+  BookMarked,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -45,6 +47,11 @@ interface NavItem {
 
 function buildNavItems(section: Section, accountId: string | null): NavItem[] {
   const base = sectionPath(section);
+  // Never let withAccount() fall back to localStorage here: the server has no
+  // localStorage, so doing so would produce different hrefs on the server and
+  // during the client's hydration render.
+  const hrefFor = (path: string) =>
+    accountId ? withAccount(path, accountId) : path;
   const dashboard = accountId
     ? withAccount(sectionPath(section, '/dashboard'), accountId)
     : base;
@@ -66,28 +73,42 @@ function buildNavItems(section: Section, accountId: string | null): NavItem[] {
     },
     {
       label: 'Projects',
-      href: withAccount(sectionPath(section, '/projects'), accountId),
+      href: hrefFor(sectionPath(section, '/projects')),
       icon: FolderOpen,
       match: (path: string, activeSection: Section) =>
         path.startsWith(sectionPath(activeSection, '/projects')),
     },
     {
       label: 'Bulk Create',
-      href: withAccount(sectionPath(section, '/bulk-create'), accountId),
+      href: hrefFor(sectionPath(section, '/bulk-create')),
       icon: Layers,
       match: (path: string, activeSection: Section) =>
         path.startsWith(sectionPath(activeSection, '/bulk-create')),
     },
     {
       label: 'Gallery',
-      href: withAccount(sectionPath(section, '/gallery'), accountId),
+      href: hrefFor(sectionPath(section, '/gallery')),
       icon: MonitorPlay,
       match: (path: string, activeSection: Section) =>
         path.startsWith(sectionPath(activeSection, '/gallery')),
     },
     {
+      label: 'Script Craft',
+      href: hrefFor(sectionPath(section, '/script-craft')),
+      icon: Wand2,
+      match: (path: string, activeSection: Section) =>
+        path.startsWith(sectionPath(activeSection, '/script-craft')),
+    },
+    {
+      label: 'Script Library',
+      href: hrefFor(sectionPath(section, '/script-library')),
+      icon: BookMarked,
+      match: (path: string, activeSection: Section) =>
+        path.startsWith(sectionPath(activeSection, '/script-library')),
+    },
+    {
       label: 'Settings',
-      href: withAccount(sectionPath(section, '/settings'), accountId),
+      href: hrefFor(sectionPath(section, '/settings')),
       icon: Settings,
       match: (path: string, activeSection: Section) =>
         path.startsWith(sectionPath(activeSection, '/settings')),
@@ -180,7 +201,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       // when the dashboard is already open (pathname does not change).
       setAccountId(account.id);
       setAccountName(account.name);
-      router.push(withAccount(sectionPath(section, '/dashboard'), account.id));
+      // A full reload guarantees every page (including the dashboard) refetches
+      // with the newly selected account instead of keeping the previous
+      // account's data in client state.
+      const target = withAccount(
+        sectionPath(section, '/dashboard'),
+        account.id,
+      );
+      if (typeof window !== 'undefined') {
+        window.location.assign(target);
+      } else {
+        router.push(target);
+      }
     },
     [router, section],
   );
@@ -189,12 +221,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
+  // The account picker is the entry point for a section.  Other pages cannot
+  // work until an account is chosen, so the full navigation is hidden here and
+  // only the logout control is shown.
+  if (isSectionLanding) {
+    return (
+      <div className="flex min-h-screen flex-col bg-background">
+        <div className="flex h-14 shrink-0 items-center justify-end px-4">
+          <LogoutButton />
+        </div>
+        <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
+      </div>
+    );
+  }
+
   const navItems = buildNavItems(section, accountId);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* ── Top navigation bar (unique per section, present on every page) ── */}
-      <header className="relative z-30 flex h-14 shrink-0 items-center gap-4 border-b bg-sidebar px-4 text-sidebar-foreground">
+      <header className="relative z-30 flex h-14 shrink-0 items-center gap-4 overflow-hidden border-b bg-sidebar px-4 text-sidebar-foreground">
         {/* Brand */}
         <Link
           href="/select"
@@ -211,7 +257,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="h-6 w-px bg-sidebar-border/60 shrink-0" />
 
         {/* Section navigation */}
-        <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+        <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden">
           {navItems.map((item) => {
             const isActive = item.match(pathname, section);
             return (
@@ -228,7 +274,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <item.icon className="h-4 w-4 shrink-0" />
                 <span className="hidden md:inline">{item.label}</span>
                 {isActive && (
-                  <span className="absolute inset-x-3 -bottom-[9px] h-0.5 rounded-full bg-primary" />
+                  <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-primary" />
                 )}
               </Link>
             );

@@ -7,6 +7,7 @@ import { getProjects } from '@/lib/api';
 import { Project } from '@/lib/types';
 import { sectionFromPathname, SECTION_LABELS } from '@/lib/section';
 import { withAccount } from '@/lib/account';
+import { useAccountId } from '@/lib/useAccountId';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -91,6 +92,9 @@ function StatCard({ title, value, description, icon: Icon, iconClassName }: Stat
 export default function DashboardPage() {
   const pathname = usePathname();
   const section = sectionFromPathname(pathname);
+  const accountId = useAccountId(section);
+  const accountHref = (path: string) =>
+    accountId ? withAccount(path, accountId) : path;
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,7 +158,7 @@ export default function DashboardPage() {
           </p>
         </div>
         <Button asChild size="sm" variant="outline">
-          <Link href={withAccount(`/${section}/projects`)}>
+          <Link href={accountHref(`/${section}/projects`)}>
             View All Projects
             <ArrowRight className="ml-2 h-3.5 w-3.5" />
           </Link>
@@ -209,7 +213,7 @@ export default function DashboardPage() {
             <Film className="h-10 w-10 mx-auto mb-3 opacity-40" />
             <p className="text-sm">No projects yet. Create one to get started!</p>
             <Button asChild size="sm" className="mt-4">
-              <Link href={withAccount(`/${section}/projects`)}>Go to Projects</Link>
+              <Link href={accountHref(`/${section}/projects`)}>Go to Projects</Link>
             </Button>
           </div>
         ) : (
@@ -219,7 +223,7 @@ export default function DashboardPage() {
               return (
                 <Link
                   key={project.id}
-                  href={withAccount(`/${section}/projects/${project.id}`)}
+                  href={accountHref(`/${section}/projects/${project.id}`)}
                   className="flex items-center gap-4 rounded-lg border p-4 hover:bg-muted/50 transition-colors"
                 >
                   <div className="flex items-center justify-center h-10 w-10 rounded-lg bg-muted shrink-0">

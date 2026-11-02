@@ -4,8 +4,9 @@ from django.db import transaction
 from rest_framework import serializers
 
 from .models import (
-    Account, Project, Segment, GlobalSettings, Logo, OutroVideo,
-    VoiceReference, SECTION_CHOICES,
+    Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
+    OutroVideo, VoiceReference, Script, SECTION_CHOICES,
+    apply_settings_to_project,
 )
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
@@ -196,6 +197,50 @@ class VoiceReferenceSerializer(serializers.ModelSerializer):
         return self._url(obj)
 
 
+class ScriptSerializer(serializers.ModelSerializer):
+    """A generated script stored in an account's Script Library."""
+
+    segment_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Script
+        fields = [
+            'id', 'account', 'section', 'title', 'pitch', 'content',
+            'model_used', 'segment_count', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'account', 'section', 'model_used', 'segment_count',
+            'created_at', 'updated_at',
+        ]
+
+    def get_segment_count(self, obj):
+        segments = obj.content.get('segments') if isinstance(obj.content, dict) else None
+        return len(segments) if isinstance(segments, list) else 0
+
+    def validate_title(self, value):
+        title = (value or '').strip()
+        if not title:
+            raise serializers.ValidationError('A script title is required.')
+        return title[:255]
+
+    def validate_content(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('Script content must be an object.')
+        segments = value.get('segments')
+        if not isinstance(segments, list) or not segments:
+            raise serializers.ValidationError(
+                'Script content must contain a non-empty segments list.'
+            )
+        for index, segment in enumerate(segments, start=1):
+            if not isinstance(segment, dict) or not str(
+                segment.get('text_content', '')
+            ).strip():
+                raise serializers.ValidationError(
+                    f'Segment {index} has no text_content.'
+                )
+        return value
+
+
 class LogoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Logo
@@ -372,6 +417,13 @@ class GlobalSettingsSerializer(TtsEngineValidationMixin, serializers.ModelSerial
                 })
 
         return attrs
+
+
+class AccountSettingsSerializer(GlobalSettingsSerializer):
+    """Same shape and validators as GlobalSettings, scoped to one account."""
+
+    class Meta(GlobalSettingsSerializer.Meta):
+        model = AccountSettings
 
 
 class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSerializer):
@@ -588,52 +640,19 @@ class ProjectImportSerializer(serializers.Serializer):
     def create(self, validated_data):
         parsed = validated_data['_parsed_data']
 
-        # 1. Create Project with settings copied from GlobalSettings
-        gs = GlobalSettings.load()
+        # 1. Create Project with settings copied from the account's settings.
+        account = validated_data.get('account')
+        defaults = (
+            AccountSettings.load(account) if account else GlobalSettings.load()
+        )
         project = Project.objects.create(
             title=parsed['title'],
             section=validated_data.get('section', 'facebook'),
-            account=validated_data.get('account'),
+            account=account,
             status='DRAFT',
-            # Copy per-project settings from global defaults
-            resolution_width=gs.render_width,
-            resolution_height=gs.render_height,
-            framerate=gs.render_fps,
-            default_voice_id=gs.default_voice_id,
-            tts_speed=gs.tts_speed,
-            tts_engine=gs.tts_engine,
-            qwen_mode=gs.qwen_mode,
-            qwen_speaker=gs.qwen_speaker,
-            qwen_language=gs.qwen_language,
-            qwen_instruct=gs.qwen_instruct,
-            qwen_max_new_tokens=gs.qwen_max_new_tokens,
-            qwen_clone_x_vector_only=gs.qwen_clone_x_vector_only,
-            active_voice_reference=gs.active_voice_reference,
-            subtitle_font_family=gs.subtitle_font_family,
-            subtitle_font_size=gs.subtitle_font_size,
-            subtitle_font_color=gs.subtitle_font_color,
-            subtitle_position=gs.subtitle_position,
-            subtitle_y_position=gs.subtitle_y_position,
-            subtitle_font=gs.subtitle_font,
-            subtitle_color=gs.subtitle_color,
-            subtitles_enabled=gs.subtitles_enabled,
-            custom_font_file=gs.custom_font_file if gs.custom_font_file else None,
-            zoom_intensity=gs.zoom_intensity,
-            ken_burns_zoom=gs.ken_burns_zoom,
-            transition_duration=gs.transition_duration,
-            inter_segment_silence=gs.inter_segment_silence,
-            logo_enabled=gs.logo_enabled,
-            active_logo=gs.active_logo,
-            logo_scale=gs.logo_scale,
-            logo_position=gs.logo_position,
-            logo_opacity=gs.logo_opacity,
-            logo_margin=gs.logo_margin,
-            outro_enabled=gs.outro_enabled,
-            active_outro=gs.active_outro,
-            upscale_enabled=gs.upscale_enabled,
-            upscale_model=gs.upscale_model,
-            upscale_denoise_strength=gs.upscale_denoise_strength,
         )
+        apply_settings_to_project(project, defaults)
+        project.save()
 
         # 2. Bulk create Segments
         segment_objects = [

@@ -14,14 +14,16 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .models import (
-    Account, Project, Segment, GlobalSettings, Logo, OutroVideo,
-    VoiceReference, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED,
-    RENDERABLE_STATUSES, SECTION_CHOICES,
+    Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
+    OutroVideo, VoiceReference, Script, STATUS_PROCESSING, STATUS_COMPLETED,
+    STATUS_FAILED, RENDERABLE_STATUSES, SECTION_CHOICES,
+    apply_settings_to_project,
 )
 from .serializers import (
     AccountSerializer, ProjectSerializer, ProjectDetailSerializer,
     ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer,
-    LogoSerializer, OutroVideoSerializer, VoiceReferenceSerializer,
+    AccountSettingsSerializer, LogoSerializer, OutroVideoSerializer,
+    VoiceReferenceSerializer, ScriptSerializer,
 )
 from .parsers import ParseError
 from .storage import write_project_artifacts, save_story_json
@@ -45,6 +47,9 @@ from core_engine import render_utils
 logger = logging.getLogger(__name__)
 
 VALID_SECTIONS = {choice[0] for choice in SECTION_CHOICES}
+
+# Sentinel used to distinguish "field omitted" from "field cleared".
+_MISSING = object()
 
 
 def get_requested_section(request):
@@ -283,7 +288,14 @@ class ProjectViewSet(viewsets.ModelViewSet):
             raise ValidationError({
                 'account': 'Account does not belong to this workspace section.'
             })
-        serializer.save(section=effective_section, account=account)
+        project = serializer.save(
+            section=effective_section,
+            account=account,
+        )
+        # New projects inherit the selected account's settings, not the
+        # workspace-wide defaults.
+        apply_settings_to_project(project, AccountSettings.load(account))
+        project.save()
 
     def perform_destroy(self, instance):
         """Delete project with its complete section-scoped asset folder.
@@ -999,6 +1011,47 @@ class SegmentViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
+class ScriptViewSet(viewsets.ModelViewSet):
+    """CRUD for scripts saved to an account's Script Library.
+
+    Scripts are always scoped by ``section`` and ``account`` so the Facebook
+    and YouTube libraries (and individual pages/channels) stay isolated.
+    """
+
+    queryset = Script.objects.all()
+    serializer_class = ScriptSerializer
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        queryset = Script.objects.all()
+        section = get_requested_section(self.request)
+        if section:
+            queryset = queryset.filter(section=section)
+        account = get_requested_account(self.request)
+        if account:
+            queryset = queryset.filter(account=account)
+        else:
+            return Script.objects.none()
+        return queryset
+
+    def perform_create(self, serializer):
+        account = get_requested_account(self.request)
+        if not account:
+            raise ValidationError({
+                'account': 'Select an account before saving a script.'
+            })
+        section = get_requested_section(self.request)
+        if section and account.section != section:
+            raise ValidationError({
+                'account': 'Account does not belong to this workspace section.'
+            })
+        serializer.save(
+            account=account,
+            section=account.section,
+            model_used=str(self.request.data.get('model_used') or '')[:120],
+        )
+
+
 @api_view(['POST'])
 def import_project(request):
     """Import a story as a new project with segments.
@@ -1258,24 +1311,213 @@ def task_status_view(request, task_id):
 
 @api_view(['GET', 'PATCH'])
 def global_settings_view(request):
-    """Retrieve or update the singleton GlobalSettings instance.
+    """Retrieve or update settings for the active account.
+
+    When the request carries ``?account=<uuid>`` (the frontend always does),
+    the response and update target that account's ``AccountSettings`` row,
+    which is seeded from GlobalSettings on first access.  Requests without an
+    account keep the legacy workspace-wide behaviour.
 
     GET  → Returns the current settings (creates defaults if no row exists).
     PATCH → Partial-update of any settings fields.
     """
-    settings_obj = GlobalSettings.load()
+    account = get_requested_account(request)
+    if account:
+        settings_obj = AccountSettings.load(account)
+        serializer_class = AccountSettingsSerializer
+    else:
+        settings_obj = GlobalSettings.load()
+        serializer_class = GlobalSettingsSerializer
 
     if request.method == 'GET':
-        serializer = GlobalSettingsSerializer(settings_obj)
+        serializer = serializer_class(settings_obj)
         return Response(serializer.data)
 
     # PATCH
-    serializer = GlobalSettingsSerializer(
+    serializer = serializer_class(
         settings_obj, data=request.data, partial=True
     )
     serializer.is_valid(raise_exception=True)
     serializer.save()
     return Response(serializer.data)
+
+
+# ===================================================================
+# Script Craft — per-account AI configuration
+# ===================================================================
+
+def _ai_config_payload(account):
+    """Merge the account's model/prompt with the shared server config."""
+    gs = GlobalSettings.load()
+    return {
+        'model': account.ai_model,
+        'system_prompt': account.ai_system_prompt,
+        'default_model': gs.ai_default_model,
+        'base_url': gs.ai_base_url,
+        'api_key': gs.ai_api_key,
+        'temperature': gs.ai_temperature,
+        'apply_to_all': gs.ai_apply_to_all,
+    }
+
+
+@api_view(['GET', 'PATCH'])
+def ai_settings_view(request):
+    """Read or update the Script Craft AI configuration for an account.
+
+    The model name and system prompt are account-specific.  The endpoint
+    URL, API key and temperature are shared by the local installation.  When
+    ``apply_to_all`` is enabled, saving copies the account's model to every
+    account so a single model can drive the whole workspace.
+    """
+    account = get_requested_account(request)
+    if account is None:
+        return Response(
+            {'error': 'Select an account before configuring AI settings.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    gs = GlobalSettings.load()
+
+    if request.method == 'PATCH':
+        data = request.data
+
+        def provided(*names):
+            """Return the first value present, or a sentinel."""
+            for name in names:
+                if name in data:
+                    return data.get(name)
+            return _MISSING
+
+        global_updates = []
+        for names, field in (
+            (('default_model', 'ai_default_model'), 'ai_default_model'),
+            (('base_url', 'ai_base_url'), 'ai_base_url'),
+            (('api_key', 'ai_api_key'), 'ai_api_key'),
+        ):
+            value = provided(*names)
+            if value is not _MISSING:
+                setattr(gs, field, str(value or '').strip())
+                global_updates.append(field)
+        temperature_value = provided('temperature', 'ai_temperature')
+        if temperature_value is not _MISSING:
+            try:
+                temperature = float(temperature_value)
+            except (TypeError, ValueError):
+                return Response(
+                    {'error': 'Temperature must be a number between 0 and 2.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if temperature < 0 or temperature > 2:
+                return Response(
+                    {'error': 'Temperature must be between 0 and 2.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            gs.ai_temperature = temperature
+            global_updates.append('ai_temperature')
+        apply_value = provided('apply_to_all', 'ai_apply_to_all')
+        if apply_value is not _MISSING:
+            gs.ai_apply_to_all = bool(apply_value)
+            global_updates.append('ai_apply_to_all')
+        if global_updates:
+            gs.save(update_fields=global_updates)
+
+        account_updates = []
+        model_value = provided('model', 'ai_model')
+        if model_value is not _MISSING:
+            account.ai_model = str(model_value or '').strip()[:120]
+            account_updates.append('ai_model')
+        prompt_value = provided('system_prompt', 'ai_system_prompt')
+        if prompt_value is not _MISSING:
+            account.ai_system_prompt = str(prompt_value or '')
+            account_updates.append('ai_system_prompt')
+        if account_updates:
+            account.save(update_fields=account_updates)
+
+        # Fan the model out to every account when the toggle is on.
+        if gs.ai_apply_to_all:
+            effective_model = account.ai_model or gs.ai_default_model
+            if effective_model:
+                Account.objects.exclude(pk=account.pk).update(
+                    ai_model=effective_model
+                )
+
+    return Response(_ai_config_payload(account))
+
+
+@api_view(['POST'])
+def script_generate_view(request):
+    """Generate a complete StoryFlow script from a short pitch.
+
+    Request body::
+
+        {
+          "pitch": "A documentary video script of world war 2 for 20 minutes",
+          "history": [{"role": "user", "content": "..."}]   # optional
+        }
+
+    Returns the parsed script plus a short assistant reply for the chat UI.
+    """
+    account = get_requested_account(request)
+    if account is None:
+        return Response(
+            {'error': 'Select an account before generating a script.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    pitch = str(request.data.get('pitch') or '').strip()
+    if not pitch:
+        return Response(
+            {'error': 'Describe the script you need before generating.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    history = request.data.get('history') or []
+    if not isinstance(history, list):
+        history = []
+
+    gs = GlobalSettings.load()
+    model = account.ai_model or gs.ai_default_model
+    if not model:
+        return Response(
+            {
+                'error': (
+                    'No AI model is configured. Open Settings → AI Model, '
+                    'choose a model and save it for this account.'
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        from core_engine import ai_client
+
+        result = ai_client.generate_script(
+            pitch=pitch,
+            history=history,
+            model=model,
+            base_url=gs.ai_base_url,
+            api_key=gs.ai_api_key,
+            system_prompt=account.ai_system_prompt,
+            temperature=gs.ai_temperature,
+        )
+    except Exception as exc:
+        logger.error('Script Craft generation failed: %s', exc)
+        return Response(
+            {'error': str(exc) or 'The AI model could not generate a script.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    script = result['script']
+    segment_count = len(script['segments'])
+    return Response({
+        'reply': (
+            f'Drafted “{script["title"]}” with {segment_count} segments. '
+            'Review it on the right, then save it to your Script Library.'
+        ),
+        'script': script,
+        'model': result['model'],
+        'segment_count': segment_count,
+    })
 
 
 # ===================================================================
@@ -1371,11 +1613,16 @@ def upload_font_view(request):
     # Validate extension and size
     validate_font_upload(font_file)
 
-    # Ensure fonts directory exists
-    fonts_dir = os.path.join(settings.MEDIA_ROOT, 'fonts')
-    os.makedirs(fonts_dir, exist_ok=True)
+    account = get_requested_account(request)
+    settings_obj = (
+        AccountSettings.load(account) if account else GlobalSettings.load()
+    )
 
-    settings_obj = GlobalSettings.load()
+    # Keep each account's font file in its own folder so uploads can never
+    # overwrite another account's font.
+    font_subdir = os.path.join('fonts', str(account.id)) if account else 'fonts'
+    fonts_dir = os.path.join(settings.MEDIA_ROOT, font_subdir)
+    os.makedirs(fonts_dir, exist_ok=True)
 
     # Delete old custom font file from disk if it exists
     if settings_obj.custom_font_file:
@@ -1398,15 +1645,17 @@ def upload_font_view(request):
     # Derive font family from filename (strip extension)
     font_family = os.path.splitext(safe_name)[0]
 
-    settings_obj.custom_font_file.name = os.path.join('fonts', safe_name)
+    settings_obj.custom_font_file.name = os.path.join(font_subdir, safe_name)
     settings_obj.subtitle_font_family = font_family
     settings_obj.subtitle_font = dest_path  # legacy field
     settings_obj.save()
 
     logger.info("Custom font uploaded: %s (family: %s)", dest_path, font_family)
 
-    serializer = GlobalSettingsSerializer(settings_obj)
-    return Response(serializer.data)
+    serializer_class = (
+        AccountSettingsSerializer if account else GlobalSettingsSerializer
+    )
+    return Response(serializer_class(settings_obj).data)
 
 
 # ===================================================================
@@ -1442,7 +1691,10 @@ def tts_test_view(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    settings_obj = GlobalSettings.load()
+    account = get_requested_account(request)
+    settings_obj = (
+        AccountSettings.load(account) if account else GlobalSettings.load()
+    )
     engine = resolve_tts_engine(request.data, default=settings_obj.tts_engine)
     engine_error = engine_ready_response(engine)
     if engine_error is not None:

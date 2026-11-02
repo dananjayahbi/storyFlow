@@ -73,10 +73,69 @@ channels):
 4. Switch accounts from the account chip in the top navigation; switch
    workspaces with the Facebook/YouTube buttons.
 
+The account picker is a standalone screen: while choosing a page/channel it
+shows only the Logout control, because Dashboard, Projects, Script Craft and the
+other workspace pages require an account first. Selecting an account loads the
+dashboard for that account. After that, the account chip in the header switches
+accounts and reloads the dashboard with the newly selected account's data.
+
+The header is a fixed 56 px rail. Navigation is a single horizontal row (it
+scrolls sideways on narrow screens), so no vertical scrollbar appears in the
+header. The active-page underline sits inside each link instead of overflowing
+below it.
+
+### Per-account settings
+
+Settings are account-specific. TTS voice/engine, subtitles, render resolution,
+Ken Burns/transitions, logo/outro selection and upscaling are stored in an
+`AccountSettings` row per account, so one page or channel can use a completely
+different setup from another. New accounts are seeded once from the workspace
+defaults and then diverge. New projects snapshot the selected account's values
+at creation time. The shared asset libraries (logos, outros, voice references,
+fonts) remain available to every account, while each account chooses which one
+to use.
+
 Storage mirrors this hierarchy:
 `backend/Storage/<Section>/<account-id>/<project-id>/`. Migration
 `0013_seed_default_accounts` creates a default account on each side and moves
 existing projects into it automatically.
+
+---
+
+## Script Craft & Script Library
+
+StoryFlow can draft narrative scripts with an in-app AI agent instead of
+maintaining JSON files outside the app.
+
+1. Open **Script Craft** from the top navigation (it is scoped to the active
+   Facebook page or YouTube channel).
+2. Describe the pitch in the chat, e.g. *“A documentary video script of World
+   War 2 for 20 minutes.”* The agent returns a structured script with narration
+   segments and cinematic image prompts.
+3. The right-hand panel parses the JSON into a readable storyboard: title,
+   segment count, narration and image prompt per beat.
+4. Click **Save to Library** to keep the draft in **Script Library**, also in
+   the top navigation and scoped to the same account.
+
+### Configuring the AI model
+
+Each account has its own model and system prompt. Open
+**Settings → AI Model**:
+
+- **API base URL** — any OpenAI-compatible endpoint (Ollama, LM Studio,
+  llama.cpp, vLLM, OpenAI, OpenRouter, …).
+- **API key** — optional; local servers usually do not need one.
+- **Model** — account-specific model id. Empty falls back to the workspace
+  default.
+- **System prompt** — account-specific voice, style and rules. StoryFlow always
+  appends the required JSON format instructions.
+- **Use this model for all accounts** — off by default. When enabled and saved,
+  the model is copied to every Facebook and YouTube account, replacing their
+  individual choices. A confirmation modal warns before overwriting.
+
+The model name/prompt live on the account; the endpoint, key and temperature
+are shared by the local installation. Scripts are stored per account and never
+leak between accounts or between Facebook and YouTube.
 
 ---
 

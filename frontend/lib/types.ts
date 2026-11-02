@@ -295,6 +295,55 @@ export interface RenderStatusResponse {
   output_url: string | null;
 }
 
+// ── Script Craft & Script Library ──
+
+export interface ScriptSegment {
+  text_content: string;
+  image_prompt: string;
+}
+
+export interface ScriptContent {
+  title: string;
+  segments: ScriptSegment[];
+}
+
+/** A script saved to an account's Script Library. */
+export interface Script {
+  id: string;
+  account: string;
+  section: 'facebook' | 'youtube';
+  title: string;
+  pitch: string;
+  content: ScriptContent;
+  model_used: string;
+  segment_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScriptGenerateResponse {
+  reply: string;
+  script: ScriptContent;
+  model: string;
+  segment_count: number;
+}
+
+export interface ScriptChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Per-account Script Craft AI configuration. */
+export interface AIConfig {
+  model: string;
+  system_prompt: string;
+  default_model: string;
+  base_url: string;
+  api_key: string;
+  temperature: number;
+  apply_to_all: boolean;
+}
+
 // ── Gallery ──
 
 /** A rendered video item returned by the Gallery API. */

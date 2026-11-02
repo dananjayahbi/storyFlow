@@ -19,6 +19,11 @@ import {
   VoiceReference,
   TtsEnginesResponse,
   GenerateAudioOptions,
+  Script,
+  ScriptContent,
+  ScriptGenerateResponse,
+  ScriptChatMessage,
+  AIConfig,
 } from './types';
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
@@ -397,6 +402,62 @@ export async function testTTS(
     { responseType: 'blob' }
   );
   return response.data;
+}
+
+// ── Script Craft & Script Library ──
+
+export async function generateScript(
+  pitch: string,
+  history: ScriptChatMessage[] = []
+): Promise<ScriptGenerateResponse> {
+  const { data } = await api.post<ScriptGenerateResponse>(
+    '/api/script-craft/generate/',
+    { pitch, history }
+  );
+  return data;
+}
+
+export async function getScripts(): Promise<Script[]> {
+  const { data } = await api.get<PaginatedResponse<Script> | Script[]>(
+    '/api/scripts/'
+  );
+  return Array.isArray(data) ? data : data.results;
+}
+
+export async function saveScript(payload: {
+  title: string;
+  pitch?: string;
+  content: ScriptContent;
+  model_used?: string;
+}): Promise<Script> {
+  const { data } = await api.post<Script>('/api/scripts/', payload);
+  return data;
+}
+
+export async function updateScript(
+  id: string,
+  payload: Partial<Pick<Script, 'title' | 'pitch' | 'content'>>
+): Promise<Script> {
+  const { data } = await api.patch<Script>(`/api/scripts/${id}/`, payload);
+  return data;
+}
+
+export async function deleteScript(id: string): Promise<void> {
+  await api.delete(`/api/scripts/${id}/`);
+}
+
+// ── Script Craft AI configuration ──
+
+export async function getAIConfig(): Promise<AIConfig> {
+  const { data } = await api.get<AIConfig>('/api/settings/ai/');
+  return data;
+}
+
+export async function updateAIConfig(
+  payload: Partial<AIConfig>
+): Promise<AIConfig> {
+  const { data } = await api.patch<AIConfig>('/api/settings/ai/', payload);
+  return data;
 }
 
 // ── Gallery ──

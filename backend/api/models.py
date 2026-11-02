@@ -67,6 +67,10 @@ class Account(models.Model):
         db_index=True,
     )
     description = models.TextField(blank=True, default='')
+    # ── Script Craft AI configuration (per account) ──
+    # Empty ``ai_model`` falls back to GlobalSettings.ai_default_model.
+    ai_model = models.CharField(max_length=120, blank=True, default='')
+    ai_system_prompt = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -334,8 +338,59 @@ class VoiceReference(models.Model):
         ordering = ['-uploaded_at']
 
 
+class Script(models.Model):
+    """A generated documentary script saved to an account's Script Library.
+
+    ``content`` stores the same JSON shape the import pipeline accepts::
+
+        {
+          "title": "...",
+          "segments": [
+            {"text_content": "...", "image_prompt": "..."}
+          ]
+        }
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='scripts',
+    )
+    section = models.CharField(
+        max_length=20,
+        choices=SECTION_CHOICES,
+        default='facebook',
+        db_index=True,
+    )
+    title = models.CharField(max_length=255)
+    pitch = models.TextField(blank=True, default='')
+    content = models.JSONField(default=dict, blank=True)
+    model_used = models.CharField(max_length=120, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.title
+
+
 class GlobalSettings(models.Model):
     """Singleton application-wide configuration record (pk always == 1)."""
+
+    # ── Script Craft AI defaults (shared connection, per-account model) ──
+    ai_default_model = models.CharField(max_length=120, blank=True, default='')
+    ai_base_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default='http://localhost:11434/v1',
+    )
+    ai_api_key = models.CharField(max_length=500, blank=True, default='')
+    ai_temperature = models.FloatField(default=0.7)
+    # When enabled, saving the AI settings copies the model to every account.
+    ai_apply_to_all = models.BooleanField(default=False)
 
     # ── TTS defaults ──
     default_voice_id = models.CharField(max_length=100, default='af_bella')
@@ -454,3 +509,223 @@ class GlobalSettings(models.Model):
     class Meta:
         verbose_name = 'Global Settings'
         verbose_name_plural = 'Global Settings'
+
+
+class AccountSettings(models.Model):
+    """Per-account copy of the workspace settings.
+
+    The settings page is scoped to the active Facebook page / YouTube channel.
+    Each account gets its own TTS, subtitle, render, logo, outro and upscale
+    configuration.  New rows are seeded from GlobalSettings so existing
+    installations keep their current behaviour until an account overrides a
+    value.
+    """
+
+    account = models.OneToOneField(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='settings',
+    )
+
+    # ── TTS defaults ──
+    default_voice_id = models.CharField(max_length=100, default='af_bella')
+    tts_speed = models.FloatField(default=1.0)
+
+    # ── TTS engine defaults ──
+    tts_engine = models.CharField(
+        max_length=20, choices=ENGINE_CHOICES, default=ENGINE_KOKORO,
+    )
+    qwen_mode = models.CharField(
+        max_length=20, choices=QWEN_MODE_CHOICES, default=QWEN_MODE_CUSTOM,
+    )
+    qwen_speaker = models.CharField(max_length=40, default=QWEN_DEFAULT_SPEAKER)
+    qwen_language = models.CharField(max_length=40, default=QWEN_DEFAULT_LANGUAGE)
+    qwen_instruct = models.TextField(blank=True, default='')
+    qwen_max_new_tokens = models.PositiveIntegerField(
+        default=QWEN_MAX_TOKENS_DEFAULT,
+    )
+    qwen_clone_x_vector_only = models.BooleanField(default=True)
+    active_voice_reference = models.ForeignKey(
+        'VoiceReference', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='account_settings_using',
+    )
+
+    # ── Subtitle styling ──
+    subtitle_font_family = models.CharField(max_length=200, default='Arial')
+    subtitle_font_size = models.PositiveIntegerField(default=48)
+    subtitle_font_color = models.CharField(max_length=7, default='#FFFFFF')
+    subtitle_position = models.CharField(
+        max_length=10, choices=SUBTITLE_POSITION_CHOICES, default='bottom',
+    )
+    subtitle_y_position = models.PositiveIntegerField(
+        null=True, blank=True, default=None,
+    )
+    subtitle_font = models.CharField(max_length=255, blank=True, default='')
+    subtitle_color = models.CharField(max_length=7, default='#FFFFFF')
+
+    # ── Render parameters ──
+    render_width = models.PositiveIntegerField(default=1920)
+    render_height = models.PositiveIntegerField(default=1080)
+    render_fps = models.PositiveIntegerField(default=30)
+
+    # ── Ken Burns & transitions ──
+    ken_burns_zoom = models.FloatField(default=1.2)
+    transition_duration = models.FloatField(default=0.5)
+    zoom_intensity = models.FloatField(default=1.3)
+
+    # ── Audio / timing ──
+    inter_segment_silence = models.FloatField(default=0.3)
+
+    # ── Subtitle toggle ──
+    subtitles_enabled = models.BooleanField(default=True)
+
+    # ── Custom font file ──
+    custom_font_file = models.FileField(
+        upload_to='fonts/', null=True, blank=True,
+    )
+
+    # ── Logo watermark ──
+    logo_enabled = models.BooleanField(default=False)
+    active_logo = models.ForeignKey(
+        'Logo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='account_settings_using',
+    )
+    logo_scale = models.FloatField(default=0.15)
+    logo_position = models.CharField(
+        max_length=20, choices=LOGO_POSITION_CHOICES, default='bottom-right',
+    )
+    logo_opacity = models.FloatField(default=1.0)
+    logo_margin = models.IntegerField(default=20)
+
+    # ── Outro video ──
+    outro_enabled = models.BooleanField(default=False)
+    active_outro = models.ForeignKey(
+        'OutroVideo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='account_settings_using',
+    )
+
+    # ── Image upscaling (GAN) ──
+    upscale_enabled = models.BooleanField(default=False)
+    upscale_model = models.CharField(
+        max_length=40,
+        choices=Project.UPSCALE_MODEL_CHOICES,
+        default='RealESRGAN_x4plus',
+    )
+    upscale_denoise_strength = models.FloatField(default=0.5)
+
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Account Settings'
+        verbose_name_plural = 'Account Settings'
+
+    def __str__(self):
+        return f'Settings for {self.account}'
+
+    @classmethod
+    def load(cls, account):
+        """Return this account's settings, seeding from GlobalSettings once."""
+        existing = cls.objects.filter(account=account).first()
+        if existing:
+            return existing
+
+        defaults = GlobalSettings.load()
+        return cls.objects.create(
+            account=account,
+            default_voice_id=defaults.default_voice_id,
+            tts_speed=defaults.tts_speed,
+            tts_engine=defaults.tts_engine,
+            qwen_mode=defaults.qwen_mode,
+            qwen_speaker=defaults.qwen_speaker,
+            qwen_language=defaults.qwen_language,
+            qwen_instruct=defaults.qwen_instruct,
+            qwen_max_new_tokens=defaults.qwen_max_new_tokens,
+            qwen_clone_x_vector_only=defaults.qwen_clone_x_vector_only,
+            active_voice_reference=defaults.active_voice_reference,
+            subtitle_font_family=defaults.subtitle_font_family,
+            subtitle_font_size=defaults.subtitle_font_size,
+            subtitle_font_color=defaults.subtitle_font_color,
+            subtitle_position=defaults.subtitle_position,
+            subtitle_y_position=defaults.subtitle_y_position,
+            subtitle_font=defaults.subtitle_font,
+            subtitle_color=defaults.subtitle_color,
+            render_width=defaults.render_width,
+            render_height=defaults.render_height,
+            render_fps=defaults.render_fps,
+            ken_burns_zoom=defaults.ken_burns_zoom,
+            transition_duration=defaults.transition_duration,
+            zoom_intensity=defaults.zoom_intensity,
+            inter_segment_silence=defaults.inter_segment_silence,
+            subtitles_enabled=defaults.subtitles_enabled,
+            custom_font_file=(
+                defaults.custom_font_file.name
+                if defaults.custom_font_file else None
+            ),
+            logo_enabled=defaults.logo_enabled,
+            active_logo=defaults.active_logo,
+            logo_scale=defaults.logo_scale,
+            logo_position=defaults.logo_position,
+            logo_opacity=defaults.logo_opacity,
+            logo_margin=defaults.logo_margin,
+            outro_enabled=defaults.outro_enabled,
+            active_outro=defaults.active_outro,
+            upscale_enabled=defaults.upscale_enabled,
+            upscale_model=defaults.upscale_model,
+            upscale_denoise_strength=defaults.upscale_denoise_strength,
+        )
+
+
+# Settings fields copied from GlobalSettings/AccountSettings onto a new
+# Project.  Project uses slightly different names for the render dimensions.
+PROJECT_SETTINGS_FIELD_MAP = {
+    'resolution_width': 'render_width',
+    'resolution_height': 'render_height',
+    'framerate': 'render_fps',
+    'default_voice_id': 'default_voice_id',
+    'tts_speed': 'tts_speed',
+    'tts_engine': 'tts_engine',
+    'qwen_mode': 'qwen_mode',
+    'qwen_speaker': 'qwen_speaker',
+    'qwen_language': 'qwen_language',
+    'qwen_instruct': 'qwen_instruct',
+    'qwen_max_new_tokens': 'qwen_max_new_tokens',
+    'qwen_clone_x_vector_only': 'qwen_clone_x_vector_only',
+    'active_voice_reference': 'active_voice_reference',
+    'subtitle_font_family': 'subtitle_font_family',
+    'subtitle_font_size': 'subtitle_font_size',
+    'subtitle_font_color': 'subtitle_font_color',
+    'subtitle_position': 'subtitle_position',
+    'subtitle_y_position': 'subtitle_y_position',
+    'subtitle_font': 'subtitle_font',
+    'subtitle_color': 'subtitle_color',
+    'subtitles_enabled': 'subtitles_enabled',
+    'custom_font_file': 'custom_font_file',
+    'zoom_intensity': 'zoom_intensity',
+    'ken_burns_zoom': 'ken_burns_zoom',
+    'transition_duration': 'transition_duration',
+    'inter_segment_silence': 'inter_segment_silence',
+    'logo_enabled': 'logo_enabled',
+    'active_logo': 'active_logo',
+    'logo_scale': 'logo_scale',
+    'logo_position': 'logo_position',
+    'logo_opacity': 'logo_opacity',
+    'logo_margin': 'logo_margin',
+    'outro_enabled': 'outro_enabled',
+    'active_outro': 'active_outro',
+    'upscale_enabled': 'upscale_enabled',
+    'upscale_model': 'upscale_model',
+    'upscale_denoise_strength': 'upscale_denoise_strength',
+}
+
+
+def apply_settings_to_project(project, source):
+    """Copy account/global settings onto *project* before it is saved."""
+    for target_field, source_field in PROJECT_SETTINGS_FIELD_MAP.items():
+        value = getattr(source, source_field)
+        # FileField values are bound to the source model; copy the path text
+        # instead of sharing the FieldFile instance.
+        if source_field == 'custom_font_file':
+            value = value.name if value else None
+        setattr(project, target_field, value)
+    return project

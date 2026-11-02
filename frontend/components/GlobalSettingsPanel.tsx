@@ -48,7 +48,9 @@ export function GlobalSettingsPanel() {
     ttsEngines, fetchTtsEngines, voiceReferences, fetchVoiceReferences,
   } = useSettingsStore();
 
-  const [isCollapsed, setIsCollapsed] = useState(getInitialCollapsed);
+  // Start expanded to keep server/client markup identical, then restore the
+  // persisted choice after hydration.
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Debounce timer ref for TTS speed slider
   const speedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -79,6 +81,11 @@ export function GlobalSettingsPanel() {
   const qwenEngine = ttsEngines.find((e) => e.id === 'qwen');
   const qwenSpeakers = qwenEngine?.speakers ?? {};
   const qwenLanguages = qwenEngine?.languages ?? ['English'];
+
+  // Restore the persisted collapsed state after the first client render.
+  useEffect(() => {
+    setIsCollapsed(getInitialCollapsed());
+  }, []);
 
   // Sync local slider value when project loads/changes
   useEffect(() => {

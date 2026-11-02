@@ -6,6 +6,7 @@ router = DefaultRouter()
 router.register(r'accounts', views.AccountViewSet)
 router.register(r'projects', views.ProjectViewSet)
 router.register(r'segments', views.SegmentViewSet)
+router.register(r'scripts', views.ScriptViewSet, basename='script')
 
 urlpatterns = [
     path('auth/login/', views.login_view, name='auth-login'),
@@ -17,6 +18,8 @@ urlpatterns = [
     path('segments/reorder/', views.reorder_segments, name='segment-reorder'),
     path('tasks/<str:task_id>/status/', views.task_status_view, name='task-status'),
     path('settings/', views.global_settings_view, name='global-settings'),
+    path('settings/ai/', views.ai_settings_view, name='ai-settings'),
+    path('script-craft/generate/', views.script_generate_view, name='script-generate'),
     path('settings/voices/', views.available_voices_view, name='available-voices'),
     path('settings/tts-engines/', views.tts_engines_view, name='tts-engines'),
     path('settings/tts-engines/qwen/unload/', views.qwen_unload_view, name='qwen-unload'),
