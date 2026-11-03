@@ -333,6 +333,69 @@ export interface ScriptChatMessage {
   content: string;
 }
 
+/** A tool activity chip shown under an assistant message. */
+export interface ChatToolEvent {
+  name: string;
+  status: 'started' | 'completed' | string;
+  label?: string;
+}
+
+/** One message in a persisted Script Craft conversation. */
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  thinking?: string;
+  tools?: ChatToolEvent[];
+  question?: string;
+  options?: string[];
+  steering?: boolean;
+  stopped?: boolean;
+  created_at: string;
+}
+
+/** One script page inside a chat session's "book". */
+export interface ChatScriptPage {
+  id: string;
+  title: string;
+  pitch: string;
+  content: ScriptContent;
+  model: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A persisted Script Craft chat session. */
+export interface ChatSession {
+  id: string;
+  account: string;
+  section: 'facebook' | 'youtube';
+  title: string;
+  summary: string;
+  messages: ChatMessage[];
+  scripts: ChatScriptPage[];
+  pending_steer: string;
+  stop_requested: boolean;
+  compacted_at: string | null;
+  message_count: number;
+  script_count: number;
+  last_message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** The block the user selected before sending a message. */
+export interface ChatSelection {
+  script_id: string;
+  segment_index: number;
+}
+
+export interface ChatCompactResponse {
+  summary: string;
+  compacted_at: string | null;
+  message_count: number;
+}
+
 /** Per-account Script Craft AI configuration. */
 export interface AIConfig {
   model: string;
@@ -342,6 +405,31 @@ export interface AIConfig {
   api_key: string;
   temperature: number;
   apply_to_all: boolean;
+  search_enabled: boolean;
+  search_provider: 'duckduckgo' | 'brave';
+  search_brave_api_key: string;
+  search_region: string;
+}
+
+// ── BGM Library ──
+
+/** A background-music track (always stored as MP3). */
+export interface BgmClip {
+  id: string;
+  account: string;
+  account_name: string;
+  section: 'facebook' | 'youtube';
+  name: string;
+  file: string;
+  file_url: string;
+  is_shared: boolean;
+  original_name: string;
+  original_format: string;
+  duration: number | null;
+  file_size: number;
+  can_edit: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Gallery ──

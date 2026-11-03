@@ -21,6 +21,9 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
+  // Use the DB duration when available and fall back to the decoded metadata
+  // (BGM tracks may not have a stored duration yet).
+  const [resolvedDuration, setResolvedDuration] = useState(duration);
 
   // Cache-busting URL to force re-fetch after regeneration. Start at 0 so
   // server and client markup match; the effect below fills in the timestamp.
@@ -33,13 +36,16 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
   const effectiveUrl = `${resolvedUrl}?t=${cacheBuster}`;
 
   // ── Reset when audioUrl changes (e.g. after regeneration) ──
+  /* eslint-disable react-hooks/set-state-in-effect -- synchronise the player with a new audio source */
   useEffect(() => {
     setCurrentTime(0);
     setIsPlaying(false);
     setIsLoaded(false);
     setHasError(false);
+    setResolvedDuration(duration);
     setCacheBuster(Date.now());
-  }, [audioUrl]);
+  }, [audioUrl, duration]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // ── Wire audio events ──
   useEffect(() => {
@@ -47,7 +53,12 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
     if (!audio) return;
 
     const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onLoadedMetadata = () => setIsLoaded(true);
+    const onLoadedMetadata = () => {
+      setIsLoaded(true);
+      if (Number.isFinite(audio.duration) && audio.duration > 0) {
+        setResolvedDuration(audio.duration);
+      }
+    };
     const onEnded = () => {
       setIsPlaying(false);
       setCurrentTime(0);
@@ -147,7 +158,7 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
         <Slider
           value={[currentTime]}
           min={0}
-          max={duration}
+          max={resolvedDuration || 0}
           step={0.1}
           onValueChange={handleSeek}
           className="flex-1 min-w-[120px]"
@@ -156,13 +167,13 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
 
         {/* Time display — inline on sm+ */}
         <span className="hidden sm:inline shrink-0 text-xs tabular-nums text-muted-foreground">
-          {formatTime(currentTime)} / {formatTime(duration)}
+          {formatTime(currentTime)} / {formatTime(resolvedDuration)}
         </span>
       </div>
 
       {/* Time display — stacked below on mobile */}
       <span className="sm:hidden text-xs tabular-nums text-muted-foreground pl-13">
-        {formatTime(currentTime)} / {formatTime(duration)}
+        {formatTime(currentTime)} / {formatTime(resolvedDuration)}
       </span>
     </div>
   );

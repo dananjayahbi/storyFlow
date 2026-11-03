@@ -238,6 +238,46 @@ def validate_voice_reference_upload(file):
     return file
 
 
+# ── Background music upload constants ──
+ALLOWED_BGM_EXTENSIONS = [
+    '.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.oga', '.opus',
+    '.wma', '.aiff', '.aif', '.alac', '.webm', '.mp4',
+]
+MAX_BGM_SIZE = 100 * 1024 * 1024  # 100 MB
+
+
+def validate_bgm_upload(file):
+    """Validate a background-music upload.
+
+    Any ffmpeg-readable audio container is accepted; the extension check keeps
+    obvious non-audio files out.  Conversion to MP3 happens afterwards.
+
+    Returns the validated file with pointer reset to 0.
+    """
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in ALLOWED_BGM_EXTENSIONS:
+        raise ValidationError({
+            'error': 'Invalid audio file',
+            'details': (
+                'Accepted formats: '
+                + ', '.join(ALLOWED_BGM_EXTENSIONS)
+                + f'. Got: {ext or "(no extension)"}'
+            ),
+        })
+
+    if file.size > MAX_BGM_SIZE:
+        raise ValidationError({
+            'error': 'File too large',
+            'details': (
+                'Background music must be under 100 MB. Got: '
+                f'{file.size / (1024 * 1024):.1f}MB'
+            ),
+        })
+
+    file.seek(0)
+    return file
+
+
 def validate_font_upload(file):
     """Validate an uploaded font file (.ttf or .otf).
 

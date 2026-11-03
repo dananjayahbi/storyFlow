@@ -14,6 +14,7 @@ import {
   Users,
   Wand2,
   BookMarked,
+  Music,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
@@ -107,6 +108,13 @@ function buildNavItems(section: Section, accountId: string | null): NavItem[] {
         path.startsWith(sectionPath(activeSection, '/script-library')),
     },
     {
+      label: 'BGM Library',
+      href: hrefFor(sectionPath(section, '/bgm-library')),
+      icon: Music,
+      match: (path: string, activeSection: Section) =>
+        path.startsWith(sectionPath(activeSection, '/bgm-library')),
+    },
+    {
       label: 'Settings',
       href: hrefFor(sectionPath(section, '/settings')),
       icon: Settings,
@@ -134,6 +142,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Hydrate the active account from the URL/localStorage and load the account
   // list for the switcher. Runs on every navigation so `?account=` wins.
+  /* eslint-disable react-hooks/set-state-in-effect -- deliberate post-hydration sync with URL/localStorage */
   useEffect(() => {
     setMounted(true);
     if (typeof window === 'undefined') return;
@@ -160,6 +169,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         // Account switcher is non-critical; pages surface their own errors.
       });
   }, [pathname, section]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Keep the account chip in sync with browser back/forward navigation.
   useEffect(() => {
@@ -214,7 +224,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         router.push(target);
       }
     },
-    [router, section],
+    [router, section, setAccountId, setAccountName],
   );
 
   if (isFullPage) {

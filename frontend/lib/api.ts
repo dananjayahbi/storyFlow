@@ -24,6 +24,9 @@ import {
   ScriptGenerateResponse,
   ScriptChatMessage,
   AIConfig,
+  ChatSession,
+  ChatCompactResponse,
+  BgmClip,
 } from './types';
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
@@ -458,6 +461,108 @@ export async function updateAIConfig(
 ): Promise<AIConfig> {
   const { data } = await api.patch<AIConfig>('/api/settings/ai/', payload);
   return data;
+}
+
+// ── Script Craft chat sessions ──
+
+export async function getChatSessions(): Promise<ChatSession[]> {
+  const { data } = await api.get<{ results: ChatSession[] } | ChatSession[]>(
+    '/api/chat/sessions/'
+  );
+  return Array.isArray(data) ? data : data.results;
+}
+
+export async function createChatSession(
+  title = ''
+): Promise<ChatSession> {
+  const { data } = await api.post<ChatSession>('/api/chat/sessions/', {
+    title,
+  });
+  return data;
+}
+
+export async function getChatSession(id: string): Promise<ChatSession> {
+  const { data } = await api.get<ChatSession>(`/api/chat/sessions/${id}/`);
+  return data;
+}
+
+export async function updateChatSession(
+  id: string,
+  payload: { title?: string }
+): Promise<ChatSession> {
+  const { data } = await api.patch<ChatSession>(
+    `/api/chat/sessions/${id}/`,
+    payload
+  );
+  return data;
+}
+
+export async function deleteChatSession(id: string): Promise<void> {
+  await api.delete(`/api/chat/sessions/${id}/`);
+}
+
+export async function steerChatSession(
+  id: string,
+  message: string
+): Promise<{ ok: boolean; pending_steer: string }> {
+  const { data } = await api.post<{ ok: boolean; pending_steer: string }>(
+    `/api/chat/sessions/${id}/steer/`,
+    { message }
+  );
+  return data;
+}
+
+export async function stopChatSession(
+  id: string
+): Promise<{ ok: boolean; stop_requested: boolean }> {
+  const { data } = await api.post<{ ok: boolean; stop_requested: boolean }>(
+    `/api/chat/sessions/${id}/stop/`
+  );
+  return data;
+}
+
+export async function compactChatSession(
+  id: string
+): Promise<ChatCompactResponse> {
+  const { data } = await api.post<ChatCompactResponse>(
+    `/api/chat/sessions/${id}/compact/`
+  );
+  return data;
+}
+
+// ── BGM Library ──
+
+export async function getBgmClips(): Promise<BgmClip[]> {
+  const { data } = await api.get<PaginatedResponse<BgmClip> | BgmClip[]>(
+    '/api/bgm/'
+  );
+  return Array.isArray(data) ? data : data.results;
+}
+
+export async function uploadBgmClip(
+  file: File,
+  options: { name?: string; isShared?: boolean } = {}
+): Promise<BgmClip> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (options.name) formData.append('name', options.name);
+  formData.append('is_shared', options.isShared ? 'true' : 'false');
+  const { data } = await api.post<BgmClip>('/api/bgm/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export async function updateBgmClip(
+  id: string,
+  payload: { name?: string; is_shared?: boolean }
+): Promise<BgmClip> {
+  const { data } = await api.patch<BgmClip>(`/api/bgm/${id}/`, payload);
+  return data;
+}
+
+export async function deleteBgmClip(id: string): Promise<void> {
+  await api.delete(`/api/bgm/${id}/`);
 }
 
 // ── Gallery ──

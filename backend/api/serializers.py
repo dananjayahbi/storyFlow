@@ -5,7 +5,7 @@ from rest_framework import serializers
 
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
-    OutroVideo, VoiceReference, Script, SECTION_CHOICES,
+    OutroVideo, VoiceReference, Script, ChatSession, BGMClip, SECTION_CHOICES,
     apply_settings_to_project,
 )
 from .parsers import JSONParser, TextParser, ParseError
@@ -239,6 +239,101 @@ class ScriptSerializer(serializers.ModelSerializer):
                     f'Segment {index} has no text_content.'
                 )
         return value
+
+
+class BGMClipSerializer(serializers.ModelSerializer):
+    """A background-music track, including shared clips from other accounts."""
+
+    file_url = serializers.SerializerMethodField()
+    account_name = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BGMClip
+        fields = [
+            'id', 'account', 'account_name', 'section', 'name', 'file',
+            'file_url', 'is_shared', 'original_name', 'original_format',
+            'duration', 'file_size', 'can_edit', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'account', 'account_name', 'section', 'file', 'file_url',
+            'original_name', 'original_format', 'duration', 'file_size',
+            'can_edit', 'created_at', 'updated_at',
+        ]
+
+    def get_file_url(self, obj):
+        if not obj.file:
+            return None
+        try:
+            return obj.file.url
+        except Exception:
+            return None
+
+    def get_account_name(self, obj):
+        return obj.account.name if obj.account_id else None
+
+    def _request_account_id(self):
+        request = self.context.get('request')
+        if request is None:
+            return None
+        cached = getattr(request, '_storyflow_account', None)
+        if cached is not None:
+            return cached.pk
+        raw = None
+        if hasattr(request, 'query_params'):
+            raw = request.query_params.get('account')
+        if not raw and hasattr(request, 'GET'):
+            raw = request.GET.get('account')
+        return raw
+
+    def get_can_edit(self, obj):
+        account_id = self._request_account_id()
+        return bool(account_id and str(account_id) == str(obj.account_id))
+
+    def validate_name(self, value):
+        name = (value or '').strip()
+        if not name:
+            raise serializers.ValidationError('A track name is required.')
+        return name[:255]
+
+
+class ChatSessionSerializer(serializers.ModelSerializer):
+    """A Script Craft chat session, optionally with its full transcript."""
+
+    message_count = serializers.SerializerMethodField()
+    script_count = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChatSession
+        fields = [
+            'id', 'account', 'section', 'title', 'summary',
+            'messages', 'scripts', 'pending_steer', 'stop_requested',
+            'compacted_at', 'message_count', 'script_count', 'last_message',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'account', 'section', 'summary', 'messages', 'scripts',
+            'pending_steer', 'stop_requested', 'compacted_at', 'message_count',
+            'script_count', 'last_message', 'created_at', 'updated_at',
+        ]
+
+    def get_message_count(self, obj):
+        return len(obj.messages) if isinstance(obj.messages, list) else 0
+
+    def get_script_count(self, obj):
+        return len(obj.scripts) if isinstance(obj.scripts, list) else 0
+
+    def get_last_message(self, obj):
+        if not isinstance(obj.messages, list) or not obj.messages:
+            return ''
+        last = obj.messages[-1]
+        if not isinstance(last, dict):
+            return ''
+        return str(last.get('content') or '')[:160]
+
+    def validate_title(self, value):
+        return (value or '').strip()[:255]
 
 
 class LogoSerializer(serializers.ModelSerializer):

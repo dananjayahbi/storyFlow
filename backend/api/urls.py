@@ -7,6 +7,7 @@ router.register(r'accounts', views.AccountViewSet)
 router.register(r'projects', views.ProjectViewSet)
 router.register(r'segments', views.SegmentViewSet)
 router.register(r'scripts', views.ScriptViewSet, basename='script')
+router.register(r'bgm', views.BGMClipViewSet, basename='bgm')
 
 urlpatterns = [
     path('auth/login/', views.login_view, name='auth-login'),
@@ -20,6 +21,32 @@ urlpatterns = [
     path('settings/', views.global_settings_view, name='global-settings'),
     path('settings/ai/', views.ai_settings_view, name='ai-settings'),
     path('script-craft/generate/', views.script_generate_view, name='script-generate'),
+    path('chat/sessions/', views.chat_sessions_view, name='chat-sessions'),
+    path(
+        'chat/sessions/<str:session_id>/',
+        views.chat_session_detail_view,
+        name='chat-session-detail',
+    ),
+    path(
+        'chat/sessions/<str:session_id>/stream/',
+        views.chat_session_stream_view,
+        name='chat-session-stream',
+    ),
+    path(
+        'chat/sessions/<str:session_id>/steer/',
+        views.chat_session_steer_view,
+        name='chat-session-steer',
+    ),
+    path(
+        'chat/sessions/<str:session_id>/stop/',
+        views.chat_session_stop_view,
+        name='chat-session-stop',
+    ),
+    path(
+        'chat/sessions/<str:session_id>/compact/',
+        views.chat_session_compact_view,
+        name='chat-session-compact',
+    ),
     path('settings/voices/', views.available_voices_view, name='available-voices'),
     path('settings/tts-engines/', views.tts_engines_view, name='tts-engines'),
     path('settings/tts-engines/qwen/unload/', views.qwen_unload_view, name='qwen-unload'),

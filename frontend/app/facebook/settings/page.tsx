@@ -127,6 +127,12 @@ export default function SettingsPage() {
   const [aiApiKey, setAiApiKey] = useState('');
   const [aiTemperature, setAiTemperature] = useState(0.7);
   const [aiApplyToAll, setAiApplyToAll] = useState(false);
+  const [searchEnabled, setSearchEnabled] = useState(true);
+  const [searchProvider, setSearchProvider] = useState<'duckduckgo' | 'brave'>(
+    'duckduckgo'
+  );
+  const [searchBraveApiKey, setSearchBraveApiKey] = useState('');
+  const [searchRegion, setSearchRegion] = useState('wt-wt');
   const [isSavingAI, setIsSavingAI] = useState(false);
   const [aiConfirmOpen, setAiConfirmOpen] = useState(false);
 
@@ -188,6 +194,10 @@ export default function SettingsPage() {
         setAiApiKey(config.api_key || '');
         setAiTemperature(config.temperature ?? 0.7);
         setAiApplyToAll(config.apply_to_all ?? false);
+        setSearchEnabled(config.search_enabled ?? true);
+        setSearchProvider(config.search_provider ?? 'duckduckgo');
+        setSearchBraveApiKey(config.search_brave_api_key || '');
+        setSearchRegion(config.search_region || 'wt-wt');
       })
       .catch(() => {
         // The AI tab surfaces its own error state.
@@ -204,10 +214,18 @@ export default function SettingsPage() {
         api_key: aiApiKey.trim(),
         temperature: aiTemperature,
         apply_to_all: aiApplyToAll,
+        search_enabled: searchEnabled,
+        search_provider: searchProvider,
+        search_brave_api_key: searchBraveApiKey.trim(),
+        search_region: searchRegion.trim() || 'wt-wt',
       });
       setAiConfig(updated);
       setAiModel(updated.model || updated.default_model || '');
       setAiApplyToAll(updated.apply_to_all);
+      setSearchEnabled(updated.search_enabled);
+      setSearchProvider(updated.search_provider);
+      setSearchBraveApiKey(updated.search_brave_api_key || '');
+      setSearchRegion(updated.search_region || 'wt-wt');
       toast.success(
         updated.apply_to_all
           ? 'AI model applied to every account'
@@ -1358,6 +1376,105 @@ export default function SettingsPage() {
                 The agent always appends the required JSON output format, so the
                 generated script can be parsed and saved to the library.
               </p>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold">Web search</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Lets the agent research facts, dates and statistics while
+                  writing. It cites the sources it used.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-3 rounded-lg border p-3">
+                <input
+                  id="search-enabled"
+                  type="checkbox"
+                  checked={searchEnabled}
+                  onChange={(event) => setSearchEnabled(event.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                />
+                <div>
+                  <label htmlFor="search-enabled" className="text-sm font-medium">
+                    Enable web search
+                  </label>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    On by default. When disabled the agent uses only its own
+                    knowledge and the conversation.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label htmlFor="search-provider" className="text-sm font-medium">
+                    Search provider
+                  </label>
+                  <select
+                    id="search-provider"
+                    value={searchProvider}
+                    onChange={(event) =>
+                      setSearchProvider(event.target.value as 'duckduckgo' | 'brave')
+                    }
+                    disabled={!searchEnabled}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                  >
+                    <option value="duckduckgo">DuckDuckGo — no key needed (default)</option>
+                    <option value="brave">Brave Search — API key required</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="search-region" className="text-sm font-medium">
+                    Region
+                  </label>
+                  <input
+                    id="search-region"
+                    value={searchRegion}
+                    onChange={(event) => setSearchRegion(event.target.value)}
+                    disabled={!searchEnabled}
+                    placeholder="wt-wt"
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm disabled:opacity-50"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    e.g. us-en, gb-en, de-de. <code>wt-wt</code> means no
+                    preference.
+                  </p>
+                </div>
+              </div>
+
+              {searchProvider === 'brave' && (
+                <div className="space-y-2">
+                  <label
+                    htmlFor="search-brave-key"
+                    className="text-sm font-medium"
+                  >
+                    Brave Search API key
+                  </label>
+                  <input
+                    id="search-brave-key"
+                    type="password"
+                    value={searchBraveApiKey}
+                    onChange={(event) => setSearchBraveApiKey(event.target.value)}
+                    disabled={!searchEnabled}
+                    placeholder="Paste your Brave Search subscription token"
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm disabled:opacity-50"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Stored locally with the endpoint settings. Brave is only
+                    used when selected above.
+                  </p>
+                </div>
+              )}
+
+              {searchEnabled && searchProvider === 'brave' && !searchBraveApiKey.trim() && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Add a Brave API key before saving, otherwise web search will
+                  fail.
+                </p>
+              )}
             </div>
 
             <Separator />

@@ -110,12 +110,84 @@ maintaining JSON files outside the app.
 1. Open **Script Craft** from the top navigation (it is scoped to the active
    Facebook page or YouTube channel).
 2. Describe the pitch in the chat, e.g. *“A documentary video script of World
-   War 2 for 20 minutes.”* The agent returns a structured script with narration
-   segments and cinematic image prompts.
-3. The right-hand panel parses the JSON into a readable storyboard: title,
-   segment count, narration and image prompt per beat.
-4. Click **Save to Library** to keep the draft in **Script Library**, also in
-   the top navigation and scoped to the same account.
+   War 2 for 20 minutes.”* The agent streams its answer and its reasoning
+   (“Thinking”) into the chat as it works.
+3. The right-hand panel is a **script book**: each script the agent creates is
+   a page. Use the page tabs or the arrows to move between them. The agent can
+   read every page in the session through its tools, so follow-up questions can
+   refer to earlier scripts.
+4. Click **Save to Library** to keep the current page in **Script Library**,
+   also in the top navigation and scoped to the same account.
+5. Select a block in the current page and either type an instruction or press
+   **Rewrite**. The agent rewrites only that segment and keeps the rest of the
+   script intact.
+
+### Chat controls
+
+- **Stop** interrupts a streaming answer. The partial reply is kept.
+- **Steering** — while the agent is writing, send another message; it is
+  delivered mid-turn and the agent adapts immediately.
+- **History** restores earlier sessions. The last session used by an account is
+  reopened automatically when you return to the page.
+- **Questions** — the agent can call an `ask_user` tool and pause with a
+  question (plus optional quick-reply buttons) instead of guessing.
+- **Slash commands** — type `/` in the composer:
+  - `/compact` summarises earlier turns into a note so the context stays small
+    (the visible history is kept).
+  - `/new` starts a fresh chat with an empty book.
+  - `/stop` stops the current answer.
+  - `/scripts` lists the pages in this session.
+  - `/help` lists the commands.
+
+Chat sessions, messages, compaction summaries and script pages are stored in
+the database per account, so reloading or leaving the page does not lose work.
+
+### Agent tools
+
+The agent uses standard OpenAI-compatible tool calls. If a local model ignores
+tools and prints a JSON script instead, StoryFlow still detects it and adds the
+page to the book.
+
+| Tool | Purpose |
+| --- | --- |
+| `create_script` | Add a new page to the session's book. |
+| `update_script` | Replace a page's title and/or segments. |
+| `rewrite_segment` | Rewrite one selected block. |
+| `list_scripts` | List every page in the session. |
+| `read_script` | Read all segments of a page. |
+| `ask_user` | Ask the human a question and pause. |
+
+Streaming uses server-sent events (`/api/chat/sessions/<id>/stream/`), with
+separate endpoints for steering, stopping and compaction. No third-party AI
+SDK is required; the client speaks the OpenAI-compatible protocol using
+Python's standard library.
+
+### BGM Library
+
+Open **BGM Library** in the top navigation to manage background music for the
+active account. The library is scoped by domain (Facebook/YouTube) and by
+account.
+
+- Upload **MP3, WAV, FLAC, M4A, AAC, OGG, OPUS, WMA, AIFF, ALAC or WebM**.
+  Every upload is converted to MP3 with FFmpeg before it is stored, so a single
+  format is used everywhere. FFmpeg must be installed and on `PATH`.
+- Play tracks directly in the library with the inbuilt player.
+- **Share** a track to make it visible to every account in the same domain
+  (Facebook tracks stay on Facebook, YouTube tracks stay on YouTube). Shared
+  tracks carry a **Shared** badge and the owner account name. Only the account
+  that uploaded a track can rename, share or delete it.
+- Track names and sharing can be changed after upload; delete removes the MP3
+  as well.
+
+Files live under `Storage/bgm/<section>/<account-id>/` and the metadata is
+stored per account in the database.
+
+### Gallery
+
+The Gallery shows rendered videos as a responsive masonry of compact
+thumbnails: 2 columns on phones, scaling up to 6 columns on wide screens. Hover
+a tile for a muted preview, click it for the full player (seek, volume, speed,
+loop, picture-in-picture and fullscreen), or use the download button.
 
 ### Configuring the AI model
 
@@ -136,6 +208,23 @@ Each account has its own model and system prompt. Open
 The model name/prompt live on the account; the endpoint, key and temperature
 are shared by the local installation. Scripts are stored per account and never
 leak between accounts or between Facebook and YouTube.
+
+### Web search
+
+The agent can research facts with a `web_search` tool. Configure it in the same
+**Settings → AI Model** tab:
+
+- **Enable web search** — on by default.
+- **Search provider** — **DuckDuckGo** works without a key and is the default.
+  **Brave Search** is optional and requires a Brave Search API subscription
+  token.
+- **Region** — DuckDuckGo region/language code such as `us-en`, `gb-en` or
+  `wt-wt` (no preference).
+
+Search settings are shared by the installation, like the AI endpoint and API
+key. Brave is only queried when selected; if it is selected without a key the
+agent reports the misconfiguration instead of guessing. No search SDK is
+required — both providers use Python's standard library.
 
 ---
 

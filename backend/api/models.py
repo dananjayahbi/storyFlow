@@ -1,4 +1,6 @@
+import os
 import uuid
+
 from django.db import models
 
 from core_engine.tts import (
@@ -338,6 +340,56 @@ class VoiceReference(models.Model):
         ordering = ['-uploaded_at']
 
 
+def bgm_upload_path(instance, filename):
+    """Background music lives under the account's BGM folder."""
+    safe = os.path.basename(filename or 'track.mp3')
+    stem, _ext = os.path.splitext(safe)
+    stem = ''.join(
+        char for char in stem if char.isalnum() or char in (' ', '-', '_')
+    ).strip() or 'track'
+    return (
+        f'bgm/{instance.section}/{instance.account_id}/'
+        f'{uuid.uuid4().hex[:12]}_{stem[:80]}.mp3'
+    )
+
+
+class BGMClip(models.Model):
+    """A background-music track in the account's BGM Library.
+
+    Every upload is converted to MP3 before it is stored.  Clips belong to one
+    account and one workspace section; ``is_shared`` makes the clip visible to
+    every account in the same section (the owner keeps edit/delete rights).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='bgm_clips',
+    )
+    section = models.CharField(
+        max_length=20,
+        choices=SECTION_CHOICES,
+        default='facebook',
+        db_index=True,
+    )
+    name = models.CharField(max_length=255)
+    file = models.FileField(upload_to=bgm_upload_path, max_length=500)
+    is_shared = models.BooleanField(default=False)
+    original_name = models.CharField(max_length=255, blank=True, default='')
+    original_format = models.CharField(max_length=20, blank=True, default='')
+    duration = models.FloatField(null=True, blank=True)
+    file_size = models.PositiveBigIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+
 class Script(models.Model):
     """A generated documentary script saved to an account's Script Library.
 
@@ -377,6 +429,58 @@ class Script(models.Model):
         return self.title
 
 
+class ChatSession(models.Model):
+    """A Script Craft conversation with its own script "book".
+
+    The conversation is stored as JSON rather than one row per message so the
+    streaming endpoint can persist a turn (including partial output after a
+    stop) in a single write.  ``scripts`` holds every script page created in
+    the session; the AI agent can read and edit all of them through tools.
+
+    Message shape::
+
+        {
+          "id": "...",
+          "role": "user" | "assistant",
+          "content": "...",
+          "thinking": "...",          # optional reasoning trace
+          "tools": [{"name": "...", "status": "completed", "label": "..."}],
+          "question": "...",           # optional ask_user question
+          "stopped": false,
+          "created_at": "..."
+        }
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='chat_sessions',
+    )
+    section = models.CharField(
+        max_length=20,
+        choices=SECTION_CHOICES,
+        default='facebook',
+        db_index=True,
+    )
+    title = models.CharField(max_length=255, blank=True, default='')
+    summary = models.TextField(blank=True, default='')
+    messages = models.JSONField(default=list, blank=True)
+    scripts = models.JSONField(default=list, blank=True)
+    # A steering message submitted while the agent is still streaming.
+    pending_steer = models.TextField(blank=True, default='')
+    stop_requested = models.BooleanField(default=False)
+    compacted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.title or f'Chat {self.pk}'
+
+
 class GlobalSettings(models.Model):
     """Singleton application-wide configuration record (pk always == 1)."""
 
@@ -391,6 +495,20 @@ class GlobalSettings(models.Model):
     ai_temperature = models.FloatField(default=0.7)
     # When enabled, saving the AI settings copies the model to every account.
     ai_apply_to_all = models.BooleanField(default=False)
+
+    # ── Script Craft web search ──
+    # DuckDuckGo works without a key; Brave is optional and needs an API key.
+    search_enabled = models.BooleanField(default=True)
+    search_provider = models.CharField(
+        max_length=20,
+        choices=[
+            ('duckduckgo', 'DuckDuckGo'),
+            ('brave', 'Brave Search'),
+        ],
+        default='duckduckgo',
+    )
+    search_brave_api_key = models.CharField(max_length=500, blank=True, default='')
+    search_region = models.CharField(max_length=20, blank=True, default='wt-wt')
 
     # ── TTS defaults ──
     default_voice_id = models.CharField(max_length=100, default='af_bella')

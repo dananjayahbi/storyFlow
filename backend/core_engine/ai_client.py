@@ -120,43 +120,60 @@ def normalize_script(payload: dict[str, Any], fallback_title: str = '') -> dict[
     return {'title': title, 'segments': segments}
 
 
-def chat_completion(
-    *,
-    base_url: str,
-    api_key: str,
-    model: str,
-    messages: list[dict[str, str]],
-    temperature: float = 0.7,
-    timeout: int = 180,
-) -> str:
-    """POST a chat completion and return the assistant message content."""
+def _completion_url(base_url: str) -> str:
     if not base_url:
         raise AIClientError('No AI base URL configured. Set it in Settings → AI Model.')
-    if not model:
-        raise AIClientError('No AI model configured. Set it in Settings → AI Model.')
-
     url = base_url.rstrip('/')
     if not url.endswith('/chat/completions'):
         url = f'{url}/chat/completions'
+    return url
 
-    body = json.dumps({
-        'model': model,
-        'messages': messages,
-        'temperature': temperature,
-        'stream': False,
-    }).encode('utf-8')
 
+def _completion_headers(api_key: str) -> dict[str, str]:
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
     }
     if api_key:
         headers['Authorization'] = f'Bearer {api_key}'
+    return headers
 
-    request = urllib.request.Request(url, data=body, headers=headers, method='POST')
+
+def _open_completion(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float,
+    timeout: int,
+    stream: bool,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | None = None,
+):
+    if not model:
+        raise AIClientError('No AI model configured. Set it in Settings → AI Model.')
+
+    url = _completion_url(base_url)
+    payload: dict[str, Any] = {
+        'model': model,
+        'messages': messages,
+        'temperature': temperature,
+        'stream': stream,
+    }
+    if tools:
+        payload['tools'] = tools
+        payload['tool_choice'] = tool_choice or 'auto'
+
+    body = json.dumps(payload).encode('utf-8')
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers=_completion_headers(api_key),
+        method='POST',
+    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode('utf-8'))
+        return url, urllib.request.urlopen(request, timeout=timeout)
     except urllib.error.HTTPError as exc:
         detail = ''
         try:
@@ -170,9 +187,10 @@ def chat_completion(
         raise AIClientError(
             f'Could not reach the AI endpoint at {url}: {exc.reason}'
         ) from exc
-    except (TimeoutError, json.JSONDecodeError) as exc:
-        raise AIClientError(f'Invalid response from the AI endpoint: {exc}') from exc
 
+
+def _message_content(payload: dict[str, Any]) -> str:
+    """Extract assistant text from a non-streamed completion payload."""
     try:
         content = payload['choices'][0]['message']['content']
     except (KeyError, IndexError, TypeError) as exc:
@@ -181,12 +199,199 @@ def chat_completion(
         ) from exc
 
     if isinstance(content, list):
-        # Some providers return content blocks instead of a plain string.
         content = ''.join(
             block.get('text', '') if isinstance(block, dict) else str(block)
             for block in content
         )
-    return str(content)
+    return str(content or '')
+
+
+def chat_completion(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, str]],
+    temperature: float = 0.7,
+    timeout: int = 180,
+) -> str:
+    """POST a chat completion and return the assistant message content."""
+    url, response = _open_completion(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        timeout=timeout,
+        stream=False,
+    )
+    try:
+        payload = json.loads(response.read().decode('utf-8'))
+    except (TimeoutError, json.JSONDecodeError) as exc:
+        raise AIClientError(f'Invalid response from the AI endpoint: {exc}') from exc
+    finally:
+        response.close()
+
+    return _message_content(payload)
+
+
+def _iter_sse_payloads(response):
+    """Yield decoded ``data:`` payloads from a server-sent event stream."""
+    while True:
+        raw_line = response.readline()
+        if not raw_line:
+            break
+        line = raw_line.decode('utf-8', errors='replace').strip()
+        if not line or line.startswith(':'):
+            continue
+        if not line.startswith('data:'):
+            continue
+        data = line[5:].strip()
+        if data == '[DONE]':
+            break
+        if data:
+            yield data
+
+
+def _yield_full_completion(payload: dict[str, Any]):
+    """Translate a non-streamed completion into streaming events."""
+    try:
+        choice = payload['choices'][0]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise AIClientError(
+            'The AI endpoint response did not contain a chat completion.'
+        ) from exc
+
+    message = choice.get('message') or {}
+    thinking = (
+        message.get('reasoning_content')
+        or message.get('reasoning')
+        or message.get('thinking')
+    )
+    if thinking:
+        yield {'type': 'thinking', 'text': str(thinking)}
+
+    content = message.get('content')
+    if isinstance(content, list):
+        content = ''.join(
+            block.get('text', '') if isinstance(block, dict) else str(block)
+            for block in content
+        )
+    if content:
+        yield {'type': 'content', 'text': str(content)}
+
+    for index, call in enumerate(message.get('tool_calls') or []):
+        function = call.get('function') or {}
+        yield {
+            'type': 'tool_call',
+            'index': index,
+            'id': call.get('id') or '',
+            'name': function.get('name') or '',
+            'arguments': function.get('arguments') or '',
+        }
+
+    yield {'type': 'done', 'finish_reason': choice.get('finish_reason') or 'stop'}
+
+
+def stream_chat_completion(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.7,
+    timeout: int = 180,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | None = None,
+):
+    """Stream a chat completion as small event dictionaries.
+
+    Yields ``content``/``thinking`` deltas and ``tool_call`` deltas (with
+    ``index``, ``id``, ``name`` and a partial ``arguments`` fragment).  Some
+    OpenAI-compatible servers ignore ``stream`` and return a single JSON
+    object; those responses are translated into the same events.
+    """
+    url, response = _open_completion(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        timeout=timeout,
+        stream=True,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
+
+    try:
+        content_type = (response.headers.get('Content-Type') or '').lower()
+        if 'text/event-stream' not in content_type:
+            # The server returned a regular JSON completion.
+            raw = response.read().decode('utf-8', errors='replace')
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise AIClientError(
+                    f'Invalid response from the AI endpoint: {exc}'
+                ) from exc
+            yield from _yield_full_completion(payload)
+            return
+
+        for data in _iter_sse_payloads(response):
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError:
+                # Providers occasionally send keep-alive pings or partial
+                # frames; ignore anything that is not valid JSON.
+                continue
+
+            if isinstance(payload.get('error'), dict):
+                raise AIClientError(
+                    str(payload['error'].get('message') or payload['error'])
+                )
+
+            choices = payload.get('choices') or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = choice.get('delta') or choice.get('message') or {}
+
+            thinking = (
+                delta.get('reasoning_content')
+                or delta.get('reasoning')
+                or delta.get('thinking')
+            )
+            if thinking:
+                yield {'type': 'thinking', 'text': str(thinking)}
+
+            content = delta.get('content')
+            if isinstance(content, list):
+                content = ''.join(
+                    block.get('text', '') if isinstance(block, dict) else str(block)
+                    for block in content
+                )
+            if content:
+                yield {'type': 'content', 'text': str(content)}
+
+            for index, call in enumerate(delta.get('tool_calls') or []):
+                function = call.get('function') or {}
+                yield {
+                    'type': 'tool_call',
+                    'index': call.get('index', index),
+                    'id': call.get('id') or '',
+                    'name': function.get('name') or '',
+                    'arguments': function.get('arguments') or '',
+                }
+
+            if choice.get('finish_reason'):
+                yield {
+                    'type': 'done',
+                    'finish_reason': choice.get('finish_reason'),
+                }
+    except (TimeoutError, OSError) as exc:
+        raise AIClientError(f'Invalid response from the AI endpoint: {exc}') from exc
+    finally:
+        response.close()
 
 
 def generate_script(

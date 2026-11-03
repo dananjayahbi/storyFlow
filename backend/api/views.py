@@ -1,13 +1,20 @@
+import json
 import logging
 import os
 import shutil
+import tempfile
+import time
 import uuid as uuid_mod
+from datetime import datetime, timezone
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.files import File
 from django.core.files.storage import default_storage
 from django.db import models, transaction
+from django.db.models import Q
 from django.http import FileResponse, StreamingHttpResponse
+from django.utils import timezone as django_timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, action
 from rest_framework.exceptions import ValidationError
@@ -15,15 +22,16 @@ from rest_framework.response import Response
 
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
-    OutroVideo, VoiceReference, Script, STATUS_PROCESSING, STATUS_COMPLETED,
-    STATUS_FAILED, RENDERABLE_STATUSES, SECTION_CHOICES,
-    apply_settings_to_project,
+    OutroVideo, VoiceReference, Script, ChatSession, BGMClip,
+    STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
+    SECTION_CHOICES, apply_settings_to_project,
 )
 from .serializers import (
     AccountSerializer, ProjectSerializer, ProjectDetailSerializer,
     ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer,
     AccountSettingsSerializer, LogoSerializer, OutroVideoSerializer,
-    VoiceReferenceSerializer, ScriptSerializer,
+    VoiceReferenceSerializer, ScriptSerializer, ChatSessionSerializer,
+    BGMClipSerializer,
 )
 from .parsers import ParseError
 from .storage import write_project_artifacts, save_story_json
@@ -37,7 +45,7 @@ from .storage_paths import (
 from .tasks import get_task_manager, render_task_function
 from .validators import (
     validate_image_upload, validate_project_for_render, validate_font_upload,
-    validate_voice_reference_upload,
+    validate_voice_reference_upload, validate_bgm_upload,
 )
 from core_engine import tts as tts_engine
 from core_engine.model_loader import KokoroModelLoader
@@ -1011,6 +1019,129 @@ class SegmentViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
+class BGMClipViewSet(viewsets.ModelViewSet):
+    """Background-music library for the active account and section.
+
+    Reads include the account's own clips plus every clip marked shared by
+    another account in the same section.  Only the owner can rename, share or
+    delete a clip.
+    """
+
+    queryset = BGMClip.objects.all()
+    serializer_class = BGMClipSerializer
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        account = get_requested_account(self.request)
+        if account is None:
+            return BGMClip.objects.none()
+        section = get_requested_section(self.request) or account.section
+        return (
+            BGMClip.objects.filter(section=section)
+            .filter(Q(account=account) | Q(is_shared=True))
+            .select_related('account')
+        )
+
+    def create(self, request, *args, **kwargs):
+        account = get_requested_account(request)
+        if account is None:
+            return Response(
+                {'error': 'Select an account before uploading music.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        upload = request.FILES.get('file')
+        if upload is None:
+            return Response(
+                {'error': 'Choose an audio file to upload.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        validate_bgm_upload(upload)
+
+        section = get_requested_section(request) or account.section
+        if section != account.section:
+            return Response(
+                {'error': 'Account does not belong to this workspace section.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        original_name = os.path.basename(upload.name or 'track')
+        stem = os.path.splitext(original_name)[0][:120] or 'track'
+        extension = os.path.splitext(original_name)[1].lower().lstrip('.') or 'audio'
+        requested_name = str(request.data.get('name') or '').strip()
+        raw_shared = request.data.get('is_shared')
+        if isinstance(raw_shared, bool):
+            is_shared = raw_shared
+        else:
+            is_shared = str(raw_shared or '').strip().lower() in (
+                '1', 'true', 'on', 'yes'
+            )
+
+        from core_engine import audio_convert
+
+        try:
+            with tempfile.TemporaryDirectory(prefix='storyflow-bgm-') as tmp:
+                source_path = os.path.join(tmp, f'source.{extension}')
+                output_path = os.path.join(tmp, 'converted.mp3')
+                with open(source_path, 'wb') as handle:
+                    for chunk in upload.chunks():
+                        handle.write(chunk)
+                audio_convert.convert_to_mp3(source_path, output_path)
+                duration = audio_convert.probe_duration(output_path)
+                file_size = os.path.getsize(output_path)
+
+                clip = BGMClip(
+                    account=account,
+                    section=section,
+                    name=(requested_name or stem)[:255],
+                    is_shared=is_shared,
+                    original_name=original_name[:255],
+                    original_format=extension[:20],
+                    duration=duration,
+                    file_size=file_size,
+                )
+                with open(output_path, 'rb') as converted:
+                    clip.file.save(
+                        f'{stem[:80] or "track"}.mp3',
+                        File(converted),
+                        save=False,
+                    )
+                clip.save()
+        except audio_convert.AudioConversionError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except OSError as exc:
+            logger.error('BGM upload failed: %s', exc)
+            return Response(
+                {'error': 'The audio file could not be stored.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        serializer = self.get_serializer(clip)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        clip = self.get_object()
+        account = get_requested_account(self.request)
+        if account is None or clip.account_id != account.pk:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied('Only the account that uploaded a clip can edit it.')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        account = get_requested_account(self.request)
+        if account is None or instance.account_id != account.pk:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied('Only the account that uploaded a clip can delete it.')
+        if instance.file:
+            instance.file.delete(save=False)
+        instance.delete()
+
+
 class ScriptViewSet(viewsets.ModelViewSet):
     """CRUD for scripts saved to an account's Script Library.
 
@@ -1357,6 +1488,10 @@ def _ai_config_payload(account):
         'api_key': gs.ai_api_key,
         'temperature': gs.ai_temperature,
         'apply_to_all': gs.ai_apply_to_all,
+        'search_enabled': gs.search_enabled,
+        'search_provider': gs.search_provider,
+        'search_brave_api_key': gs.search_brave_api_key,
+        'search_region': gs.search_region,
     }
 
 
@@ -1418,6 +1553,29 @@ def ai_settings_view(request):
         if apply_value is not _MISSING:
             gs.ai_apply_to_all = bool(apply_value)
             global_updates.append('ai_apply_to_all')
+
+        search_enabled = provided('search_enabled')
+        if search_enabled is not _MISSING:
+            gs.search_enabled = bool(search_enabled)
+            global_updates.append('search_enabled')
+        search_provider = provided('search_provider')
+        if search_provider is not _MISSING:
+            provider = str(search_provider or '').strip().lower()
+            if provider not in ('duckduckgo', 'brave'):
+                return Response(
+                    {'error': 'Search provider must be duckduckgo or brave.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            gs.search_provider = provider
+            global_updates.append('search_provider')
+        search_key = provided('search_brave_api_key')
+        if search_key is not _MISSING:
+            gs.search_brave_api_key = str(search_key or '').strip()[:500]
+            global_updates.append('search_brave_api_key')
+        search_region = provided('search_region')
+        if search_region is not _MISSING:
+            gs.search_region = str(search_region or 'wt-wt').strip()[:20]
+            global_updates.append('search_region')
         if global_updates:
             gs.save(update_fields=global_updates)
 
@@ -1518,6 +1676,469 @@ def script_generate_view(request):
         'model': result['model'],
         'segment_count': segment_count,
     })
+
+
+# ===================================================================
+# Script Craft — streaming chat sessions
+# ===================================================================
+
+def _chat_session_for_request(request, session_id):
+    """Return one session owned by the requested account/section."""
+    account = get_requested_account(request)
+    if account is None:
+        return None, Response(
+            {'error': 'Select an account before using Script Craft.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    queryset = ChatSession.objects.filter(account=account)
+    section = get_requested_section(request)
+    if section:
+        queryset = queryset.filter(section=section)
+    try:
+        session = queryset.get(pk=session_id)
+    except (ChatSession.DoesNotExist, ValueError, DjangoValidationError):
+        return None, Response(
+            {'error': 'Chat session not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    return session, None
+
+
+def _sse(event, payload):
+    """Encode one server-sent event frame."""
+    return (
+        f'event: {event}\n'
+        f'data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n'
+    )
+
+
+def _chat_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _ui_message(role, content, **extra):
+    message = {
+        'id': uuid_mod.uuid4().hex,
+        'role': role,
+        'content': content,
+        'created_at': _chat_now_iso(),
+    }
+    message.update(extra)
+    return message
+
+
+def _context_transcript(session):
+    """Messages that still belong in the model context after compaction."""
+    messages = session.messages if isinstance(session.messages, list) else []
+    if not session.compacted_at:
+        return messages
+    cutoff = session.compacted_at.isoformat()
+    return [
+        message for message in messages
+        if str(message.get('created_at') or '') > cutoff
+    ]
+
+
+@api_view(['GET', 'POST'])
+def chat_sessions_view(request):
+    """List or create Script Craft chat sessions for the active account."""
+    account = get_requested_account(request)
+    if account is None:
+        return Response(
+            {'error': 'Select an account before using Script Craft.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    section = get_requested_section(request) or account.section
+    if account.section != section:
+        return Response(
+            {'error': 'Account does not belong to this workspace section.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if request.method == 'GET':
+        sessions = ChatSession.objects.filter(
+            account=account, section=section
+        )[:100]
+        return Response({
+            'results': ChatSessionSerializer(sessions, many=True).data,
+            'count': len(sessions),
+        })
+
+    title = str(request.data.get('title') or '').strip()[:255]
+    session = ChatSession.objects.create(
+        account=account,
+        section=section,
+        title=title,
+    )
+    return Response(
+        ChatSessionSerializer(session).data,
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+def chat_session_detail_view(request, session_id):
+    """Read, rename or delete one chat session."""
+    session, error = _chat_session_for_request(request, session_id)
+    if error:
+        return error
+
+    if request.method == 'DELETE':
+        session.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    if request.method == 'PATCH':
+        updates = []
+        if 'title' in request.data:
+            session.title = str(request.data.get('title') or '').strip()[:255]
+            updates.append('title')
+        if updates:
+            session.save(update_fields=updates + ['updated_at'])
+        return Response(ChatSessionSerializer(session).data)
+
+    return Response(ChatSessionSerializer(session).data)
+
+
+@api_view(['POST'])
+def chat_session_steer_view(request, session_id):
+    """Queue a steering message for the currently streaming agent."""
+    session, error = _chat_session_for_request(request, session_id)
+    if error:
+        return error
+
+    text = str(request.data.get('message') or '').strip()
+    if not text:
+        return Response(
+            {'error': 'Write a steering message first.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    session.pending_steer = text[:4000]
+    session.save(update_fields=['pending_steer', 'updated_at'])
+    return Response({'ok': True, 'pending_steer': session.pending_steer})
+
+
+@api_view(['POST'])
+def chat_session_stop_view(request, session_id):
+    """Ask the running stream to stop after its current chunk."""
+    session, error = _chat_session_for_request(request, session_id)
+    if error:
+        return error
+
+    session.stop_requested = True
+    session.save(update_fields=['stop_requested', 'updated_at'])
+    return Response({'ok': True, 'stop_requested': True})
+
+
+@api_view(['POST'])
+def chat_session_compact_view(request, session_id):
+    """Summarise earlier turns so the context stays small."""
+    session, error = _chat_session_for_request(request, session_id)
+    if error:
+        return error
+
+    messages = session.messages if isinstance(session.messages, list) else []
+    if not messages:
+        return Response({
+            'summary': session.summary,
+            'compacted_at': session.compacted_at,
+            'message_count': 0,
+        })
+
+    gs = GlobalSettings.load()
+    account = session.account
+    model = account.ai_model or gs.ai_default_model
+    if not model:
+        return Response(
+            {'error': 'No AI model is configured. Open Settings → AI Model.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    transcript_lines = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get('role') or '')
+        content = str(message.get('content') or '').strip()
+        if role in ('user', 'assistant') and content:
+            transcript_lines.append(f'{role.upper()}: {content}')
+    transcript = '\n\n'.join(transcript_lines)[-24000:]
+
+    prompt = (
+        'Summarise this script-writing conversation for future context. '
+        'Keep every concrete decision, user preference, script title, and '
+        'open question. Mention script pages by title so the agent can find '
+        'them with its tools. Be concise but complete.\n\n'
+    )
+    if session.summary:
+        prompt += f'Previous summary:\n{session.summary}\n\n'
+    prompt += f'Conversation:\n{transcript}\n\nSummary:'
+
+    try:
+        from core_engine import ai_client
+
+        summary = ai_client.chat_completion(
+            base_url=gs.ai_base_url,
+            api_key=gs.ai_api_key,
+            model=model,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': 'You compress conversations into faithful notes.',
+                },
+                {'role': 'user', 'content': prompt},
+            ],
+            temperature=0.2,
+            timeout=120,
+        )
+    except Exception as exc:
+        logger.error('Chat compaction failed: %s', exc)
+        return Response(
+            {'error': str(exc) or 'The conversation could not be compacted.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    session.summary = summary.strip()
+    session.compacted_at = django_timezone.now()
+    session.save(update_fields=['summary', 'compacted_at', 'updated_at'])
+    return Response({
+        'summary': session.summary,
+        'compacted_at': session.compacted_at,
+        'message_count': len(messages),
+    })
+
+
+@api_view(['POST'])
+def chat_session_stream_view(request, session_id):
+    """Stream one agent turn as server-sent events."""
+    session, error = _chat_session_for_request(request, session_id)
+    if error:
+        return error
+
+    text = str(request.data.get('message') or '').strip()
+    if not text:
+        return Response(
+            {'error': 'Write a message before sending.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    selection = request.data.get('selection')
+    if not isinstance(selection, dict):
+        selection = None
+
+    gs = GlobalSettings.load()
+    account = session.account
+    model = account.ai_model or gs.ai_default_model
+    if not model:
+        return Response(
+            {
+                'error': (
+                    'No AI model is configured. Open Settings → AI Model, '
+                    'choose a model and save it for this account.'
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    messages = session.messages if isinstance(session.messages, list) else []
+    # Capture the context *before* appending the new user turn: the agent
+    # helper adds that turn itself, and duplicating it confuses the model.
+    transcript = _context_transcript(session)
+    user_message = _ui_message('user', text)
+    messages = [*messages, user_message]
+    session.messages = messages
+    if not session.title:
+        session.title = text[:80]
+    session.stop_requested = False
+    # A steering message submitted while no stream is running is simply the
+    # next user turn; fold it into this message instead of queueing it.
+    if session.pending_steer:
+        session.pending_steer = ''
+    session.save(update_fields=[
+        'messages', 'title', 'stop_requested', 'pending_steer', 'updated_at',
+    ])
+
+    scripts = list(session.scripts or [])
+    state = {'scripts': scripts}
+
+    def take_steer():
+        row = ChatSession.objects.filter(pk=session.pk).first()
+        if row is None or not row.pending_steer:
+            return None
+        steer = row.pending_steer
+        ChatSession.objects.filter(pk=session.pk).update(pending_steer='')
+        return steer
+
+    def should_stop():
+        return bool(
+            ChatSession.objects.filter(pk=session.pk)
+            .values_list('stop_requested', flat=True)
+            .first()
+        )
+
+    def persist():
+        session.scripts = state['scripts']
+        session.save(update_fields=['messages', 'scripts', 'updated_at'])
+
+    def event_stream():
+        draft = None
+        last_persist = 0.0
+        try:
+            yield _sse('meta', {
+                'session_id': str(session.pk),
+                'user_message': user_message,
+                'model': model,
+            })
+
+            from core_engine import chat_agent
+
+            for event in chat_agent.run_agent_turn(
+                base_url=gs.ai_base_url,
+                api_key=gs.ai_api_key,
+                model=model,
+                temperature=gs.ai_temperature,
+                system_prompt=account.ai_system_prompt,
+                summary=session.summary,
+                transcript=transcript,
+                scripts=state['scripts'],
+                user_text=text,
+                selection=selection,
+                search_config={
+                    'enabled': gs.search_enabled,
+                    'provider': gs.search_provider,
+                    'brave_api_key': gs.search_brave_api_key,
+                    'region': gs.search_region,
+                },
+                should_stop=should_stop,
+                take_steer=take_steer,
+            ):
+                kind = event.get('type')
+
+                if kind in ('token', 'thinking'):
+                    if draft is None:
+                        draft = _ui_message('assistant', '', thinking='', tools=[])
+                    if kind == 'token':
+                        draft['content'] += event.get('text') or ''
+                    else:
+                        draft['thinking'] = (draft.get('thinking') or '') + (
+                            event.get('text') or ''
+                        )
+                    now = time.monotonic()
+                    if now - last_persist >= 1.5:
+                        last_persist = now
+                        if draft.get('id') not in {
+                            item.get('id') for item in session.messages
+                        }:
+                            session.messages = [*session.messages, draft]
+                        persist()
+                    yield _sse(kind, {'text': event.get('text') or ''})
+                    continue
+
+                if kind == 'message':
+                    message = event.get('message') or {}
+                    if draft is not None:
+                        # Replace the streamed draft with the final message so
+                        # thinking/tool metadata is stored in one place.
+                        session.messages = [
+                            item for item in session.messages
+                            if item.get('id') != draft.get('id')
+                        ]
+                        draft = None
+                    if message.get('id') not in {
+                        item.get('id') for item in session.messages
+                    }:
+                        session.messages = [*session.messages, message]
+                    persist()
+                    yield _sse('message', {'message': message})
+                    continue
+
+                if kind == 'script':
+                    script = event.get('script')
+                    if isinstance(script, dict):
+                        script_id = script.get('id')
+                        for index, existing in enumerate(state['scripts']):
+                            if existing.get('id') == script_id:
+                                state['scripts'][index] = script
+                                break
+                        else:
+                            state['scripts'].append(script)
+                    persist()
+                    yield _sse('script', {
+                        'script': event.get('script'),
+                        'action': event.get('action'),
+                        'segment_index': event.get('segment_index'),
+                        'scripts': state['scripts'],
+                    })
+                    continue
+
+                if kind == 'steer':
+                    steer_message = _ui_message(
+                        'user', event.get('text') or '', steering=True
+                    )
+                    session.messages = [*session.messages, steer_message]
+                    persist()
+                    yield _sse('steer', {
+                        'text': event.get('text') or '',
+                        'message': steer_message,
+                    })
+                    continue
+
+                if kind == 'question':
+                    yield _sse('question', {
+                        'question': event.get('question'),
+                        'options': event.get('options') or [],
+                    })
+                    continue
+
+                if kind == 'error':
+                    yield _sse('error', {'error': event.get('error')})
+                    continue
+
+                if kind == 'done':
+                    persist()
+                    yield _sse('done', {
+                        'stopped': bool(event.get('stopped')),
+                        'waiting_for_user': bool(event.get('waiting_for_user')),
+                        'scripts': state['scripts'],
+                    })
+                    continue
+
+                yield _sse(kind or 'event', event)
+        except GeneratorExit:
+            # The browser closed the connection (stop button or navigation);
+            # keep whatever was generated so far.
+            if draft is not None:
+                draft['stopped'] = True
+                session.messages = [
+                    item for item in session.messages
+                    if item.get('id') != draft.get('id')
+                ] + [draft]
+            persist()
+            raise
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception('Script Craft chat stream failed')
+            if draft is not None and draft.get('content'):
+                draft['stopped'] = True
+                session.messages = [*session.messages, draft]
+            persist()
+            yield _sse('error', {
+                'error': str(exc) or 'The agent stream failed.',
+            })
+        finally:
+            if draft is not None and draft.get('content'):
+                draft['stopped'] = True
+                if draft.get('id') not in {
+                    item.get('id') for item in session.messages
+                }:
+                    session.messages = [*session.messages, draft]
+            persist()
+
+    response = StreamingHttpResponse(
+        event_stream(), content_type='text/event-stream'
+    )
+    response['Cache-Control'] = 'no-cache, no-transform'
+    response['X-Accel-Buffering'] = 'no'
+    return response
 
 
 # ===================================================================

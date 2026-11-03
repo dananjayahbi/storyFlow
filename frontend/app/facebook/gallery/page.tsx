@@ -241,13 +241,13 @@ export default function GalleryPage() {
 
       {/* Loading state */}
       {loading && (
-        <div className="columns-1 md:columns-2 lg:columns-3 gap-4 [column-fill:_balance]">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="overflow-hidden break-inside-avoid mb-4">
+        <div className="columns-2 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-3 [column-fill:_balance]">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <Card key={i} className="overflow-hidden break-inside-avoid mb-3">
               <Skeleton className={`w-full ${i % 3 === 1 ? 'aspect-[9/16]' : 'aspect-video'}`} />
-              <CardContent className="pt-4">
-                <Skeleton className="h-5 w-3/4 mb-2" />
-                <Skeleton className="h-4 w-1/2" />
+              <CardContent className="pt-2.5 pb-3">
+                <Skeleton className="h-4 w-3/4 mb-2" />
+                <Skeleton className="h-3 w-1/2" />
               </CardContent>
             </Card>
           ))}
@@ -268,11 +268,11 @@ export default function GalleryPage() {
 
       {/* Video grid — masonry layout for mixed aspect ratios */}
       {!loading && items.length > 0 && (
-        <div className="columns-1 md:columns-2 lg:columns-3 gap-4 [column-fill:_balance]">
+        <div className="columns-2 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-3 [column-fill:_balance]">
           {items.map((item) => (
             <Card
               key={item.id}
-              className="overflow-hidden cursor-pointer group hover:ring-2 hover:ring-primary/20 transition-all break-inside-avoid mb-4"
+              className="overflow-hidden cursor-pointer group hover:ring-2 hover:ring-primary/20 transition-all break-inside-avoid mb-3"
               onClick={() => setSelectedItem(item)}
             >
               {/* Video preview */}
@@ -314,11 +314,11 @@ export default function GalleryPage() {
               </div>
 
               {/* Info */}
-              <CardContent className="pt-3 pb-4">
+              <CardContent className="pt-2.5 pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-medium truncate">{item.title}</h3>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                    <h3 className="truncate text-sm font-medium">{item.title}</h3>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="flex items-center gap-1">
