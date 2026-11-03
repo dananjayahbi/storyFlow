@@ -143,10 +143,10 @@ describe('TimelineEditorPage', () => {
     // Sidebar info
     expect(screen.getAllByText('DRAFT').length).toBeGreaterThan(0);
 
-    // Navigation link — sidebar has Dashboard link
-    expect(
-      screen.getAllByRole('link', { name: /dashboard/i }).length
-    ).toBeGreaterThan(0);
+    // The old Details tab is gone; the sidebar shows the Settings panel only.
+    expect(screen.queryByText('Details')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Settings').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Story Template')).not.toBeInTheDocument();
 
     // Timeline content (segment text)
     expect(screen.getByDisplayValue('Once upon a time')).toBeInTheDocument();

@@ -83,7 +83,10 @@ The header is a fixed 56 px rail. Navigation is a single horizontal row (it
 scrolls sideways on narrow screens), so no vertical scrollbar appears in the
 header. The active-page underline sits inside each link instead of overflowing
 below it. The project editor sidebar starts directly with the project title and
-status; the StoryFlow mark is shown only once, in the shared top header.
+status; the StoryFlow mark is shown only once, in the shared top header. The
+editor sidebar has a single **Settings** panel — the old Details tab was
+removed. The **Story Template** JSON reference now lives on the account
+Settings page under **Settings → Story Template**.
 
 ### Per-account settings
 

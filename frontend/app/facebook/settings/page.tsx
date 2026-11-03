@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon,
   Trash2, Upload, Film, Cpu, Mic, AlertTriangle, CheckCircle2, Wand2,
-  SlidersHorizontal,
+  SlidersHorizontal, BookOpen,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -29,6 +29,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { SettingsSkeleton } from '@/components/skeletons';
 import { SettingsMixPanel } from '@/components/SettingsMixPanel';
+import { StoryTemplateModal } from '@/components/StoryTemplateModal';
 
 type SettingsTab =
   | 'tester'
@@ -38,6 +39,7 @@ type SettingsTab =
   | 'logos'
   | 'outros'
   | 'mix'
+  | 'template'
   | 'ai';
 
 const SETTINGS_TABS: Array<{
@@ -87,6 +89,12 @@ const SETTINGS_TABS: Array<{
     label: 'Audio Mix',
     description: 'Music, echo & demo tune',
     icon: SlidersHorizontal,
+  },
+  {
+    id: 'template',
+    label: 'Story Template',
+    description: 'JSON import reference',
+    icon: BookOpen,
   },
   {
     id: 'ai',
@@ -1285,6 +1293,36 @@ export default function SettingsPage() {
       )}
       {/* ── Audio Mix + demo playground ── */}
       {activeTab === 'mix' && <SettingsMixPanel />}
+
+      {/* ── Story Template reference (moved from the project Details tab) ── */}
+      {activeTab === 'template' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BookOpen className="h-5 w-5" />
+              Story Template
+            </CardTitle>
+            <CardDescription>
+              The JSON structure used by Import Segments. Open the reference to
+              copy the template or a complete example story.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <StoryTemplateModal
+              trigger={
+                <Button variant="outline">
+                  <BookOpen className="mr-2 h-4 w-4" />
+                  Open Story Template
+                </Button>
+              }
+            />
+            <p className="text-xs text-muted-foreground">
+              Each segment needs narration text and an image prompt. Import the
+              JSON with the Import Segments button in a project.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Script Craft AI Configuration ── */}
       {activeTab === 'ai' && (
