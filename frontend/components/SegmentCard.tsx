@@ -16,7 +16,8 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions, Volume2, VolumeX } from 'lucide-react';
+import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions, VolumeX, Download } from 'lucide-react';
+import { getSegmentAudioDownloadUrl } from '@/lib/api';
 import { SegmentTextEditor } from './SegmentTextEditor';
 import { ImageUploader } from './ImageUploader';
 import { ImagePromptDisplay } from './ImagePromptDisplay';
@@ -168,6 +169,24 @@ function SegmentCardComponent({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <a
+                    href={getSegmentAudioDownloadUrl(segment.id, 'wav')}
+                    download
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download WAV
+                  </a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <a
+                    href={getSegmentAudioDownloadUrl(segment.id, 'mp3')}
+                    download
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download MP3
+                  </a>
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   disabled={segment.is_locked || isGenerating}
                   onClick={handleGenerateAudio}

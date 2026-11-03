@@ -858,6 +858,90 @@ class SegmentViewSet(viewsets.ModelViewSet):
             'message': 'Image removed successfully',
         }, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['get'], url_path='download-audio')
+    def download_audio(self, request, pk=None):
+        """Download a segment's generated narration as WAV or MP3.
+
+        GET /api/segments/<id>/download-audio/?format=wav|mp3
+        """
+        segment = self.get_object()
+        if not segment.audio_file:
+            return Response(
+                {'error': 'This segment has no generated audio.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            source_path = segment.audio_file.path
+        except (ValueError, NotImplementedError):
+            return Response(
+                {'error': 'Audio file is not accessible.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        if not os.path.isfile(source_path):
+            return Response(
+                {'error': 'Audio file is missing on disk.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        audio_format = str(
+            request.query_params.get('audio_format') or 'wav'
+        ).lower()
+        if audio_format not in ('wav', 'mp3'):
+            return Response(
+                {'error': "audio_format must be 'wav' or 'mp3'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        title = ''.join(
+            char for char in (segment.project.title or 'segment')
+            if char.isalnum() or char in (' ', '-', '_')
+        ).strip() or 'segment'
+        stem = f'{title} - segment {segment.sequence_index + 1}'
+
+        if audio_format == 'wav':
+            response = FileResponse(
+                open(source_path, 'rb'), content_type='audio/wav'
+            )
+            response['Content-Disposition'] = (
+                f'attachment; filename="{stem}.wav"'
+            )
+            return response
+
+        from core_engine import audio_convert
+
+        handle, mp3_path = tempfile.mkstemp(suffix='.mp3')
+        os.close(handle)
+        try:
+            audio_convert.convert_to_mp3(source_path, mp3_path)
+        except Exception as exc:  # noqa: BLE001 - surface a useful 400
+            try:
+                os.remove(mp3_path)
+            except OSError:
+                pass
+            logger.warning(
+                'MP3 conversion failed for segment %s: %s', segment.id, exc
+            )
+            return Response(
+                {
+                    'error': (
+                        'Could not convert this segment to MP3. '
+                        'FFmpeg may be unavailable.'
+                    ),
+                    'details': str(exc),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        response = FileResponse(open(mp3_path, 'rb'), content_type='audio/mpeg')
+        response['Content-Disposition'] = (
+            f'attachment; filename="{stem}.mp3"'
+        )
+        response._resource_closers.append(
+            lambda: os.path.exists(mp3_path) and os.remove(mp3_path)
+        )
+        return response
+
     @action(detail=True, methods=['delete'], url_path='remove-audio')
     def remove_audio(self, request, pk=None):
         segment = self.get_object()

@@ -653,7 +653,9 @@ Tuned for a GTX 1660 Ti (6 GB):
 5. In the project editor, open the split-button dropdown → **Qwen — finalize
    audio**. Segments generated with Kokoro are automatically regenerated with
    Qwen, and each segment shows a Kokoro/Qwen badge.
-6. Use **Settings → TTS Engines → Unload VRAM** when you are done with Qwen.
+6. Use the segment's overflow menu to download its narration as **WAV** or
+   **MP3**; MP3 conversion uses FFmpeg.
+7. Use **Settings → TTS Engines → Unload VRAM** when you are done with Qwen.
 
 Engine choice is stored per project (default inherited from global settings),
 so a project can mix a fast draft pass with a final Qwen pass at any time.

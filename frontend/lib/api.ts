@@ -656,6 +656,18 @@ export function getDownloadUrl(projectId: string, section: Section = getCurrentS
   return `${base}/api/gallery/${projectId}/download/?section=${section}`;
 }
 
+export function getSegmentAudioDownloadUrl(
+  segmentId: string,
+  format: 'wav' | 'mp3' = 'wav',
+  section: Section = getCurrentSection()
+): string {
+  const base = api.defaults.baseURL || 'http://localhost:8765';
+  const account = getCurrentAccountId(section);
+  const params = new URLSearchParams({ audio_format: format, section });
+  if (account) params.set('account', account);
+  return `${base}/api/segments/${segmentId}/download-audio/?${params.toString()}`;
+}
+
 // ── Logos ──
 
 export async function getLogos(): Promise<Logo[]> {
