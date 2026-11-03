@@ -348,14 +348,11 @@ export default function TimelineEditorPage() {
               : 'w-72'
           )}
         >
-          {/* â”€â”€ Brand + Project header â”€â”€ */}
+          {/* ── Project header ── */}
           <div className={cn(
-            'flex items-center h-14 border-b px-3 shrink-0',
-            sidebarCollapsed ? 'justify-center' : 'gap-2.5'
+            'flex items-center h-14 border-b px-3 shrink-0 gap-2.5',
+            sidebarCollapsed && 'hidden'
           )}>
-            <Link href={`/${section}`} className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary text-primary-foreground shrink-0 hover:bg-primary/90 transition-colors">
-              <Film className="h-4 w-4" />
-            </Link>
             {!sidebarCollapsed && (
               <div className="flex-1 min-w-0">
                 {isRenaming ? (

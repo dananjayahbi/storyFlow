@@ -82,7 +82,8 @@ accounts and reloads the dashboard with the newly selected account's data.
 The header is a fixed 56 px rail. Navigation is a single horizontal row (it
 scrolls sideways on narrow screens), so no vertical scrollbar appears in the
 header. The active-page underline sits inside each link instead of overflowing
-below it.
+below it. The project editor sidebar starts directly with the project title and
+status; the StoryFlow mark is shown only once, in the shared top header.
 
 ### Per-account settings
 
