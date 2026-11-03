@@ -237,7 +237,7 @@ export function BgmLibraryPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] md:items-end">
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] md:items-start">
             <div className="space-y-2">
               <label htmlFor="bgm-file" className="text-sm font-medium">
                 Audio file
@@ -274,7 +274,7 @@ export function BgmLibraryPage() {
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:min-w-[180px]">
               <label htmlFor="bgm-shared" className="text-sm font-medium">
                 Sharing
               </label>
@@ -362,10 +362,10 @@ export function BgmLibraryPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((clip) => (
-            <Card key={clip.id} className="flex flex-col">
+            <Card key={clip.id} className="flex h-full flex-col">
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-2">
-                  <CardTitle className="min-w-0 text-base leading-snug">
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="line-clamp-2 min-h-[2.75rem] min-w-0 text-base leading-snug">
                     {clip.name}
                   </CardTitle>
                   <div className="flex shrink-0 flex-col items-end gap-1">
@@ -378,7 +378,7 @@ export function BgmLibraryPage() {
                     )}
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <div className="flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span>{formatTime(clip.duration || 0)}</span>
                   <span>{humanSize(clip.file_size)}</span>
                   {clip.original_format && (
@@ -399,23 +399,25 @@ export function BgmLibraryPage() {
                   <p className="text-xs text-muted-foreground">Audio unavailable</p>
                 )}
 
-                <div className="flex items-center gap-2">
+                <div className="mt-auto flex items-center gap-2">
                   {clip.can_edit ? (
                     <>
                       <Button
                         variant="outline"
                         size="sm"
-                        className="h-9 flex-1"
+                        className="h-9 min-w-0 flex-1"
                         onClick={() => void handleShareToggle(clip)}
                         disabled={busyId === clip.id}
                       >
-                        <Share2 className="mr-2 h-3.5 w-3.5" />
-                        {clip.is_shared ? 'Make private' : 'Share'}
+                        <Share2 className="mr-2 h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">
+                          {clip.is_shared ? 'Make private' : 'Share'}
+                        </span>
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-9 w-9"
+                        className="h-9 w-9 shrink-0"
                         title="Rename"
                         onClick={() => {
                           setRenaming(clip);
@@ -429,7 +431,7 @@ export function BgmLibraryPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-9 w-9 text-destructive hover:text-destructive"
+                            className="h-9 w-9 shrink-0 text-destructive hover:text-destructive"
                             disabled={busyId === clip.id}
                           >
                             {busyId === clip.id ? (

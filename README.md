@@ -194,10 +194,11 @@ account.
   that uploaded a track can rename, share or delete it.
 - Track names and sharing can be changed after upload; delete removes the MP3
   as well.
-- The upload grid labels every control (Audio file, Track name and Sharing) so
-  all three columns share the same baseline. Track cards align the MP3/Shared
-  badges with the title, and the player, Share button and rename/delete actions
-  all use the same 36 px control height.
+- The upload grid labels every control (Audio file, Track name and Sharing) and
+  aligns the three fields on the same top baseline, so the helper text under the
+  file input no longer pushes the other labels down. Track cards reserve two
+  title lines and keep the MP3/Shared badges, player, Share button and
+  rename/delete actions on consistent heights, including when one title wraps.
 
 Files live under `Storage/bgm/<section>/<account-id>/` and the metadata is
 stored per account in the database.
