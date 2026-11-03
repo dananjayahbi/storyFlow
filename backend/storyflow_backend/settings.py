@@ -156,6 +156,21 @@ QWEN_TTS_PYTHON = os.environ.get(
 # raise a clean OOM instead of spilling into shared GPU memory.
 QWEN_TTS_VRAM_FRACTION = os.environ.get('QWEN_TTS_VRAM_FRACTION', '0.72')
 
+# ---------------------------------------------------------------------------
+# MusicGen (GPU subprocess, reuses the Python 3.11 CUDA TTS venv)
+# ---------------------------------------------------------------------------
+# Django runs on Python 3.14/CPU; MusicGen runs in the same Python 3.11 + CUDA
+# environment used by Qwen TTS.  The model is downloaded locally from
+# https://huggingface.co/facebook/musicgen-small.
+MUSICGEN_PYTHON = os.environ.get(
+    'MUSICGEN_PYTHON',
+    str(BASE_DIR / 'qwen_tts' / '.venv' / 'Scripts' / 'python.exe'),
+)
+MUSICGEN_MODEL_DIR = os.environ.get(
+    'MUSICGEN_MODEL_DIR',
+    str(BASE_DIR.parent / 'models' / 'musicgen-small'),
+)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

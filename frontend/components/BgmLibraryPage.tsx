@@ -211,7 +211,7 @@ export function BgmLibraryPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Music className="h-6 w-6 text-primary" />
@@ -274,17 +274,22 @@ export function BgmLibraryPage() {
               />
             </div>
 
-            <div className="flex h-9 items-center gap-2">
-              <input
-                id="bgm-shared"
-                type="checkbox"
-                checked={isShared}
-                onChange={(event) => setIsShared(event.target.checked)}
-                className="h-4 w-4 accent-primary"
-              />
-              <label htmlFor="bgm-shared" className="text-sm">
-                Share with this domain
+            <div className="space-y-2">
+              <label htmlFor="bgm-shared" className="text-sm font-medium">
+                Sharing
               </label>
+              <div className="flex h-9 items-center gap-2 whitespace-nowrap">
+                <input
+                  id="bgm-shared"
+                  type="checkbox"
+                  checked={isShared}
+                  onChange={(event) => setIsShared(event.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-primary"
+                />
+                <label htmlFor="bgm-shared" className="text-sm">
+                  Share with this domain
+                </label>
+              </div>
             </div>
           </div>
 
@@ -359,8 +364,8 @@ export function BgmLibraryPage() {
           {filtered.map((clip) => (
             <Card key={clip.id} className="flex flex-col">
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-base leading-snug">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="min-w-0 text-base leading-snug">
                     {clip.name}
                   </CardTitle>
                   <div className="flex shrink-0 flex-col items-end gap-1">
@@ -394,13 +399,13 @@ export function BgmLibraryPage() {
                   <p className="text-xs text-muted-foreground">Audio unavailable</p>
                 )}
 
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   {clip.can_edit ? (
                     <>
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1"
+                        className="h-9 flex-1"
                         onClick={() => void handleShareToggle(clip)}
                         disabled={busyId === clip.id}
                       >
@@ -410,7 +415,7 @@ export function BgmLibraryPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8"
+                        className="h-9 w-9"
                         title="Rename"
                         onClick={() => {
                           setRenaming(clip);
@@ -424,7 +429,7 @@ export function BgmLibraryPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            className="h-9 w-9 text-destructive hover:text-destructive"
                             disabled={busyId === clip.id}
                           >
                             {busyId === clip.id ? (

@@ -199,6 +199,18 @@ class Project(models.Model):
         related_name='projects_using',
     )
 
+    # Background music (uploads or generated MusicGen soundtracks)
+    bgm_enabled = models.BooleanField(default=False)
+    active_bgm = models.ForeignKey(
+        'BGMClip', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='projects_using',
+    )
+    # Level of the music bed relative to the narration and the side-chain
+    # attenuation applied while the voiceover is active.
+    bgm_gain_db = models.FloatField(default=-18.0)
+    bgm_ducking_db = models.FloatField(default=-12.0)
+    bgm_crossfade_ms = models.PositiveIntegerField(default=3000)
+
     # Image upscaling (GAN)
     UPSCALE_MODEL_CHOICES = [
         ('RealESRGAN_x4plus', 'Real-ESRGAN x4 (General)'),
@@ -353,12 +365,23 @@ def bgm_upload_path(instance, filename):
     )
 
 
+BGM_SOURCE_UPLOADED = 'uploaded'
+BGM_SOURCE_GENERATED = 'generated'
+BGM_SOURCE_CHOICES = [
+    (BGM_SOURCE_UPLOADED, 'Uploaded'),
+    (BGM_SOURCE_GENERATED, 'Generated (MusicGen)'),
+]
+
+
 class BGMClip(models.Model):
     """A background-music track in the account's BGM Library.
 
     Every upload is converted to MP3 before it is stored.  Clips belong to one
     account and one workspace section; ``is_shared`` makes the clip visible to
     every account in the same section (the owner keeps edit/delete rights).
+
+    Generated clips additionally point at the project (and store the MusicGen
+    plan) that produced them so a soundtrack can be regenerated or audited.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -376,6 +399,20 @@ class BGMClip(models.Model):
     name = models.CharField(max_length=255)
     file = models.FileField(upload_to=bgm_upload_path, max_length=500)
     is_shared = models.BooleanField(default=False)
+    source = models.CharField(
+        max_length=20,
+        choices=BGM_SOURCE_CHOICES,
+        default=BGM_SOURCE_UPLOADED,
+        db_index=True,
+    )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='generated_bgm_clips',
+    )
+    generation_metadata = models.JSONField(default=dict, blank=True)
     original_name = models.CharField(max_length=255, blank=True, default='')
     original_format = models.CharField(max_length=20, blank=True, default='')
     duration = models.FloatField(null=True, blank=True)

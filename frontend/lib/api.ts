@@ -27,6 +27,9 @@ import {
   ChatSession,
   ChatCompactResponse,
   BgmClip,
+  MusicEngineStatus,
+  GenerateSoundtrackPayload,
+  GenerateSoundtrackResponse,
 } from './types';
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
@@ -563,6 +566,21 @@ export async function updateBgmClip(
 
 export async function deleteBgmClip(id: string): Promise<void> {
   await api.delete(`/api/bgm/${id}/`);
+}
+
+export async function getMusicEngineStatus(): Promise<MusicEngineStatus> {
+  const { data } = await api.get<MusicEngineStatus>('/api/bgm/engine-status/');
+  return data;
+}
+
+export async function generateBgmSoundtrack(
+  payload: GenerateSoundtrackPayload
+): Promise<GenerateSoundtrackResponse> {
+  const { data } = await api.post<GenerateSoundtrackResponse>(
+    '/api/bgm/generate/',
+    payload
+  );
+  return data;
 }
 
 // ── Gallery ──

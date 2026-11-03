@@ -17,6 +17,7 @@ interface AudioPlayerProps {
 
 export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const isSeekingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -47,41 +48,6 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
   }, [audioUrl, duration]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // ── Wire audio events ──
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const onLoadedMetadata = () => {
-      setIsLoaded(true);
-      if (Number.isFinite(audio.duration) && audio.duration > 0) {
-        setResolvedDuration(audio.duration);
-      }
-    };
-    const onEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
-    };
-    const onError = () => {
-      setHasError(true);
-      setIsPlaying(false);
-    };
-
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    audio.addEventListener('loadedmetadata', onLoadedMetadata);
-    audio.addEventListener('ended', onEnded);
-    audio.addEventListener('error', onError);
-
-    return () => {
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audio.removeEventListener('ended', onEnded);
-      audio.removeEventListener('error', onError);
-      audio.pause();
-    };
-  }, [effectiveUrl]);
-
   // ── Play / Pause toggle ──
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -99,82 +65,130 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
     }
   }, [isPlaying]);
 
-  // ── Seek via Slider ──
-  const handleSeek = useCallback((value: number[]) => {
-    const audio = audioRef.current;
-    if (!audio || !value.length) return;
-
-    const newTime = value[0];
-    audio.currentTime = newTime;
-    setCurrentTime(newTime);
+  // Radix fires onValueChange continuously while dragging. Update the visual
+  // position only; the actual media seek happens once on pointer/key commit.
+  const handleSeekPreview = useCallback((value: number[]) => {
+    if (!value.length) return;
+    isSeekingRef.current = true;
+    setCurrentTime(value[0]);
   }, []);
 
-  // ── Error state ──
-  if (hasError) {
-    return (
-      <div className={cn('flex items-center gap-2 text-sm text-destructive', className)}>
-        <AlertCircle className="h-4 w-4" />
-        <span>Audio unavailable</span>
-      </div>
-    );
-  }
+  const handleSeekCommit = useCallback((value: number[]) => {
+    const audio = audioRef.current;
+    if (!audio || !value.length) return;
+    const newTime = Math.max(0, value[0]);
+    try {
+      audio.currentTime = newTime;
+    } catch {
+      // Metadata may not be available yet; the seeked/loadedmetadata events
+      // will reconcile the display as soon as the browser is ready.
+    }
+    setCurrentTime(newTime);
+    isSeekingRef.current = false;
+  }, []);
 
-  // ── Loading state ──
-  if (!isLoaded) {
-    return (
-      <div className={cn('flex items-center gap-2', className)}>
-        {/* Hidden audio element to start loading metadata */}
-        <audio ref={audioRef} src={effectiveUrl} preload="metadata" />
-        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-        <span className="text-xs text-muted-foreground">Loading audio…</span>
-      </div>
-    );
-  }
+  // ── Media element event handlers ──
+  const handleLoadedMetadata = useCallback(() => {
+    const audio = audioRef.current;
+    setIsLoaded(true);
+    if (audio && Number.isFinite(audio.duration) && audio.duration > 0) {
+      setResolvedDuration(audio.duration);
+    }
+  }, []);
 
-  // ── Player UI ──
+  const handleTimeUpdate = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || isSeekingRef.current) return;
+    setCurrentTime(audio.currentTime);
+  }, []);
+
+  const handleSeeked = useCallback(() => {
+    const audio = audioRef.current;
+    isSeekingRef.current = false;
+    if (audio) setCurrentTime(audio.currentTime);
+  }, []);
+
+  const handleEnded = useCallback(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+  }, []);
+
+  const handleError = useCallback(() => {
+    setHasError(true);
+    setIsPlaying(false);
+  }, []);
+
   return (
     <div className={cn('flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2', className)}>
-      {/* Hidden audio element */}
-      <audio ref={audioRef} src={effectiveUrl} preload="metadata" />
+      {/* The <audio> element is always mounted so React never swaps the
+          element (and its media session) while loading or after an error. */}
+      <audio
+        ref={audioRef}
+        src={effectiveUrl}
+        preload="auto"
+        onLoadedMetadata={handleLoadedMetadata}
+        onTimeUpdate={handleTimeUpdate}
+        onSeeked={handleSeeked}
+        onEnded={handleEnded}
+        onError={handleError}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+      />
 
-      {/* Top row: play button + slider */}
-      <div className="flex items-center gap-2 w-full">
-        {/* Play / Pause button — 44×44 touch target on mobile */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-11 w-11 shrink-0 sm:h-7 sm:w-7"
-          onClick={togglePlay}
-          aria-label={isPlaying ? 'Pause' : 'Play'}
-        >
-          {isPlaying ? (
-            <Pause className="h-5 w-5 sm:h-4 sm:w-4" />
-          ) : (
-            <Play className="h-5 w-5 sm:h-4 sm:w-4" />
-          )}
-        </Button>
+      {hasError ? (
+        <div className="flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4" />
+          <span>Audio unavailable</span>
+        </div>
+      ) : !isLoaded ? (
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Loading audio…</span>
+        </div>
+      ) : (
+        <>
+          {/* Top row: play button + slider */}
+          <div className="flex items-center gap-2 w-full">
+            {/* Play / Pause button — 44×44 touch target on mobile */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-11 w-11 shrink-0 sm:h-7 sm:w-7"
+              onClick={togglePlay}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+            >
+              {isPlaying ? (
+                <Pause className="h-5 w-5 sm:h-4 sm:w-4" />
+              ) : (
+                <Play className="h-5 w-5 sm:h-4 sm:w-4" />
+              )}
+            </Button>
 
-        {/* Seek slider */}
-        <Slider
-          value={[currentTime]}
-          min={0}
-          max={resolvedDuration || 0}
-          step={0.1}
-          onValueChange={handleSeek}
-          className="flex-1 min-w-[120px]"
-          aria-label="Audio seek"
-        />
+            {/* Seek slider */}
+            <Slider
+              value={[currentTime]}
+              min={0}
+              max={resolvedDuration || 0}
+              step={0.1}
+              onValueChange={handleSeekPreview}
+              onValueCommit={handleSeekCommit}
+              className="flex-1 min-w-[120px]"
+              aria-label="Audio seek"
+            />
 
-        {/* Time display — inline on sm+ */}
-        <span className="hidden sm:inline shrink-0 text-xs tabular-nums text-muted-foreground">
-          {formatTime(currentTime)} / {formatTime(resolvedDuration)}
-        </span>
-      </div>
+            {/* Time display — inline on sm+ with a stable width so the
+                slider's right edge never shifts as digits change. */}
+            <span className="hidden sm:inline min-w-[84px] shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              {formatTime(currentTime)} / {formatTime(resolvedDuration)}
+            </span>
+          </div>
 
-      {/* Time display — stacked below on mobile */}
-      <span className="sm:hidden text-xs tabular-nums text-muted-foreground pl-13">
-        {formatTime(currentTime)} / {formatTime(resolvedDuration)}
-      </span>
+          {/* Time display — stacked below on mobile */}
+          <span className="sm:hidden text-xs tabular-nums text-muted-foreground pl-13">
+            {formatTime(currentTime)} / {formatTime(resolvedDuration)}
+          </span>
+        </>
+      )}
     </div>
   );
 }

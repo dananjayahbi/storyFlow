@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useSettingsStore, useProjectStore } from '@/lib/stores';
+import { useSettingsStore, useProjectStore, useBgmStore } from '@/lib/stores';
 import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { VoiceSelector } from '@/components/VoiceSelector';
 import { SubtitleSettingsForm } from '@/components/SubtitleSettingsForm';
 import { RenderSettingsForm } from '@/components/RenderSettingsForm';
 import { LogoWatermarkModal } from '@/components/LogoWatermarkModal';
+import { BgmGenerationProgress } from '@/components/BgmGenerationProgress';
 import {
   Settings,
   ChevronDown,
@@ -26,6 +27,9 @@ import {
   Stamp,
   Film,
   Sparkles,
+  Music,
+  Loader2,
+  Wand2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -42,11 +46,24 @@ function getInitialCollapsed(): boolean {
 }
 
 export function GlobalSettingsPanel() {
-  const { project, isLoading: isProjectLoading, updateProjectSettings } = useProjectStore();
+  const {
+    project,
+    isLoading: isProjectLoading,
+    updateProjectSettings,
+  } = useProjectStore();
   const {
     outroVideos, fetchOutroVideos, logos, fetchLogos,
     ttsEngines, fetchTtsEngines, voiceReferences, fetchVoiceReferences,
   } = useSettingsStore();
+  const {
+    clips: bgmClips,
+    engine: musicEngine,
+    generating: generatingMusic,
+    ensureLoaded: ensureBgmLoaded,
+    refreshClips: refreshBgmClips,
+    generate: generateMusic,
+    setActiveTrack,
+  } = useBgmStore();
 
   // Start expanded to keep server/client markup identical, then restore the
   // persisted choice after hydration.
@@ -61,10 +78,19 @@ export function GlobalSettingsPanel() {
   // Debounce timer ref for upscale denoise slider
   const denoiseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Debounce timers for the background-music sliders
+  const bgmGainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bgmDuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Local slider value for responsive UI (updated immediately, saved after debounce)
   const [localSpeed, setLocalSpeed] = useState<number | null>(null);
   const [localSilence, setLocalSilence] = useState<number | null>(null);
   const [localDenoise, setLocalDenoise] = useState<number | null>(null);
+  const [localBgmGain, setLocalBgmGain] = useState<number | null>(null);
+  const [localBgmDuck, setLocalBgmDuck] = useState<number | null>(null);
+
+  // Background-music library + MusicGen state lives in the shared BGM store
+  // so the timeline toolbar and this panel stay in sync.
 
   // Logo watermark modal state
   const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
@@ -76,6 +102,13 @@ export function GlobalSettingsPanel() {
     fetchTtsEngines();
     fetchVoiceReferences();
   }, [fetchOutroVideos, fetchLogos, fetchTtsEngines, fetchVoiceReferences]);
+
+  // Load the account's music library and the MusicGen runtime status. The
+  // store deduplicates this across the settings panel and the timeline
+  // toolbar, so both surfaces show the same clips and progress.
+  useEffect(() => {
+    if (project) void ensureBgmLoaded(project.id);
+  }, [project, ensureBgmLoaded]);
 
   // Derived Qwen capability info
   const qwenEngine = ttsEngines.find((e) => e.id === 'qwen');
@@ -93,6 +126,8 @@ export function GlobalSettingsPanel() {
       setLocalSpeed(project.tts_speed);
       setLocalSilence(project.inter_segment_silence);
       setLocalDenoise(project.upscale_denoise_strength);
+      setLocalBgmGain(project.bgm_gain_db ?? -18);
+      setLocalBgmDuck(project.bgm_ducking_db ?? -12);
     }
   }, [project]);
 
@@ -183,12 +218,64 @@ export function GlobalSettingsPanel() {
     [handleSettingChange]
   );
 
+  // ── Background-music level sliders with debounce ──
+  const handleBgmGainChange = useCallback(
+    (values: number[]) => {
+      const value = values[0];
+      setLocalBgmGain(value);
+      if (bgmGainTimerRef.current) clearTimeout(bgmGainTimerRef.current);
+      bgmGainTimerRef.current = setTimeout(() => {
+        handleSettingChange({ bgm_gain_db: value });
+      }, 300);
+    },
+    [handleSettingChange]
+  );
+
+  const handleBgmDuckChange = useCallback(
+    (values: number[]) => {
+      const value = values[0];
+      setLocalBgmDuck(value);
+      if (bgmDuckTimerRef.current) clearTimeout(bgmDuckTimerRef.current);
+      bgmDuckTimerRef.current = setTimeout(() => {
+        handleSettingChange({ bgm_ducking_db: value });
+      }, 300);
+    },
+    [handleSettingChange]
+  );
+
+  const handleBgmTrackChange = useCallback(
+    async (value: string) => {
+      try {
+        await setActiveTrack(value === 'none' ? null : value);
+        toast.success('Settings saved');
+      } catch {
+        toast.error('Failed to save settings');
+      }
+    },
+    [setActiveTrack]
+  );
+
+  const handleGenerateMusic = useCallback(async () => {
+    if (!project) return;
+    const result = await generateMusic(
+      project.id,
+      `${project.title} — Generated Soundtrack`
+    );
+    if (result.ok) {
+      toast.success('Soundtrack generated and attached to this project');
+    } else if (result.error) {
+      toast.error(result.error);
+    }
+  }, [project, generateMusic]);
+
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
       if (speedTimerRef.current) clearTimeout(speedTimerRef.current);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (denoiseTimerRef.current) clearTimeout(denoiseTimerRef.current);
+      if (bgmGainTimerRef.current) clearTimeout(bgmGainTimerRef.current);
+      if (bgmDuckTimerRef.current) clearTimeout(bgmDuckTimerRef.current);
     };
   }, []);
 
@@ -432,6 +519,149 @@ export function GlobalSettingsPanel() {
                 Silence gap between narration segments in the final video
               </p>
             </div>
+          </section>
+
+          <Separator />
+
+          {/* ── Background Music (uploads + MusicGen) ── */}
+          <section>
+            <div className="flex items-center gap-1.5 mb-3">
+              <Music className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex-1">
+                Background Music
+              </h3>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <span className="text-xs text-muted-foreground">
+                  {project.bgm_enabled ? 'On' : 'Off'}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={project.bgm_enabled ?? false}
+                  onChange={(e) =>
+                    handleSettingChange({ bgm_enabled: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-muted-foreground accent-primary cursor-pointer"
+                />
+              </label>
+            </div>
+
+            {project.bgm_enabled && (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">
+                    Music track
+                  </label>
+                  <Select
+                    value={project.active_bgm ?? 'none'}
+                    onValueChange={(value) => void handleBgmTrackChange(value)}
+                  >
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="Select a track…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No track selected</SelectItem>
+                      {bgmClips.map((clip) => (
+                        <SelectItem key={clip.id} value={clip.id}>
+                          {clip.name}
+                          {clip.source === 'generated' ? ' · generated' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleGenerateMusic()}
+                    disabled={generatingMusic || !musicEngine?.available}
+                    title={
+                      musicEngine?.available
+                        ? 'Generate a continuous MusicGen soundtrack from this script'
+                        : musicEngine?.reason || 'MusicGen is unavailable'
+                    }
+                  >
+                    {generatingMusic ? (
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="mr-2 h-3.5 w-3.5" />
+                    )}
+                    {generatingMusic ? 'Generating…' : 'Generate with MusicGen'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void refreshBgmClips()}
+                  >
+                    Refresh tracks
+                  </Button>
+                </div>
+
+                {generatingMusic && <BgmGenerationProgress />}
+                {musicEngine?.available && musicEngine.gpu && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {musicEngine.gpu}
+                    {musicEngine.vram_free_gb != null
+                      ? ` · ${musicEngine.vram_free_gb.toFixed(1)} GB VRAM free`
+                      : ''}
+                    {musicEngine.backend === 'transformers'
+                      ? ' · Transformers / CUDA'
+                      : ''}
+                    {musicEngine.weights_verified ? ' · weights verified' : ''}
+                  </p>
+                )}
+                {musicEngine && !musicEngine.available && (
+                  <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-700 dark:text-amber-300">
+                    {musicEngine.reason}
+                  </p>
+                )}
+
+                {/* Music level */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-muted-foreground">
+                      Music level
+                    </label>
+                    <span className="text-xs font-medium tabular-nums">
+                      {(localBgmGain ?? project.bgm_gain_db ?? -18).toFixed(0)} dB
+                    </span>
+                  </div>
+                  <Slider
+                    value={[localBgmGain ?? project.bgm_gain_db ?? -18]}
+                    min={-40}
+                    max={0}
+                    step={1}
+                    onValueChange={handleBgmGainChange}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Level of the music bed under the narration
+                  </p>
+                </div>
+
+                {/* Ducking */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-muted-foreground">
+                      Voice-over ducking
+                    </label>
+                    <span className="text-xs font-medium tabular-nums">
+                      {(localBgmDuck ?? project.bgm_ducking_db ?? -12).toFixed(0)} dB
+                    </span>
+                  </div>
+                  <Slider
+                    value={[localBgmDuck ?? project.bgm_ducking_db ?? -12]}
+                    min={-24}
+                    max={0}
+                    step={1}
+                    onValueChange={handleBgmDuckChange}
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Attenuation applied to the music while the voiceover speaks
+                  </p>
+                </div>
+              </div>
+            )}
           </section>
 
           <Separator />

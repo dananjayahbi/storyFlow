@@ -61,6 +61,11 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   logo_margin: number;
   outro_enabled: boolean;
   active_outro: string | null;
+  bgm_enabled: boolean;
+  active_bgm: string | null;
+  bgm_gain_db: number;
+  bgm_ducking_db: number;
+  bgm_crossfade_ms: number;
   upscale_enabled: boolean;
   upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
   upscale_denoise_strength: number;
@@ -243,6 +248,11 @@ export interface TaskProgress {
   total: number;
   percentage: number;
   current_segment_id?: string;
+  description?: string;
+  /** MusicGen task results. */
+  generated_clip_id?: string;
+  output_url?: string;
+  duration?: number;
 }
 
 export interface CompletedSegmentAudio {
@@ -423,6 +433,10 @@ export interface BgmClip {
   file: string;
   file_url: string;
   is_shared: boolean;
+  /** 'uploaded' or 'generated' (MusicGen). */
+  source: 'uploaded' | 'generated';
+  project: string | null;
+  generation_metadata: MusicGenerationMetadata;
   original_name: string;
   original_format: string;
   duration: number | null;
@@ -430,6 +444,72 @@ export interface BgmClip {
   can_edit: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/** Metadata stored on a MusicGen-generated BGM clip. */
+export interface MusicGenerationMetadata {
+  engine?: string;
+  model?: string;
+  generated?: boolean;
+  bpm?: number;
+  root_key?: string;
+  mode?: string;
+  anchor?: string;
+  style?: string;
+  prompts?: string[];
+  segment_count?: number;
+  total_duration?: number;
+}
+
+export interface MusicEngineStatus {
+  engine: 'musicgen';
+  backend?: 'transformers' | 'audiocraft' | 'unavailable';
+  model: string;
+  model_dir?: string | null;
+  installed: boolean;
+  torch_installed: boolean;
+  torch_version: string | null;
+  transformers_version?: string | null;
+  cuda_available: boolean;
+  device: 'cuda' | 'cpu' | null;
+  available: boolean;
+  python: string;
+  gpu?: string | null;
+  vram_total_gb?: number | null;
+  vram_free_gb?: number | null;
+  weights_verified?: boolean | null;
+  reason: string | null;
+  sample_rate: number;
+  continuation_tail_seconds: number;
+  crossfade_ms: number;
+}
+
+export interface GenerateSoundtrackPayload {
+  project?: string;
+  segments?: Array<{
+    text_content: string;
+    image_prompt?: string;
+    duration: number;
+  }>;
+  name?: string;
+  bpm?: number;
+  root_key?: string;
+  mode?: 'major' | 'minor';
+  style?: string;
+  attach?: boolean;
+}
+
+export interface GenerateSoundtrackResponse {
+  task_id: string;
+  status: TaskStatus;
+  engine: 'musicgen';
+  model: string;
+  project_id: string | null;
+  account_id: string;
+  segments: number;
+  estimated_duration: number;
+  attach_to_project: boolean;
+  message: string;
 }
 
 // ── Gallery ──

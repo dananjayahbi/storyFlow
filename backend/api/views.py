@@ -42,12 +42,14 @@ from .storage_paths import (
     section_folder,
     upgrade_legacy_project_path,
 )
+from . import music_service
 from .tasks import get_task_manager, render_task_function
 from .validators import (
     validate_image_upload, validate_project_for_render, validate_font_upload,
     validate_voice_reference_upload, validate_bgm_upload,
 )
 from core_engine import tts as tts_engine
+from core_engine import music_generator
 from core_engine.model_loader import KokoroModelLoader
 from core_engine.tts_wrapper import construct_audio_path, VALID_VOICE_IDS
 from core_engine import render_utils
@@ -1036,10 +1038,143 @@ class BGMClipViewSet(viewsets.ModelViewSet):
         if account is None:
             return BGMClip.objects.none()
         section = get_requested_section(self.request) or account.section
-        return (
+        queryset = (
             BGMClip.objects.filter(section=section)
             .filter(Q(account=account) | Q(is_shared=True))
             .select_related('account')
+        )
+        source = self.request.query_params.get('source')
+        if source in ('uploaded', 'generated'):
+            queryset = queryset.filter(source=source)
+        return queryset
+
+    @action(detail=False, methods=['get'], url_path='engine-status')
+    def engine_status(self, request):
+        """Report whether MusicGen (AudioCraft + CUDA) can run here."""
+        return Response(music_generator.engine_status())
+
+    @action(detail=False, methods=['post'], url_path='generate')
+    def generate(self, request):
+        """Start a MusicGen soundtrack job for a project or a raw script.
+
+        Body (project mode)::
+
+            {"project": "<uuid>", "name": "optional clip name"}
+
+        Body (script mode)::
+
+            {"segments": [
+                {"text_content": "...", "duration": 12.4, "image_prompt": "..."}
+            ]}
+
+        Durations must be the measured TTS durations (``segment_i.mp3``).
+        Generation is queued on the single TaskManager worker so it can never
+        overlap a TTS, image or render job on the 6 GB GPU.
+        """
+        account = get_requested_account(request)
+        if account is None:
+            return Response(
+                {'error': 'Select an account before generating music.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        section = get_requested_section(request) or account.section
+        if section != account.section:
+            return Response(
+                {'error': 'Account does not belong to this workspace section.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        project_id = request.data.get('project') or request.data.get('project_id')
+        project = None
+        if project_id:
+            project = scoped_projects(request).filter(pk=project_id).first()
+            if project is None:
+                return Response(
+                    {'error': 'Project not found.'},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            try:
+                segments = music_service.segments_from_project(project)
+            except music_generator.MusicGenerationError as exc:
+                return Response(
+                    {'error': str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            try:
+                segments = music_service.segments_from_payload(request.data)
+            except music_generator.MusicGenerationError as exc:
+                return Response(
+                    {'error': str(exc)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if any(seg.duration <= 0 for seg in segments):
+                return Response(
+                    {
+                        'error': (
+                            'Every segment needs a measured `duration` '
+                            '(seconds) before music can be generated.'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        engine = music_generator.engine_status()
+        if not engine['available']:
+            return Response(
+                {
+                    'error': engine.get('reason')
+                    or 'MusicGen is not available in this environment.',
+                    'engine': engine,
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        task_id = music_service.new_task_id('music')
+        plan_options = {
+            'bpm': request.data.get('bpm'),
+            'root_key': request.data.get('root_key') or request.data.get('key'),
+            'mode': request.data.get('mode'),
+            'style': request.data.get('style'),
+        }
+        raw_attach = request.data.get('attach', True)
+        if isinstance(raw_attach, bool):
+            attach = raw_attach
+        else:
+            attach = str(raw_attach).strip().lower() in ('1', 'true', 'on', 'yes')
+        name = str(request.data.get('name') or '').strip()
+
+        get_task_manager().submit_task(
+            lambda: music_service.generate_soundtrack_task(
+                task_id=task_id,
+                account_id=str(account.pk),
+                section=section,
+                segments=segments,
+                project_id=str(project.pk) if project else None,
+                name=name,
+                plan_options=plan_options,
+                attach_to_project=attach,
+            ),
+            task_id=task_id,
+        )
+
+        return Response(
+            {
+                'task_id': task_id,
+                'status': 'PENDING',
+                'engine': 'musicgen',
+                'model': music_generator.MUSICGEN_MODEL,
+                'project_id': str(project.pk) if project else None,
+                'account_id': str(account.pk),
+                'segments': len(segments),
+                'estimated_duration': round(
+                    sum(seg.safe_duration for seg in segments), 2
+                ),
+                'attach_to_project': attach,
+                'message': 'Music generation started.',
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
 
     def create(self, request, *args, **kwargs):

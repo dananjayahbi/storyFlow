@@ -109,6 +109,23 @@ class KokoroModelLoader:
         return str(model_dir / MODEL_FILENAME)
 
     @classmethod
+    def unload(cls) -> bool:
+        """Drop the shared ONNX session so its memory can be reclaimed.
+
+        Returns ``True`` when a resident session was released.  The next
+        :meth:`get_session` call transparently reloads it.
+        """
+        import gc
+
+        with cls._lock:
+            if cls._session is None:
+                return False
+            cls._session = None
+        gc.collect()
+        logger.info("Kokoro ONNX session unloaded.")
+        return True
+
+    @classmethod
     def is_model_available(cls):
         """
         Check whether the model file exists on disk.

@@ -252,13 +252,15 @@ class BGMClipSerializer(serializers.ModelSerializer):
         model = BGMClip
         fields = [
             'id', 'account', 'account_name', 'section', 'name', 'file',
-            'file_url', 'is_shared', 'original_name', 'original_format',
+            'file_url', 'is_shared', 'source', 'project',
+            'generation_metadata', 'original_name', 'original_format',
             'duration', 'file_size', 'can_edit', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'account', 'account_name', 'section', 'file', 'file_url',
-            'original_name', 'original_format', 'duration', 'file_size',
-            'can_edit', 'created_at', 'updated_at',
+            'source', 'project', 'generation_metadata', 'original_name',
+            'original_format', 'duration', 'file_size', 'can_edit',
+            'created_at', 'updated_at',
         ]
 
     def get_file_url(self, obj):
@@ -546,6 +548,8 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
             'logo_enabled', 'active_logo', 'logo_scale',
             'logo_position', 'logo_opacity', 'logo_margin',
             'outro_enabled', 'active_outro',
+            'bgm_enabled', 'active_bgm', 'bgm_gain_db', 'bgm_ducking_db',
+            'bgm_crossfade_ms',
             'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
         ]
         # A project cannot be moved between Facebook/YouTube or between
@@ -614,6 +618,44 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
         if value < 0.0 or value > 5.0:
             raise serializers.ValidationError(
                 'Inter-segment silence must be between 0.0 and 5.0 seconds.'
+            )
+        return value
+
+    def validate_active_bgm(self, value):
+        """Only clips from this account/section (or shared ones) may be used."""
+        if value is None:
+            return value
+        project = self.instance
+        if project is None:
+            return value
+        if value.section != project.section:
+            raise serializers.ValidationError(
+                'The selected music track belongs to a different workspace.'
+            )
+        if value.account_id != project.account_id and not value.is_shared:
+            raise serializers.ValidationError(
+                'Select a track from this account or one shared by its domain.'
+            )
+        return value
+
+    def validate_bgm_gain_db(self, value):
+        if value < -60.0 or value > 0.0:
+            raise serializers.ValidationError(
+                'Music gain must be between -60 and 0 dB.'
+            )
+        return value
+
+    def validate_bgm_ducking_db(self, value):
+        if value < -30.0 or value > 0.0:
+            raise serializers.ValidationError(
+                'Ducking must be between -30 and 0 dB.'
+            )
+        return value
+
+    def validate_bgm_crossfade_ms(self, value):
+        if value < 0 or value > 10000:
+            raise serializers.ValidationError(
+                'Music crossfade must be between 0 and 10000 milliseconds.'
             )
         return value
 

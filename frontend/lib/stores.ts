@@ -35,6 +35,9 @@ import {
   uploadVoiceReference as apiUploadVoiceReference,
   updateVoiceReference as apiUpdateVoiceReference,
   deleteVoiceReference as apiDeleteVoiceReference,
+  getBgmClips,
+  getMusicEngineStatus,
+  generateBgmSoundtrack,
 } from './api';
 import type {
   ProjectDetail,
@@ -51,6 +54,9 @@ import type {
   TtsEngineInfo,
   GenerateAudioOptions,
   GenerateAllAudioOptions,
+  BgmClip,
+  MusicEngineStatus,
+  TaskProgress,
 } from './types';
 import { type Voice, AVAILABLE_VOICES } from './constants';
 
@@ -1102,4 +1108,143 @@ export const useSettingsStore = create<SettingsStore>()((set, get) => ({
       set({ globalSettings: { ...gs, active_voice_reference: null } });
     }
   },
+}));
+
+// ── Background music (library + MusicGen generation) ─────────────────────
+
+interface BgmStore {
+  projectId: string | null;
+  clips: BgmClip[];
+  clipsLoaded: boolean;
+  engine: MusicEngineStatus | null;
+  engineLoaded: boolean;
+  generating: boolean;
+  progress: TaskProgress | null;
+  message: string | null;
+  error: string | null;
+  lastClipId: string | null;
+  ensureLoaded: (projectId: string) => Promise<void>;
+  refreshClips: () => Promise<void>;
+  refreshEngine: () => Promise<void>;
+  generate: (
+    projectId: string,
+    title: string
+  ) => Promise<{ ok: boolean; clipId?: string | null; error?: string }>;
+  setActiveTrack: (clipId: string | null) => Promise<void>;
+  reset: () => void;
+}
+
+const initialBgmState = {
+  projectId: null as string | null,
+  clips: [] as BgmClip[],
+  clipsLoaded: false,
+  engine: null as MusicEngineStatus | null,
+  engineLoaded: false,
+  generating: false,
+  progress: null as TaskProgress | null,
+  message: null as string | null,
+  error: null as string | null,
+  lastClipId: null as string | null,
+};
+
+export const useBgmStore = create<BgmStore>()((set, get) => ({
+  ...initialBgmState,
+
+  ensureLoaded: async (projectId) => {
+    if (get().projectId !== projectId) {
+      set({ ...initialBgmState, projectId });
+    }
+    const pending: Promise<void>[] = [];
+    if (!get().clipsLoaded) pending.push(get().refreshClips());
+    if (!get().engineLoaded) pending.push(get().refreshEngine());
+    await Promise.all(pending);
+  },
+
+  refreshClips: async () => {
+    try {
+      const clips = await getBgmClips();
+      set({ clips, clipsLoaded: true });
+    } catch {
+      set({ clipsLoaded: true });
+    }
+  },
+
+  refreshEngine: async () => {
+    try {
+      const engine = await getMusicEngineStatus();
+      set({ engine, engineLoaded: true });
+    } catch {
+      set({ engine: null, engineLoaded: true });
+    }
+  },
+
+  generate: async (projectId, title) => {
+    if (get().generating) {
+      return { ok: false, error: 'A soundtrack is already being generated.' };
+    }
+
+    const queued: TaskProgress = {
+      current: 0,
+      total: 0,
+      percentage: 0,
+      description: 'Queuing MusicGen…',
+    };
+    set({
+      generating: true,
+      error: null,
+      message: queued.description,
+      progress: queued,
+      lastClipId: null,
+    });
+
+    try {
+      const response = await generateBgmSoundtrack({
+        project: projectId,
+        name: title,
+      });
+      const finalStatus = await pollTaskStatus(response.task_id, (status) => {
+        set({
+          progress: status.progress,
+          message: status.progress?.description || 'Generating music…',
+        });
+      });
+
+      if (finalStatus.status === 'COMPLETED') {
+        const clipId = finalStatus.progress?.generated_clip_id ?? null;
+        set({
+          generating: false,
+          message: null,
+          error: null,
+          lastClipId: clipId,
+          progress: {
+            ...finalStatus.progress,
+            percentage: 100,
+            description: 'Soundtrack ready',
+          },
+        });
+        await get().refreshClips();
+        await useProjectStore.getState().fetchProject(projectId);
+        return { ok: true, clipId };
+      }
+
+      const detail =
+        finalStatus.errors?.[0]?.error || 'Music generation failed';
+      set({ generating: false, error: detail, message: detail });
+      return { ok: false, error: detail };
+    } catch (err) {
+      const detail =
+        (err as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error || 'Music generation failed';
+      set({ generating: false, error: detail, message: detail });
+      return { ok: false, error: detail };
+    }
+  },
+
+  setActiveTrack: async (clipId) => {
+    await useProjectStore
+      .getState()
+      .updateProjectSettings({ active_bgm: clipId });
+  },
+
+  reset: () => set({ ...initialBgmState }),
 }));

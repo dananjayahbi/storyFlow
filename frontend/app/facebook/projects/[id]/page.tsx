@@ -7,6 +7,8 @@ import { useProjectStore } from '@/lib/stores';
 import { sectionFromPathname } from '@/lib/section';
 import { Timeline } from '@/components/Timeline';
 import { GlobalSettingsPanel } from '@/components/GlobalSettingsPanel';
+import { BgmToolbarControls } from '@/components/BgmToolbarControls';
+import { BgmGenerationProgress } from '@/components/BgmGenerationProgress';
 import ImportDialog from '@/components/ImportDialog';
 import { StoryTemplateModal } from '@/components/StoryTemplateModal';
 import { Button } from '@/components/ui/button';
@@ -727,6 +729,9 @@ export default function TimelineEditorPage() {
                   </div>
                 )}
 
+                {/* Background-music generation progress (MusicGen) */}
+                {project?.bgm_enabled && <BgmGenerationProgress />}
+
                 {/* Render progress */}
                 {isRendering && (
                   <div className="space-y-1.5">
@@ -810,6 +815,12 @@ export default function TimelineEditorPage() {
                   <Button variant="ghost" size="sm" onClick={cancelGeneration} className="h-8 text-xs px-2">
                     <X className="h-3.5 w-3.5" />
                   </Button>
+                )}
+                {project?.bgm_enabled && (
+                  <>
+                    <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
+                    <BgmToolbarControls project={project} />
+                  </>
                 )}
               </div>
 

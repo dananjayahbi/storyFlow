@@ -99,6 +99,27 @@ describe('AudioPlayer', () => {
     expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
   });
 
+  it('commits keyboard seeking to the underlying audio element', () => {
+    render(<AudioPlayer audioUrl="/test.wav" duration={10} />);
+    fireAudioEvent('loadedmetadata');
+
+    const slider = screen.getByRole('slider');
+    fireEvent.keyDown(slider, { key: 'ArrowRight', keyCode: 39 });
+
+    expect(getAudioEl().currentTime).toBeGreaterThan(0);
+  });
+
+  it('syncs the displayed time after a native seek', () => {
+    render(<AudioPlayer audioUrl="/test.wav" duration={10} />);
+    fireAudioEvent('loadedmetadata');
+
+    const audio = getAudioEl();
+    audio.currentTime = 5;
+    fireAudioEvent('seeked');
+
+    expect(screen.getAllByText(/0:05/).length).toBeGreaterThanOrEqual(1);
+  });
+
   it('handles audio error events gracefully', () => {
     render(<AudioPlayer audioUrl="/bad.wav" duration={10} />);
 

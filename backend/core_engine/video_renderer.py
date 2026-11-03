@@ -724,6 +724,9 @@ def render_project(
             "Could not read logo settings: %s. Logo disabled.", logo_err,
         )
 
+    # Warnings accumulator for the result dict
+    warnings: list[str] = []
+
     # ------------------------------------------------------------------
     # C5. Read image upscale settings from Project
     # ------------------------------------------------------------------
@@ -735,8 +738,37 @@ def render_project(
         upscale_enabled, upscale_model, upscale_denoise,
     )
 
-    # Warnings accumulator for the result dict
-    warnings: list[str] = []
+    # ------------------------------------------------------------------
+    # C6. Read background-music settings (uploaded or MusicGen generated)
+    # ------------------------------------------------------------------
+    bgm_enabled = bool(getattr(project, "bgm_enabled", False))
+    bgm_gain_db = float(getattr(project, "bgm_gain_db", -18.0))
+    bgm_ducking_db = float(getattr(project, "bgm_ducking_db", -12.0))
+    bgm_path = None
+    if bgm_enabled:
+        active_bgm = getattr(project, "active_bgm", None)
+        if active_bgm is not None and active_bgm.file:
+            try:
+                candidate = active_bgm.file.path
+                if os.path.isfile(candidate):
+                    bgm_path = candidate
+                else:
+                    warnings.append(
+                        "Background music is enabled but the track file is "
+                        "missing; rendering without music."
+                    )
+            except (ValueError, NotImplementedError):
+                warnings.append(
+                    "Background music file is not accessible; rendering "
+                    "without music."
+                )
+    if bgm_enabled and not bgm_path:
+        logger.warning("BGM enabled for project %s but no playable track.", project_id)
+    logger.info(
+        "Background music: enabled=%s, file=%s, gain=%.1f dB, ducking=%.1f dB",
+        bgm_enabled, os.path.basename(bgm_path) if bgm_path else None,
+        bgm_gain_db, bgm_ducking_db,
+    )
 
     # ------------------------------------------------------------------
     # D. Query segments in order
@@ -993,6 +1025,40 @@ def render_project(
             "Audio exported to temp file: %s (%.2fs)",
             temp_audio_path, mixed_audio.duration,
         )
+
+        # --------------------------------------------------------------
+        # G2.5. Multiplex background music with voice-activated ducking
+        # --------------------------------------------------------------
+        if bgm_path:
+            if on_progress:
+                on_progress(
+                    total_segments,
+                    total_segments,
+                    "Mixing background music…",
+                )
+            try:
+                from core_engine.music_generator import mix_background_music
+
+                mix_result = mix_background_music(
+                    temp_audio_path,
+                    bgm_path,
+                    music_gain_db=bgm_gain_db,
+                    ducking_db=bgm_ducking_db,
+                )
+                logger.info(
+                    "Background music mixed (%.2fs timeline, gain %.1f dB, "
+                    "ducking %.1f dB).",
+                    mix_result["duration"], bgm_gain_db, bgm_ducking_db,
+                )
+            except Exception as bgm_err:
+                logger.warning(
+                    "Background music mixing failed: %s — continuing with "
+                    "narration only.",
+                    bgm_err,
+                )
+                warnings.append(
+                    f"Background music could not be mixed: {bgm_err}"
+                )
 
         # Close audio clips to free handles
         mixed_audio.close()
