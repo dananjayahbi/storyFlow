@@ -507,7 +507,8 @@ def fast_render_segments(
     Args:
         segment_data: List of dicts with keys: ``image_path``,
             ``audio_duration``, ``text_content``, ``sequence_index`` and
-            optional ``focus_x``/``focus_y`` (0..1 frame position).
+            optional ``focus_x``/``focus_y`` (0..1 frame position) plus
+            ``focus_area`` (normalised subject rectangle).
         output_path: Path for the output MP4 file.
         resolution: ``(width, height)`` of the output video.
         fps: Frames per second.
@@ -530,6 +531,7 @@ def fast_render_segments(
         apply_ken_burns,
         load_and_prepare_image,
         calculate_crop_dimensions,
+        calculate_focus_crop_dimensions,
         get_pan_direction,
         get_start_end_coords,
         interpolate_position,
@@ -591,10 +593,19 @@ def fast_render_segments(
             seg.get("focus_x", 0.5), seg.get("focus_y", 0.5),
         )
         src_h, src_w = source_image.shape[:2]
-        crop_w, crop_h = calculate_crop_dimensions(width, height, zoom_intensity)
+        focus_area = seg.get("focus_area")
+        if focus_area:
+            crop_w, crop_h = calculate_focus_crop_dimensions(
+                width, height, zoom_intensity, focus_area, src_w, src_h,
+            )
+        else:
+            crop_w, crop_h = calculate_crop_dimensions(
+                width, height, zoom_intensity,
+            )
         start_name, end_name = get_pan_direction(seg["sequence_index"])
         (sx, sy), (ex, ey) = get_start_end_coords(
             start_name, end_name, src_w, src_h, crop_w, crop_h,
+            focus_area=focus_area,
         )
 
         segments_info.append({

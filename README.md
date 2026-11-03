@@ -151,6 +151,14 @@ block is rendered as a static still. Changing the resolution in
 **Project → Settings → Render** immediately reshapes every segment preview so
 the editor always matches the next render.
 
+Each block also has a **focus-area** tool. After aligning the image, press the
+scan button and drag a rectangle around the subject. The rectangle is stored
+as `image_focus_area` (`{x, y, w, h}`, normalised to the frame) and the
+renderer keeps it inside the Ken Burns crop: it zooms out just enough when the
+subject is larger than the normal crop and confines the pan to the region that
+keeps the subject visible. Clear the rectangle with the focus button to return
+to the normal full-frame camera path.
+
 ---
 
 ## Script Craft & Script Library

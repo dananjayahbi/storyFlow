@@ -269,9 +269,13 @@ function SegmentCardComponent({
             frameHeight={frameHeight}
             focusX={segment.image_focus_x}
             focusY={segment.image_focus_y}
+            focusArea={segment.image_focus_area}
             onFocusChange={(id, focus) => onUpdate(id, {
               image_focus_x: focus.x,
               image_focus_y: focus.y,
+            })}
+            onFocusAreaChange={(id, area) => onUpdate(id, {
+              image_focus_area: area,
             })}
             onUpload={onUploadImage}
             onRemove={onRemoveImage}

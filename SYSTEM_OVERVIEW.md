@@ -59,7 +59,9 @@ the origin they tried and support retrying after a backend restart.
   dragged to choose which part of the source is visible. The saved focus
   (`image_focus_x` / `image_focus_y`) is used by the renderer to cover-crop the
   source before Ken Burns pans and zooms inside that frame. All seven camera
-  presets move, so the first block animates like every other block.
+  presets move, so the first block animates like every other block. A block
+  can also mark a subject rectangle (`image_focus_area`); the camera zooms out
+  enough to keep it in view and pans only inside the region around it.
 - The editor supports adding, deleting, reordering, renaming and locking blocks.
 - The left sidebar has one **Settings** panel. The old Details tab was removed;
   the Story Template JSON reference now lives on the Settings page.

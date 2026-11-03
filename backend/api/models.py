@@ -295,6 +295,10 @@ class Segment(models.Model):
     # moves the frame window across the source image.
     image_focus_x = models.FloatField(default=0.5)
     image_focus_y = models.FloatField(default=0.5)
+    # Optional rectangle (normalised x/y/w/h inside the rendered frame) that
+    # marks the subject.  Ken Burns keeps this area in view and centres the
+    # camera path around it.
+    image_focus_area = models.JSONField(null=True, blank=True, default=None)
 
     def __str__(self):
         return f"Segment {self.sequence_index} of {self.project.title}"

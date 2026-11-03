@@ -892,6 +892,7 @@ def render_project(
                 "sequence_index": segment.sequence_index,
                 "focus_x": getattr(segment, "image_focus_x", 0.5),
                 "focus_y": getattr(segment, "image_focus_y", 0.5),
+                "focus_area": getattr(segment, "image_focus_area", None),
             })
 
             if on_progress:

@@ -61,6 +61,49 @@ describe('ImageUploader', () => {
     expect(image).toHaveStyle({ objectPosition: '25% 75%' });
   });
 
+  it('shows a marked Ken Burns focus area and can clear it', () => {
+    const onFocusAreaChange = jest.fn().mockResolvedValue(undefined);
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        focusArea={{ x: 0.2, y: 0.3, w: 0.4, h: 0.2 }}
+        onFocusAreaChange={onFocusAreaChange}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    expect(screen.getByText('Ken Burns focus')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Mark Ken Burns focus area/i })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear focus area/i }));
+    expect(onFocusAreaChange).toHaveBeenCalledWith('seg-1', null);
+  });
+
+  it('exposes the focus-area marking tool', () => {
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        onFocusAreaChange={jest.fn()}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Mark Ken Burns focus area/i })
+    );
+    expect(
+      screen.getByRole('button', { name: /Cancel focus area marking/i })
+    ).toBeInTheDocument();
+  });
+
   it('drop event triggers upload callback', async () => {
     render(
       <ImageUploader

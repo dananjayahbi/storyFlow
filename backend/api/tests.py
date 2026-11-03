@@ -375,6 +375,46 @@ class TestSegmentUpdate(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertAlmostEqual(response.data['image_focus_x'], 0.5)
         self.assertAlmostEqual(response.data['image_focus_y'], 0.5)
+        self.assertIsNone(response.data['image_focus_area'])
+
+    def test_patch_image_focus_area(self):
+        area = {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4}
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_area': area},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['image_focus_area'], area)
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.image_focus_area, area)
+
+    def test_patch_image_focus_area_can_be_cleared(self):
+        self.segment.image_focus_area = {'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2}
+        self.segment.save()
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_area': None},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data['image_focus_area'])
+
+    def test_patch_image_focus_area_rejects_invalid_values(self):
+        invalid_areas = [
+            {'x': -0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+            {'x': 0.1, 'y': 0.1, 'w': 0.0, 'h': 0.2},
+            {'x': 0.9, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+            {'x': 0.1, 'y': 0.1},
+            'not-a-rectangle',
+        ]
+        for area in invalid_areas:
+            response = self.client.patch(
+                f'/api/segments/{self.segment.id}/',
+                {'image_focus_area': area},
+                format='json',
+            )
+            self.assertEqual(response.status_code, 400, area)
 
     def test_lock_segment(self):
         response = self.client.patch(
@@ -1759,6 +1799,72 @@ class KenBurnsMathTests(TestCase):
         with self.assertRaises(ValueError):
             position_to_coords("middle_left", 2496, 1404, 1476, 830)
 
+    # ------------------------------------------------------------------
+    # Focus-area tests (Feature #17)
+    # ------------------------------------------------------------------
+
+    def test_focus_area_bounds_keep_subject_inside_crop(self):
+        """The crop-position bounds always contain the marked rectangle."""
+        from core_engine.ken_burns import (
+            get_focus_area_bounds,
+            get_position_in_bounds,
+        )
+
+        # Frame 1000×1000, crop 400×400, subject at (400, 400, 200, 200).
+        bounds = get_focus_area_bounds(
+            {'x': 0.4, 'y': 0.4, 'w': 0.2, 'h': 0.2},
+            1000, 1000, 400, 400,
+        )
+        self.assertEqual(bounds, (200, 400, 200, 400))
+
+        for pos in ('top_left', 'top_right', 'bottom_left', 'bottom_right', 'center'):
+            x, y = get_position_in_bounds(pos, bounds)
+            self.assertGreaterEqual(x, bounds[0])
+            self.assertLessEqual(x, bounds[1])
+            self.assertGreaterEqual(y, bounds[2])
+            self.assertLessEqual(y, bounds[3])
+
+    def test_focus_area_bounds_collapse_when_larger_than_crop(self):
+        """A subject larger than the crop collapses to its centre."""
+        from core_engine.ken_burns import get_focus_area_bounds
+
+        bounds = get_focus_area_bounds(
+            {'x': 0.1, 'y': 0.1, 'w': 0.8, 'h': 0.8},
+            1000, 1000, 300, 300,
+        )
+        self.assertEqual(bounds[0], bounds[1])
+        self.assertEqual(bounds[2], bounds[3])
+
+    def test_focus_crop_expands_for_large_subject(self):
+        """Large focus areas zoom out just enough to include the subject."""
+        from core_engine.ken_burns import (
+            calculate_crop_dimensions,
+            calculate_focus_crop_dimensions,
+        )
+
+        base_w, base_h = calculate_crop_dimensions(1920, 1080, 1.3)
+        focus_w, focus_h = calculate_focus_crop_dimensions(
+            1920, 1080, 1.3,
+            {'x': 0.1, 'y': 0.1, 'w': 0.7, 'h': 0.7},
+            1600, 900,
+        )
+        self.assertGreaterEqual(focus_w, base_w)
+        self.assertGreaterEqual(focus_h, base_h)
+        self.assertLessEqual(focus_w, 1600)
+        self.assertLessEqual(focus_h, 900)
+
+    def test_focus_start_end_coords_stay_inside_subject(self):
+        """Start/end crop positions follow the focus area, not the frame."""
+        from core_engine.ken_burns import get_start_end_coords
+
+        (sx, sy), (ex, ey) = get_start_end_coords(
+            'top_left', 'bottom_right',
+            1000, 1000, 400, 400,
+            focus_area={'x': 0.4, 'y': 0.4, 'w': 0.2, 'h': 0.2},
+        )
+        self.assertEqual((sx, sy), (200, 200))
+        self.assertEqual((ex, ey), (400, 400))
+
 
 # ===================================================================
 # Ken Burns Integration Tests (Task 04.02.12)
@@ -2132,6 +2238,27 @@ class KenBurnsIntegrationTests(TestCase):
         )
         h, w = frame.shape[:2]
         self.assertAlmostEqual(w / h, 16 / 9, places=2)
+
+    def test_apply_ken_burns_with_focus_area(self):
+        """A marked subject area produces a valid animated clip."""
+        from core_engine.ken_burns import apply_ken_burns
+
+        clip = apply_ken_burns(
+            image_path=self.image_paths[0],
+            duration=1.0,
+            resolution=(640, 360),
+            zoom_intensity=1.3,
+            fps=24,
+            segment_index=0,
+            focus_area={'x': 0.4, 'y': 0.35, 'w': 0.25, 'h': 0.3},
+        )
+        try:
+            start = self._get_frame(clip, 0.0)
+            end = self._get_frame(clip, 1.0)
+            self.assertEqual(start.shape, (360, 640, 3))
+            self.assertFalse(np.array_equal(start, end))
+        finally:
+            clip.close()
 
     # ------------------------------------------------------------------
     # Full Render Pipeline Tests

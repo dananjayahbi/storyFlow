@@ -163,7 +163,7 @@ class SegmentSerializer(serializers.ModelSerializer):
             'id', 'project', 'sequence_index', 'text_content',
             'image_prompt', 'image_file', 'audio_file',
             'audio_duration', 'audio_engine', 'is_locked',
-            'image_focus_x', 'image_focus_y',
+            'image_focus_x', 'image_focus_y', 'image_focus_area',
         ]
         read_only_fields = [
             'id', 'project', 'sequence_index',
@@ -183,6 +183,41 @@ class SegmentSerializer(serializers.ModelSerializer):
                 'Image focus Y must be between 0.0 and 1.0.'
             )
         return value
+
+    def validate_image_focus_area(self, value):
+        """Validate the optional Ken Burns focus rectangle.
+
+        Coordinates are normalised to the visible render frame:
+        ``{"x": 0..1, "y": 0..1, "w": 0..1, "h": 0..1}``.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                'Image focus area must be an object with x, y, w and h.'
+            )
+        try:
+            x = float(value['x'])
+            y = float(value['y'])
+            w = float(value['w'])
+            h = float(value['h'])
+        except (KeyError, TypeError, ValueError):
+            raise serializers.ValidationError(
+                'Image focus area needs numeric x, y, w and h values.'
+            )
+        if not all(0.0 <= number <= 1.0 for number in (x, y, w, h)):
+            raise serializers.ValidationError(
+                'Image focus area values must be between 0.0 and 1.0.'
+            )
+        if w <= 0.0 or h <= 0.0:
+            raise serializers.ValidationError(
+                'Image focus area width and height must be greater than zero.'
+            )
+        if x + w > 1.001 or y + h > 1.001:
+            raise serializers.ValidationError(
+                'Image focus area must stay inside the render frame.'
+            )
+        return {'x': x, 'y': y, 'w': w, 'h': h}
 
 
 class VoiceReferenceSerializer(serializers.ModelSerializer):

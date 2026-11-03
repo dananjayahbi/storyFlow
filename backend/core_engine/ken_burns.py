@@ -429,6 +429,80 @@ def position_to_coords(
     return (x, y)
 
 
+def get_focus_area_bounds(
+    focus_area: dict,
+    source_width: int,
+    source_height: int,
+    crop_width: int,
+    crop_height: int,
+) -> Tuple[int, int, int, int]:
+    """Translate a normalised focus rectangle into crop-position bounds.
+
+    The returned ``(min_x, max_x, min_y, max_y)`` describe every top-left
+    crop position that still keeps the marked subject inside the crop.
+    When the rectangle is larger than the crop (for example a focus area
+    that fills most of the frame), the bounds collapse to its centre.
+
+    Args:
+        focus_area: ``{"x", "y", "w", "h"}`` normalised to the frame.
+        source_width: Width of the prepared frame in pixels.
+        source_height: Height of the prepared frame in pixels.
+        crop_width: Width of the Ken Burns crop box in pixels.
+        crop_height: Height of the Ken Burns crop box in pixels.
+
+    Returns:
+        ``(min_x, max_x, min_y, max_y)`` as non-negative integers.
+    """
+    fx = int(round(float(focus_area['x']) * source_width))
+    fy = int(round(float(focus_area['y']) * source_height))
+    fw = max(1, int(round(float(focus_area['w']) * source_width)))
+    fh = max(1, int(round(float(focus_area['h']) * source_height)))
+
+    # Clamp a rectangle that slightly overflows after rounding.
+    fx = max(0, min(fx, source_width - 1))
+    fy = max(0, min(fy, source_height - 1))
+    fw = max(1, min(fw, source_width - fx))
+    fh = max(1, min(fh, source_height - fy))
+
+    # To keep the focus rectangle inside the crop:
+    #   crop_left <= fx                 → left <= fx
+    #   crop_left >= fx + fw - crop_w   → left >= fx + fw - crop_w
+    min_x = max(0, fx + fw - crop_width)
+    max_x = min(source_width - crop_width, fx)
+    min_y = max(0, fy + fh - crop_height)
+    max_y = min(source_height - crop_height, fy)
+
+    if min_x > max_x:
+        centre = fx + fw // 2 - crop_width // 2
+        min_x = max_x = max(0, min(centre, source_width - crop_width))
+    if min_y > max_y:
+        centre = fy + fh // 2 - crop_height // 2
+        min_y = max_y = max(0, min(centre, source_height - crop_height))
+
+    return (min_x, max_x, min_y, max_y)
+
+
+def get_position_in_bounds(
+    position: str,
+    bounds: Tuple[int, int, int, int],
+) -> Tuple[int, int]:
+    """Map a direction position name inside focus-area crop bounds."""
+    min_x, max_x, min_y, max_y = bounds
+    mapping = {
+        'top_left': (min_x, min_y),
+        'top_right': (max_x, min_y),
+        'bottom_left': (min_x, max_y),
+        'bottom_right': (max_x, max_y),
+        'center': ((min_x + max_x) // 2, (min_y + max_y) // 2),
+    }
+    if position not in mapping:
+        valid = ', '.join(sorted(mapping.keys()))
+        raise ValueError(
+            f"Unknown position name '{position}'. Valid names are: {valid}"
+        )
+    return mapping[position]
+
+
 def get_start_end_coords(
     start_name: str,
     end_name: str,
@@ -436,6 +510,7 @@ def get_start_end_coords(
     source_height: int,
     crop_width: int,
     crop_height: int,
+    focus_area: dict | None = None,
 ) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     """Compute start and end crop-box positions for the Ken Burns pan.
 
@@ -451,6 +526,9 @@ def get_start_end_coords(
         source_height: Height of the prepared source image in pixels.
         crop_width: Width of the crop box in pixels.
         crop_height: Height of the crop box in pixels.
+        focus_area: Optional normalised subject rectangle.  When supplied,
+            the pan happens inside the region that keeps the subject
+            visible instead of across the whole frame.
 
     Returns:
         ``((start_x, start_y), (end_x, end_y))`` — top-left corner of
@@ -459,6 +537,16 @@ def get_start_end_coords(
     Raises:
         ValueError: If either position name is not recognised.
     """
+    if focus_area:
+        bounds = get_focus_area_bounds(
+            focus_area, source_width, source_height,
+            crop_width, crop_height,
+        )
+        return (
+            get_position_in_bounds(start_name, bounds),
+            get_position_in_bounds(end_name, bounds),
+        )
+
     start = position_to_coords(
         start_name, source_width, source_height, crop_width, crop_height
     )
@@ -466,6 +554,50 @@ def get_start_end_coords(
         end_name, source_width, source_height, crop_width, crop_height
     )
     return (start, end)
+
+
+def calculate_focus_crop_dimensions(
+    output_width: int,
+    output_height: int,
+    zoom_intensity: float,
+    focus_area: dict,
+    source_width: int,
+    source_height: int,
+) -> Tuple[int, int]:
+    """Grow the crop box just enough to keep the marked subject in view.
+
+    The base crop is the normal zoom crop.  If the focus rectangle is
+    larger than that crop, the box is scaled up (zooming out) with a small
+    padding until it contains the subject, then capped at the prepared
+    frame size.
+    """
+    base_crop_w, base_crop_h = calculate_crop_dimensions(
+        output_width, output_height, zoom_intensity
+    )
+    if not focus_area:
+        return base_crop_w, base_crop_h
+
+    padding = 1.1
+    needed_scale = max(
+        (float(focus_area['w']) * output_width) / base_crop_w,
+        (float(focus_area['h']) * output_height) / base_crop_h,
+        1.0,
+    ) * padding
+    max_scale = min(
+        source_width / base_crop_w,
+        source_height / base_crop_h,
+    )
+    scale = min(needed_scale, max_scale)
+
+    crop_w = max(1, min(source_width, int(round(base_crop_w * scale))))
+    crop_h = max(1, min(source_height, int(round(base_crop_h * scale))))
+    logger.debug(
+        "calculate_focus_crop_dimensions: base %dx%d → focus %dx%d "
+        "(scale %.2f, focus %.2f×%.2f)",
+        base_crop_w, base_crop_h, crop_w, crop_h, scale,
+        focus_area['w'], focus_area['h'],
+    )
+    return crop_w, crop_h
 
 
 def interpolate_position(
@@ -534,6 +666,7 @@ def apply_ken_burns(
     segment_index: int = 0,
     focus_x: float = 0.5,
     focus_y: float = 0.5,
+    focus_area: dict | None = None,
 ) -> VideoClip:
     """Apply the Ken Burns (zoom-and-pan) effect to a still image.
 
@@ -569,6 +702,10 @@ def apply_ken_burns(
             source image (0..1).  Defaults to centred.
         focus_y: Vertical position of the render frame inside the source
             image (0..1).  Defaults to centred.
+        focus_area: Optional ``{"x", "y", "w", "h"}`` subject rectangle
+            normalised to the prepared frame.  The crop zooms out if
+            needed and pans only inside the region that keeps the subject
+            visible.
 
     Returns:
         A MoviePy :class:`VideoClip` with the specified duration and FPS,
@@ -604,8 +741,9 @@ def apply_ken_burns(
     # ------------------------------------------------------------------
     # 2. Calculate crop dimensions
     # ------------------------------------------------------------------
-    crop_width, crop_height = calculate_crop_dimensions(
-        output_width, output_height, zoom_intensity
+    crop_width, crop_height = calculate_focus_crop_dimensions(
+        output_width, output_height, zoom_intensity, focus_area,
+        source_width, source_height,
     )
     logger.debug(
         "  Crop dimensions: %dx%d", crop_width, crop_height
@@ -629,6 +767,7 @@ def apply_ken_burns(
         source_height,
         crop_width,
         crop_height,
+        focus_area=focus_area,
     )
     logger.debug(
         "  Start coords: (%d, %d), End coords: (%d, %d)",

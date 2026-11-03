@@ -73,6 +73,14 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   upscale_denoise_strength: number;
 }
 
+/** Normalised rectangle inside the rendered image frame (0..1). */
+export interface ImageFocusArea {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface Segment {
   id: string;
   project: string;
@@ -89,6 +97,8 @@ export interface Segment {
   image_focus_x?: number;
   /** Normalised vertical frame position inside the image (0..1). */
   image_focus_y?: number;
+  /** Optional subject rectangle used to centre the Ken Burns camera. */
+  image_focus_area?: ImageFocusArea | null;
 }
 
 export interface GlobalSettings {
@@ -205,6 +215,7 @@ export interface UpdateSegmentPayload {
   is_locked?: boolean;
   image_focus_x?: number;
   image_focus_y?: number;
+  image_focus_area?: ImageFocusArea | null;
 }
 
 export interface ReorderPayload {
