@@ -34,7 +34,31 @@ describe('ImageUploader', () => {
         onRemove={mockRemove}
       />
     );
-    expect(screen.getByAltText('Segment image')).toBeInTheDocument();
+    expect(
+      screen.getByAltText('Segment image cropped to the render frame')
+    ).toBeInTheDocument();
+  });
+
+  it('uses the project aspect ratio and persisted focus for the frame', () => {
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        frameWidth={1080}
+        frameHeight={1920}
+        focusX={0.25}
+        focusY={0.75}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    const frame = screen.getByLabelText(/Render frame 1080×1920/);
+    expect(frame).toHaveStyle({ aspectRatio: '1080 / 1920' });
+
+    const image = screen.getByAltText('Segment image cropped to the render frame');
+    expect(image).toHaveStyle({ objectPosition: '25% 75%' });
   });
 
   it('drop event triggers upload callback', async () => {

@@ -332,6 +332,40 @@ class TestSegmentUpdate(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['image_prompt'], 'New prompt')
 
+    def test_patch_image_focus(self):
+        """The editor's frame position is persisted per segment."""
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_x': 0.2, 'image_focus_y': 0.8},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertAlmostEqual(response.data['image_focus_x'], 0.2)
+        self.assertAlmostEqual(response.data['image_focus_y'], 0.8)
+        self.segment.refresh_from_db()
+        self.assertAlmostEqual(self.segment.image_focus_x, 0.2)
+        self.assertAlmostEqual(self.segment.image_focus_y, 0.8)
+
+    def test_patch_image_focus_rejects_out_of_range(self):
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_x': 1.5},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_y': -0.1},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_image_focus_defaults_to_centered(self):
+        response = self.client.get(f'/api/segments/{self.segment.id}/')
+        self.assertEqual(response.status_code, 200)
+        self.assertAlmostEqual(response.data['image_focus_x'], 0.5)
+        self.assertAlmostEqual(response.data['image_focus_y'], 0.5)
+
     def test_lock_segment(self):
         response = self.client.patch(
             f'/api/segments/{self.segment.id}/',
@@ -2016,6 +2050,67 @@ class KenBurnsIntegrationTests(TestCase):
             self.assertEqual(frame.dtype, np.uint8)
         finally:
             clip.close()
+
+    # ------------------------------------------------------------------
+    # Aspect-ratio frame / focus crop tests (Issue #21)
+    # ------------------------------------------------------------------
+
+    def _make_wide_split_image(self):
+        """1600×450 image: left half red, right half blue."""
+        img = PILImage.new("RGB", (1600, 450), color=(255, 0, 0))
+        for y_px in range(450):
+            for x_px in range(800, 1600):
+                img.putpixel((x_px, y_px), (0, 0, 255))
+        path = os.path.join(self.temp_dir, "wide_split.png")
+        img.save(path)
+        return path
+
+    def test_load_prepare_focus_selects_horizontal_frame(self):
+        """focus_x=0 keeps the left side; focus_x=1 keeps the right side."""
+        from core_engine.ken_burns import load_and_prepare_image
+
+        path = self._make_wide_split_image()
+        left = load_and_prepare_image(
+            path, (640, 360), 1.3, focus_x=0.0, focus_y=0.5,
+        )
+        right = load_and_prepare_image(
+            path, (640, 360), 1.3, focus_x=1.0, focus_y=0.5,
+        )
+
+        # Both frames must have the render aspect ratio (16:9).
+        for frame in (left, right):
+            h, w = frame.shape[:2]
+            self.assertAlmostEqual(w / h, 16 / 9, places=2)
+
+        # The visible frame is entirely inside one half of the source.
+        self.assertGreater(int(left[:, :, 0].mean()), 200)
+        self.assertLess(int(left[:, :, 2].mean()), 50)
+        self.assertGreater(int(right[:, :, 2].mean()), 200)
+        self.assertLess(int(right[:, :, 0].mean()), 50)
+
+    def test_load_prepare_portrait_frame_from_wide_image(self):
+        """A 16:9 source cropped to a 3:4 frame has the frame aspect ratio."""
+        from core_engine.ken_burns import load_and_prepare_image
+
+        path = self._make_wide_split_image()
+        frame = load_and_prepare_image(
+            path, (480, 640), 1.3, focus_x=0.5, focus_y=0.5,
+        )
+        h, w = frame.shape[:2]
+        self.assertAlmostEqual(w / h, 3 / 4, places=2)
+        self.assertGreater(w, 0)
+        self.assertGreater(h, 0)
+
+    def test_load_prepare_focus_clamps_to_image(self):
+        """Out-of-range focus values are clamped instead of crashing."""
+        from core_engine.ken_burns import load_and_prepare_image
+
+        path = self._make_wide_split_image()
+        frame = load_and_prepare_image(
+            path, (640, 360), 1.3, focus_x=-5.0, focus_y=5.0,
+        )
+        h, w = frame.shape[:2]
+        self.assertAlmostEqual(w / h, 16 / 9, places=2)
 
     # ------------------------------------------------------------------
     # Full Render Pipeline Tests

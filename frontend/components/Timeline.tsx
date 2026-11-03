@@ -9,6 +9,10 @@ import { FileText, Plus } from 'lucide-react';
 
 interface TimelineProps {
   segments: Segment[];
+  /** Render frame width in pixels (project resolution). */
+  frameWidth?: number;
+  /** Render frame height in pixels (project resolution). */
+  frameHeight?: number;
   onAddSegment?: () => Promise<void>;
   onUpdateSegment: (id: string, data: UpdateSegmentPayload) => Promise<void>;
   onDeleteSegment: (id: string) => Promise<void>;
@@ -17,7 +21,8 @@ interface TimelineProps {
 }
 
 export function Timeline({
-  segments, onAddSegment, onUpdateSegment, onDeleteSegment, onUploadImage, onRemoveImage,
+  segments, frameWidth = 1920, frameHeight = 1080,
+  onAddSegment, onUpdateSegment, onDeleteSegment, onUploadImage, onRemoveImage,
 }: TimelineProps) {
   if (segments.length === 0) {
     return (
@@ -38,6 +43,8 @@ export function Timeline({
           <SegmentCard
             key={segment.id}
             segment={segment}
+            frameWidth={frameWidth}
+            frameHeight={frameHeight}
             onUpdate={onUpdateSegment}
             onDelete={onDeleteSegment}
             onUploadImage={onUploadImage}

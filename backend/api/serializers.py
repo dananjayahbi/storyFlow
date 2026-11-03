@@ -163,11 +163,26 @@ class SegmentSerializer(serializers.ModelSerializer):
             'id', 'project', 'sequence_index', 'text_content',
             'image_prompt', 'image_file', 'audio_file',
             'audio_duration', 'audio_engine', 'is_locked',
+            'image_focus_x', 'image_focus_y',
         ]
         read_only_fields = [
             'id', 'project', 'sequence_index',
             'image_file', 'audio_file', 'audio_duration', 'audio_engine',
         ]
+
+    def validate_image_focus_x(self, value):
+        if value is None or not 0.0 <= value <= 1.0:
+            raise serializers.ValidationError(
+                'Image focus X must be between 0.0 and 1.0.'
+            )
+        return value
+
+    def validate_image_focus_y(self, value):
+        if value is None or not 0.0 <= value <= 1.0:
+            raise serializers.ValidationError(
+                'Image focus Y must be between 0.0 and 1.0.'
+            )
+        return value
 
 
 class VoiceReferenceSerializer(serializers.ModelSerializer):

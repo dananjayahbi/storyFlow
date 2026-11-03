@@ -290,6 +290,11 @@ class Segment(models.Model):
     # can show whether a segment is still on the fast draft voice.
     audio_engine = models.CharField(max_length=20, blank=True, default='')
     is_locked = models.BooleanField(default=False)
+    # Normalised (0..1) position of the image inside the render frame.
+    # 0.5/0.5 is the centred cover crop; dragging the image in the editor
+    # moves the frame window across the source image.
+    image_focus_x = models.FloatField(default=0.5)
+    image_focus_y = models.FloatField(default=0.5)
 
     def __str__(self):
         return f"Segment {self.sequence_index} of {self.project.title}"

@@ -33,6 +33,10 @@ const TEXT_TRUNCATION_THRESHOLD = 150;
 
 interface SegmentCardProps {
   segment: Segment;
+  /** Render frame width in pixels (project resolution). */
+  frameWidth?: number;
+  /** Render frame height in pixels (project resolution). */
+  frameHeight?: number;
   onUpdate: (id: string, data: UpdateSegmentPayload) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onUploadImage: (id: string, file: File) => Promise<void>;
@@ -40,7 +44,8 @@ interface SegmentCardProps {
 }
 
 function SegmentCardComponent({
-  segment, onUpdate, onDelete, onUploadImage, onRemoveImage,
+  segment, frameWidth, frameHeight,
+  onUpdate, onDelete, onUploadImage, onRemoveImage,
 }: SegmentCardProps) {
   // Granular selector: only re-renders when THIS segment's audio status changes,
   // not when other segments' statuses update in the audioGenerationStatus map.
@@ -260,6 +265,14 @@ function SegmentCardComponent({
             segmentId={segment.id}
             currentImage={segment.image_file}
             isLocked={segment.is_locked || isGenerating}
+            frameWidth={frameWidth}
+            frameHeight={frameHeight}
+            focusX={segment.image_focus_x}
+            focusY={segment.image_focus_y}
+            onFocusChange={(id, focus) => onUpdate(id, {
+              image_focus_x: focus.x,
+              image_focus_y: focus.y,
+            })}
             onUpload={onUploadImage}
             onRemove={onRemoveImage}
           />

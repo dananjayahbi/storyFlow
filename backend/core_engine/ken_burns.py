@@ -75,23 +75,29 @@ def load_and_prepare_image(
     image_path: str,
     resolution: Tuple[int, int],
     zoom_intensity: float,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
 ) -> np.ndarray:
     """Load a source image and prepare it for Ken Burns animation.
 
-    The source image must be at least ``resolution × zoom_intensity``
-    pixels in each dimension to provide sufficient "zoom headroom" —
-    enough room for the crop box to pan across all five defined
-    positions (corners and center) without leaving the image bounds.
+    The source is first **cover-cropped to the render aspect ratio** with
+    ``object-fit: cover`` semantics.  ``focus_x``/``focus_y`` select where
+    the frame window sits inside the source image (``0.5`` = centred), so
+    the frame shown in the editor is exactly the region the renderer uses.
+    Everything outside that frame is discarded before Ken Burns runs.
 
-    If the source image is smaller than the minimum, it is upscaled
-    uniformly using LANCZOS resampling.  If it is significantly larger
-    than the minimum (> 1.5× in both dimensions), it is center-cropped
-    to limit memory usage during frame generation.
+    The cropped frame must be at least ``resolution × zoom_intensity``
+    pixels in each dimension to provide sufficient "zoom headroom".  If it
+    is smaller it is upscaled uniformly with LANCZOS resampling; if it is
+    significantly larger (> 1.5× the minimum) it is downscaled to the
+    minimum to limit memory usage during frame generation.
 
     Args:
         image_path: Absolute path to the source cover image.
         resolution: Target output ``(width, height)``.
         zoom_intensity: Zoom factor (≥ 1.0).
+        focus_x: Horizontal frame position inside the source (0..1).
+        focus_y: Vertical frame position inside the source (0..1).
 
     Returns:
         NumPy array of shape ``(H, W, 3)`` with dtype ``uint8``
@@ -123,7 +129,46 @@ def load_and_prepare_image(
     )
 
     # ------------------------------------------------------------------
-    # Step 3: Calculate minimum required dimensions
+    # Step 3: Cover-crop the source to the render aspect ratio
+    # ------------------------------------------------------------------
+    # This is the same geometry as CSS ``object-fit: cover``.  The focus
+    # values are ``object-position`` percentages: 0.0 aligns the frame
+    # with the left/top edge and 1.0 with the right/bottom edge.  Only
+    # the region inside the frame is kept, so Ken Burns can never reveal
+    # the parts of the image that are outside the editor's crop frame.
+    target_aspect = output_width / output_height
+    source_aspect = src_w / src_h
+    focus_x = min(1.0, max(0.0, float(focus_x)))
+    focus_y = min(1.0, max(0.0, float(focus_y)))
+
+    if source_aspect > target_aspect:
+        # Source is wider than the frame: trim left/right.
+        frame_h = src_h
+        frame_w = max(1, int(round(src_h * target_aspect)))
+        max_offset_x = src_w - frame_w
+        offset_x = int(round(focus_x * max_offset_x))
+        img = img[:, offset_x : offset_x + frame_w]
+        logger.debug(
+            "  Cover-cropped horizontally: %dx%d → %dx%d (focus %.2f)",
+            src_w, src_h, frame_w, frame_h, focus_x,
+        )
+    else:
+        # Source is taller than (or equal to) the frame: trim top/bottom.
+        frame_w = src_w
+        frame_h = max(1, int(round(src_w / target_aspect)))
+        max_offset_y = src_h - frame_h
+        offset_y = int(round(focus_y * max_offset_y))
+        img = img[offset_y : offset_y + frame_h, :]
+        logger.debug(
+            "  Cover-cropped vertically: %dx%d → %dx%d (focus %.2f)",
+            src_w, src_h, frame_w, frame_h, focus_y,
+        )
+
+    img = np.ascontiguousarray(img)
+    src_h, src_w = img.shape[:2]
+
+    # ------------------------------------------------------------------
+    # Step 4: Calculate minimum required dimensions
     # ------------------------------------------------------------------
     min_w = int(output_width * zoom_intensity)
     min_h = int(output_height * zoom_intensity)
@@ -133,18 +178,15 @@ def load_and_prepare_image(
     )
 
     # ------------------------------------------------------------------
-    # Step 4 & 5: Upscale if necessary
+    # Step 5: Upscale if necessary
     # ------------------------------------------------------------------
     if src_w < min_w or src_h < min_h:
-        scale_x = min_w / src_w
-        scale_y = min_h / src_h
-        scale = max(scale_x, scale_y)
-
-        new_w = int(src_w * scale)
-        new_h = int(src_h * scale)
+        scale = max(min_w / src_w, min_h / src_h)
+        new_w = max(min_w, int(round(src_w * scale)))
+        new_h = max(min_h, int(round(src_h * scale)))
 
         logger.info(
-            "  Upscaling image from %dx%d to %dx%d "
+            "  Upscaling frame from %dx%d to %dx%d "
             "(minimum required: %dx%d, scale factor: %.2f)",
             src_w, src_h, new_w, new_h, min_w, min_h, scale,
         )
@@ -154,21 +196,18 @@ def load_and_prepare_image(
         src_h, src_w = img.shape[:2]
 
     # ------------------------------------------------------------------
-    # Step 6: Cover-crop to limit memory usage
+    # Step 6: Downscale oversized frames to limit memory usage
     # ------------------------------------------------------------------
-    # Only crop if the image is significantly larger than the minimum
-    # (more than 1.5× in both axes).  Moderately larger images are
-    # kept at full size for slightly better crop quality.
-    if src_w > min_w * 1.5 and src_h > min_h * 1.5:
-        offset_x = (src_w - min_w) // 2
-        offset_y = (src_h - min_h) // 2
-        img = img[
-            offset_y : offset_y + min_h,
-            offset_x : offset_x + min_w,
-        ].copy()
+    # Moderately larger frames are kept at full size for slightly better
+    # crop quality; anything above 1.5× the minimum is resized down.
+    if src_w > min_w * 1.5 or src_h > min_h * 1.5:
+        img = cv2.resize(
+            img, (min_w, min_h), interpolation=cv2.INTER_AREA,
+        )
+        src_h, src_w = img.shape[:2]
         logger.debug(
-            "  Center-cropped from %dx%d to %dx%d (memory optimisation)",
-            src_w, src_h, min_w, min_h,
+            "  Downscaled oversized frame to %dx%d (memory optimisation)",
+            src_w, src_h,
         )
 
     # ------------------------------------------------------------------
@@ -177,7 +216,7 @@ def load_and_prepare_image(
     final_h, final_w = img.shape[:2]
     if final_w == min_w and final_h == min_h:
         logger.debug(
-            "  Image exactly matches minimum size — "
+            "  Frame exactly matches minimum size — "
             "zero pan range in both axes (zoom-only)."
         )
 
@@ -491,6 +530,8 @@ def apply_ken_burns(
     zoom_intensity: float = 1.3,
     fps: int = 30,
     segment_index: int = 0,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
 ) -> VideoClip:
     """Apply the Ken Burns (zoom-and-pan) effect to a still image.
 
@@ -522,6 +563,10 @@ def apply_ken_burns(
         segment_index: Zero-based index of this segment within the
             project, used to deterministically select the pan direction.
             Defaults to ``0``.
+        focus_x: Horizontal position of the render frame inside the
+            source image (0..1).  Defaults to centred.
+        focus_y: Vertical position of the render frame inside the source
+            image (0..1).  Defaults to centred.
 
     Returns:
         A MoviePy :class:`VideoClip` with the specified duration and FPS,
@@ -546,7 +591,9 @@ def apply_ken_burns(
     # ------------------------------------------------------------------
     # 1. Load and prepare the source image
     # ------------------------------------------------------------------
-    source_image = load_and_prepare_image(image_path, resolution, zoom_intensity)
+    source_image = load_and_prepare_image(
+        image_path, resolution, zoom_intensity, focus_x, focus_y,
+    )
     source_height, source_width = source_image.shape[:2]
     logger.debug(
         "  Source image prepared: %dx%d", source_width, source_height

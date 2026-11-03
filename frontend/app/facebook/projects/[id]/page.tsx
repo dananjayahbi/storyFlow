@@ -493,6 +493,8 @@ export default function TimelineEditorPage() {
           <main className="flex-1 overflow-auto">
             <Timeline
               segments={segments}
+              frameWidth={project.resolution_width}
+              frameHeight={project.resolution_height}
               onAddSegment={async () => { await addSegment(); }}
               onUpdateSegment={updateSegment}
               onDeleteSegment={deleteSegment}

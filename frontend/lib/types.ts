@@ -85,6 +85,10 @@ export interface Segment {
   /** Which engine produced the current audio ('kokoro' | 'qwen' | ''). */
   audio_engine?: 'kokoro' | 'qwen' | '';
   is_locked: boolean;
+  /** Normalised horizontal frame position inside the image (0..1). */
+  image_focus_x?: number;
+  /** Normalised vertical frame position inside the image (0..1). */
+  image_focus_y?: number;
 }
 
 export interface GlobalSettings {
@@ -199,6 +203,8 @@ export interface UpdateSegmentPayload {
   text_content?: string;
   image_prompt?: string;
   is_locked?: boolean;
+  image_focus_x?: number;
+  image_focus_y?: number;
 }
 
 export interface ReorderPayload {

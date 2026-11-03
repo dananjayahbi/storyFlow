@@ -506,7 +506,8 @@ def fast_render_segments(
 
     Args:
         segment_data: List of dicts with keys: ``image_path``,
-            ``audio_duration``, ``text_content``, ``sequence_index``.
+            ``audio_duration``, ``text_content``, ``sequence_index`` and
+            optional ``focus_x``/``focus_y`` (0..1 frame position).
         output_path: Path for the output MP4 file.
         resolution: ``(width, height)`` of the output video.
         fps: Frames per second.
@@ -582,9 +583,12 @@ def fast_render_segments(
                 y_position=subtitle_settings.get("y_position"),
             )
 
-        # Prepare Ken Burns frame generator
+        # Prepare Ken Burns frame generator.  The source is cover-cropped
+        # to the render aspect ratio at the user-selected focus first, so
+        # Ken Burns only pans inside the frame visible in the editor.
         source_image = load_and_prepare_image(
             seg["image_path"], resolution, zoom_intensity,
+            seg.get("focus_x", 0.5), seg.get("focus_y", 0.5),
         )
         src_h, src_w = source_image.shape[:2]
         crop_w, crop_h = calculate_crop_dimensions(width, height, zoom_intensity)

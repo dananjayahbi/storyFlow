@@ -890,6 +890,8 @@ def render_project(
                 "audio_duration": audio_duration,
                 "text_content": text_content,
                 "sequence_index": segment.sequence_index,
+                "focus_x": getattr(segment, "image_focus_x", 0.5),
+                "focus_y": getattr(segment, "image_focus_y", 0.5),
             })
 
             if on_progress:

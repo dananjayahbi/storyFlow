@@ -108,6 +108,23 @@ Storage mirrors this hierarchy:
 `0013_seed_default_accounts` creates a default account on each side and moves
 existing projects into it automatically.
 
+### Image framing and Ken Burns
+
+Every segment preview is drawn inside the project's render aspect ratio (for
+example 3:4 or 16:9), not at the source image's own ratio. A 16:9 upload shown
+in a 3:4 project is cover-cropped, and the image can be dragged inside the
+frame to choose which part is visible. The position is stored per segment as
+`image_focus_x` / `image_focus_y` (0…1, default `0.5`) with a normal `PATCH`
+to `/api/segments/<id>/`.
+
+The renderer applies exactly the same geometry: `load_and_prepare_image()`
+cover-crops the source to the render aspect ratio using the saved focus and
+discards everything outside the frame *before* Ken Burns runs. The animation
+therefore only pans and zooms inside the visible frame instead of revealing
+the cropped-away parts of the image. Changing the resolution in
+**Project → Settings → Render** immediately reshapes every segment preview so
+the editor always matches the next render.
+
 ---
 
 ## Script Craft & Script Library
