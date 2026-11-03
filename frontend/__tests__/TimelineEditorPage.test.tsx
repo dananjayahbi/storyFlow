@@ -132,13 +132,17 @@ describe('TimelineEditorPage', () => {
       error: null,
     });
 
-    renderPage();
+    const { container } = renderPage();
 
     // Header — project title in top bar (also appears in sidebar)
     await waitFor(() => {
       const matches = screen.getAllByText('Test Story');
       expect(matches.length).toBeGreaterThanOrEqual(1);
     });
+
+    // The expanded editor sidebar is 10 px wider than the original w-72.
+    const sidebar = container.querySelector('aside');
+    expect(sidebar).toHaveClass('w-[298px]');
 
     // Sidebar info
     expect(screen.getAllByText('DRAFT').length).toBeGreaterThan(0);

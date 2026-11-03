@@ -86,7 +86,8 @@ below it. The project editor sidebar starts directly with the project title and
 status; the StoryFlow mark is shown only once, in the shared top header. The
 editor sidebar has a single **Settings** panel — the old Details tab was
 removed. The **Story Template** JSON reference now lives on the account
-Settings page under **Settings → Story Template**.
+Settings page under **Settings → Story Template**. The expanded editor sidebar
+is 298 px wide (10 px wider than the original 288 px) and collapses to 56 px.
 
 ### Per-account settings
 

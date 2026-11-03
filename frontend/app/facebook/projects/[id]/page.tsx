@@ -279,7 +279,7 @@ export default function TimelineEditorPage() {
       <TooltipProvider>
         <div className="flex h-[calc(100vh-3.5rem)] bg-background">
           {/* Skeleton sidebar */}
-          <aside className="w-56 border-r bg-sidebar shrink-0 p-4 space-y-4">
+          <aside className="w-[298px] border-r bg-sidebar shrink-0 p-4 space-y-4">
             <Skeleton className="h-8 w-8 rounded-lg" />
             <Skeleton className="h-6 w-40" />
             <Skeleton className="h-5 w-20" />
@@ -341,8 +341,8 @@ export default function TimelineEditorPage() {
           className={cn(
             'flex flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200 ease-in-out shrink-0',
             mounted
-              ? sidebarCollapsed ? 'w-14' : 'w-72'
-              : 'w-72'
+              ? sidebarCollapsed ? 'w-14' : 'w-[298px]'
+              : 'w-[298px]'
           )}
         >
           {/* ── Project header ── */}
