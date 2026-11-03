@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, X, Move, LocateFixed } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { getApiBaseUrl } from '@/lib/apiConfig';
 
 interface ImageUploaderProps {
   segmentId: string;
@@ -62,7 +63,7 @@ export function ImageUploader({
   }, [focus]);
 
   const imageUrl = currentImage
-    ? (currentImage.startsWith('http') ? currentImage : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8765'}${currentImage}`)
+    ? (currentImage.startsWith('http') ? currentImage : `${getApiBaseUrl()}${currentImage}`)
     : null;
 
   // Keep the local pan in sync when the segment/project changes.

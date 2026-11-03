@@ -1,4 +1,4 @@
-import api from './api';
+import { ensureApiBaseUrl } from './apiConfig';
 import type { ChatSelection } from './types';
 import type { Section } from './section';
 
@@ -72,10 +72,7 @@ export async function streamChatSession({
   signal,
   onEvent,
 }: StreamChatOptions): Promise<void> {
-  const base = (api.defaults.baseURL || 'http://localhost:8765').replace(
-    /\/$/,
-    ''
-  );
+  const base = (await ensureApiBaseUrl()).replace(/\/$/, '');
   const params = new URLSearchParams({ section });
   if (accountId) params.set('account', accountId);
 

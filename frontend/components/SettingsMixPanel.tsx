@@ -22,15 +22,9 @@ import {
   Loader2, Music, Save, Sparkles, Upload, Trash2, Volume2,
   Waves, Mic2, RefreshCw, Film,
 } from 'lucide-react';
+import { mediaUrl } from '@/lib/apiConfig';
 
-const API_BASE = 'http://localhost:8765';
 const POLL_INTERVAL_MS = 2000;
-
-function mediaUrl(path: string | null): string | null {
-  if (!path) return null;
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
-}
 
 function formatDb(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(0)} dB`;

@@ -3197,6 +3197,19 @@ def outro_detail_view(request, outro_id):
 from rest_framework.decorators import api_view as _api_view
 
 
+@_api_view(['GET'])
+def health_view(request):
+    """Liveness probe used by the frontend to discover the backend origin.
+
+    Returns a stable ``service`` marker so a client can tell StoryFlow apart
+    from any other local development server that happens to occupy a port.
+    """
+    return Response(
+        {'status': 'ok', 'service': 'storyflow-backend'},
+        status=status.HTTP_200_OK,
+    )
+
+
 @_api_view(['POST'])
 def login_view(request):
     username = request.data.get('username') or request.data.get('email') or ''

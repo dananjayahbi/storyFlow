@@ -51,6 +51,30 @@ npm run dev -- -p 3847
 
 The frontend server will start at **http://localhost:3847**.
 
+#### Backend address and connection errors
+
+The frontend resolves the Django origin in one place (`frontend/lib/apiConfig.ts`).
+Set `NEXT_PUBLIC_API_URL` (for example
+`NEXT_PUBLIC_API_URL=http://192.168.1.100:8765`) when the backend does not run
+on the default `http://localhost:8765`. If the variable is unset, the browser
+probes `GET /api/health/` once and accepts the first origin that identifies
+itself as `storyflow-backend` (default, then the standard Django port `8000`).
+The resolved origin is cached in `localStorage`, so pages and media elements
+keep using the same server.
+
+The health endpoint is also the quickest manual check:
+
+```bash
+curl http://localhost:8765/api/health/
+# {"status": "ok", "service": "storyflow-backend"}
+```
+
+An account picker that cannot reach the backend now shows the exact origin it
+tried, offers a **Retry** button, and retries automatically when the browser
+tab regains focus or the network reconnects. A backend CMD window that is
+already back at its shell prompt is not running, even if the window is still
+open.
+
 ### Quick Start Scripts
 
 For convenience, use the provided start script from the project root:

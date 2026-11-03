@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { SettingsSkeleton } from '@/components/skeletons';
 import { SettingsMixPanel } from '@/components/SettingsMixPanel';
 import { StoryTemplateModal } from '@/components/StoryTemplateModal';
+import { mediaUrl } from '@/lib/apiConfig';
 
 type SettingsTab =
   | 'tester'
@@ -894,7 +895,7 @@ export default function SettingsPage() {
                       </p>
                     </div>
                     {ref.audio_url && (
-                      <audio controls src={`http://localhost:8765${ref.audio_url}`} className="h-8 max-w-[180px]" />
+                      <audio controls src={mediaUrl(ref.audio_url) ?? undefined} className="h-8 max-w-[180px]" />
                     )}
                     <Button
                       size="sm"
@@ -1150,7 +1151,7 @@ export default function SettingsPage() {
                   <div className="w-full aspect-square bg-muted/30 rounded flex items-center justify-center overflow-hidden">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={`http://localhost:8765${logo.file}`}
+                      src={mediaUrl(logo.file) ?? undefined}
                       alt={logo.name}
                       className="max-w-full max-h-full object-contain"
                     />

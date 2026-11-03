@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { ensureApiBaseUrl } from '@/lib/apiConfig';
 
 export function LogoutButton() {
   const router = useRouter();
@@ -12,11 +13,11 @@ export function LogoutButton() {
     } catch {
       // ignore
     }
-    try {
-      fetch('http://localhost:8765/api/auth/logout/', { method: 'POST' });
-    } catch {
-      // ignore
-    }
+    ensureApiBaseUrl()
+      .then((apiBase) => fetch(`${apiBase}/api/auth/logout/`, { method: 'POST' }))
+      .catch(() => {
+        // Backend optional during logout.
+      });
     router.replace('/login');
   };
   return (

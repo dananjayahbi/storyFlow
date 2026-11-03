@@ -59,6 +59,7 @@ import type {
   TaskProgress,
 } from './types';
 import { type Voice, AVAILABLE_VOICES } from './constants';
+import { getApiBaseUrl } from './apiConfig';
 
 interface ProjectStore {
   // State
@@ -216,7 +217,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
         set({ renderStatus: 'rendering' as RenderStatus });
         get().pollRenderStatus();
       } else if (project.status === 'COMPLETED' && project.output_path) {
-        const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8765';
+        const backendBase = getApiBaseUrl();
         set({
           renderStatus: 'completed' as RenderStatus,
           outputUrl: `/media/${project.output_path}`,
@@ -479,7 +480,7 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
     if (!outputUrl) return;
 
     // Cross-origin download via fetch → blob → object URL
-    const backendBase = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || 'http://localhost:8765';
+    const backendBase = getApiBaseUrl();
     const fullUrl = `${backendBase}${outputUrl}`;
 
     fetch(fullUrl)

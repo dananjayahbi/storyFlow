@@ -3,6 +3,7 @@
 import { useRef, useState, useCallback } from "react";
 import { useProjectStore } from "@/lib/stores";
 import { Button } from "@/components/ui/button";
+import { getApiBaseUrl } from "@/lib/apiConfig";
 
 /**
  * Formats seconds into MM:SS display string.
@@ -27,9 +28,7 @@ export default function VideoPreview() {
   const [hasError, setHasError] = useState(false);
 
   // Build full video URL with cache-busting timestamp
-  const backendBase =
-    process.env.NEXT_PUBLIC_API_URL?.replace("/api", "") ||
-    "http://localhost:8765";
+  const backendBase = getApiBaseUrl();
   const videoSrc = outputUrl
     ? `${backendBase}${outputUrl}?t=${Date.now()}`
     : "";

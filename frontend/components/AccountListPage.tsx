@@ -9,6 +9,7 @@ import {
   Loader2,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   UserRound,
   Video,
@@ -28,6 +29,7 @@ import {
   withAccount,
 } from '@/lib/account';
 import { sectionFromPathname, SECTION_LABELS } from '@/lib/section';
+import { checkApiHealth, resetApiBaseUrlDiscovery } from '@/lib/apiConfig';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -83,7 +85,21 @@ export function AccountListPage() {
       const data = await getAccounts(section);
       setAccounts(data.results);
     } catch {
-      setError('Failed to load accounts. Make sure the backend is running.');
+      // Distinguish "backend is down" from "backend answered with an error"
+      // and show the exact origin the frontend tried to reach.  The backend
+      // may have been started on another local port; checkApiHealth() probes
+      // /api/health/ and the axios interceptor will have resolved that
+      // origin before this code runs.
+      const health = await checkApiHealth();
+      if (health.ok) {
+        setError(
+          `The backend is running at ${health.baseUrl}, but the accounts request failed. Check the server console, then retry.`
+        );
+      } else {
+        setError(
+          `Cannot reach the StoryFlow backend at ${health.baseUrl}. Start it with "python manage.py runserver 8765" (or set NEXT_PUBLIC_API_URL), then retry.`
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -92,6 +108,27 @@ export function AccountListPage() {
   useEffect(() => {
     fetchAccounts();
   }, [fetchAccounts]);
+
+  // Automatically retry when the user comes back to the tab or the network
+  // reconnects — usually right after the backend has been (re)started.
+  useEffect(() => {
+    if (!error || loading) return;
+    const retry = () => {
+      resetApiBaseUrlDiscovery();
+      void fetchAccounts();
+    };
+    window.addEventListener('focus', retry);
+    window.addEventListener('online', retry);
+    return () => {
+      window.removeEventListener('focus', retry);
+      window.removeEventListener('online', retry);
+    };
+  }, [error, loading, fetchAccounts]);
+
+  const retryLoad = () => {
+    resetApiBaseUrlDiscovery();
+    void fetchAccounts();
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -187,10 +224,21 @@ export function AccountListPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 mb-6">
-          <p className="text-sm text-destructive">{error}</p>
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={retryLoad}
+            disabled={loading}
+            className="shrink-0"
+          >
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+            Retry
+          </Button>
         </div>
       )}
+
 
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

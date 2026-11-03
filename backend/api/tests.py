@@ -271,6 +271,16 @@ class TestEndpointEdgeCases(APITestCase):
         self.assertEqual(response.status_code, 405)
 
 
+class TestHealthEndpoint(APITestCase):
+    """The frontend uses /api/health/ to discover the backend origin."""
+
+    def test_health_reports_storyflow_service(self):
+        response = self.client.get('/api/health/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'ok')
+        self.assertEqual(response.data['service'], 'storyflow-backend')
+
+
 class TestSegmentList(APITestCase):
     """Tests for GET /api/segments/?project={id}."""
 

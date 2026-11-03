@@ -5,6 +5,7 @@ import { Play, Pause, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn, formatTime } from '@/lib/utils';
+import { getApiBaseUrl } from '@/lib/apiConfig';
 
 interface AudioPlayerProps {
   /** Full URL to the .wav file (relative or absolute). */
@@ -32,7 +33,7 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
 
   // audioUrl may be a relative path ("/media/...") served by Django or an absolute URL.
   // Prepend the backend base URL only if it's not already absolute (same pattern as ImageUploader).
-  const backendBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8765';
+  const backendBase = getApiBaseUrl();
   const resolvedUrl = audioUrl.startsWith('http') ? audioUrl : `${backendBase}${audioUrl}`;
   const effectiveUrl = `${resolvedUrl}?t=${cacheBuster}`;
 

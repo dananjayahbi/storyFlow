@@ -40,7 +40,10 @@ and settings are scoped to the active account. Facebook and YouTube data never
 mix, and two accounts on the same side never see each other's projects.
 
 Account-specific settings are stored in an `AccountSettings` row. New projects
-snapshot those values when they are created.
+snapshot those values when they are created. The frontend resolves the Django
+origin through `NEXT_PUBLIC_API_URL` or, when unset, by probing
+`/api/health/` for the `storyflow-backend` service marker. Account pages show
+the origin they tried and support retrying after a backend restart.
 
 ---
 

@@ -35,15 +35,20 @@ import {
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
 import { getCurrentAccountId } from './account';
+import { ensureApiBaseUrl, getApiBaseUrl } from './apiConfig';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8765',
+  baseURL: getApiBaseUrl(),
 });
 
 // Every request is scoped to the workspace encoded in the current URL.
 // This prevents the Facebook side from ever listing or mutating YouTube data
 // (and vice versa) even if a component forgets to pass the section.
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  // Resolve the backend origin once (configurable via NEXT_PUBLIC_API_URL,
+  // otherwise auto-discovered from /api/health/).  This keeps every page —
+  // including accounts — pointed at the server that is actually running.
+  config.baseURL = await ensureApiBaseUrl();
   const section = getCurrentSection();
   config.params = { ...(config.params ?? {}) };
   if (!config.params.section) {
@@ -647,12 +652,12 @@ export async function getGalleryItems(section?: Section): Promise<GalleryItem[]>
 }
 
 export function getStreamUrl(projectId: string, section: Section = getCurrentSection()): string {
-  const base = api.defaults.baseURL || 'http://localhost:8765';
+  const base = getApiBaseUrl();
   return `${base}/api/gallery/${projectId}/stream/?section=${section}`;
 }
 
 export function getDownloadUrl(projectId: string, section: Section = getCurrentSection()): string {
-  const base = api.defaults.baseURL || 'http://localhost:8765';
+  const base = getApiBaseUrl();
   return `${base}/api/gallery/${projectId}/download/?section=${section}`;
 }
 
@@ -661,7 +666,7 @@ export function getSegmentAudioDownloadUrl(
   format: 'wav' | 'mp3' = 'wav',
   section: Section = getCurrentSection()
 ): string {
-  const base = api.defaults.baseURL || 'http://localhost:8765';
+  const base = getApiBaseUrl();
   const account = getCurrentAccountId(section);
   const params = new URLSearchParams({ audio_format: format, section });
   if (account) params.set('account', account);

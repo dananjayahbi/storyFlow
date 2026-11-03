@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Check, ImageOff } from 'lucide-react';
 import { toast } from 'sonner';
+import { mediaUrl } from '@/lib/apiConfig';
 
 // ── Props ──────────────────────────────────────────────────────────
 interface LogoWatermarkModalProps {
@@ -190,7 +191,7 @@ export function LogoWatermarkModal({
                     <div className="w-full aspect-square rounded flex items-center justify-center overflow-hidden bg-muted/30">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={`http://localhost:8765${logo.file}`}
+                        src={mediaUrl(logo.file) ?? undefined}
                         alt={logo.name}
                         className="max-w-full max-h-full object-contain"
                       />
@@ -294,7 +295,7 @@ export function LogoWatermarkModal({
                   {selectedLogo && (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
-                      src={`http://localhost:8765${selectedLogo.file}`}
+                      src={mediaUrl(selectedLogo.file) ?? undefined}
                       alt="Logo preview"
                       style={logoStyle}
                       className="pointer-events-none"

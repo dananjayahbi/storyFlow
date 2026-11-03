@@ -2,13 +2,14 @@
 
 import axios from 'axios';
 import type { GlobalSettings, Voice } from '../types/settings';
+import { getApiBaseUrl } from '../lib/apiConfig';
 
 /**
  * Axios instance pointing at the StoryFlow backend.
  * Mirrors the base config used by the existing project / segment API.
  */
 const api = axios.create({
-  baseURL: 'http://localhost:8765',
+  baseURL: getApiBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
 });
 

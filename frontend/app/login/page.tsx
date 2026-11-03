@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ensureApiBaseUrl } from '@/lib/apiConfig';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,7 +25,8 @@ export default function LoginPage() {
       setError(null);
       // Simple local login: accept any non-empty credentials.
       try {
-        await fetch('http://localhost:8765/api/auth/login/', {
+        const apiBase = await ensureApiBaseUrl();
+        await fetch(`${apiBase}/api/auth/login/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
