@@ -720,6 +720,7 @@ def run_agent_turn(
     )
 
     all_tools: list[dict[str, Any]] = []
+    all_thinking_parts: list[str] = []
 
     for round_index in range(max_tool_rounds):
         content_parts: list[str] = []
@@ -775,12 +776,15 @@ def run_agent_turn(
 
         content = ''.join(content_parts)
         thinking = ''.join(thinking_parts)
+        if thinking:
+            all_thinking_parts.append(thinking)
 
         if stopped:
             yield {
                 'type': 'message',
                 'message': _assistant_message(
-                    content, thinking, tools=all_tools, stopped=True
+                    content, ''.join(all_thinking_parts), tools=all_tools,
+                    stopped=True,
                 ),
             }
             yield {'type': 'done', 'stopped': True}
@@ -884,7 +888,9 @@ def run_agent_turn(
             for event in fallback['events']:
                 yield event
             clean = _fallback_ack(content)
-            message = _assistant_message(clean, thinking, tools=all_tools)
+            message = _assistant_message(
+                clean, ''.join(all_thinking_parts), tools=all_tools
+            )
             yield {'type': 'message', 'message': message}
             if fallback.get('stop'):
                 yield {'type': 'done', 'stopped': False, 'waiting_for_user': True}
@@ -892,7 +898,9 @@ def run_agent_turn(
             yield {'type': 'done', 'stopped': False}
             return
 
-        message = _assistant_message(content, thinking, tools=all_tools)
+        message = _assistant_message(
+            content, ''.join(all_thinking_parts), tools=all_tools
+        )
         yield {'type': 'message', 'message': message}
 
         if steer_text:

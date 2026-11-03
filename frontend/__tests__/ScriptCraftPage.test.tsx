@@ -139,12 +139,30 @@ describe('ScriptCraftPage', () => {
   });
 
   it('restores the last session and renders tool activity and thinking', async () => {
-    render(<ScriptCraftPage />);
+    const { container } = render(<ScriptCraftPage />);
 
     expect(await screen.findByText('Ocean chat')).toBeInTheDocument();
     expect(screen.getByText('Added the first page.')).toBeInTheDocument();
     expect(screen.getByText('Wrote page 1')).toBeInTheDocument();
     expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.getByText('Planning the beats.')).toBeInTheDocument();
+
+    // Chat and book are separate scroll panes inside a viewport-height page.
+    const root = container.firstChild as HTMLElement;
+    expect(root).toHaveClass('lg:h-[calc(100vh-6.5rem)]');
+    expect(container.querySelectorAll('.overflow-y-auto').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps the full thinking block expandable after the turn completes', async () => {
+    render(<ScriptCraftPage />);
+
+    const label = await screen.findByText('Thinking');
+    const details = label.closest('details');
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute('open');
+
+    fireEvent.click(label);
+    expect(details).toHaveAttribute('open');
     expect(screen.getByText('Planning the beats.')).toBeInTheDocument();
   });
 

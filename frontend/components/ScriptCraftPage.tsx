@@ -141,7 +141,6 @@ export function ScriptCraftPage() {
   const [savingPage, setSavingPage] = useState<string | null>(null);
   const [aiConfig, setAiConfig] = useState<AIConfig | null>(null);
 
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const activeSessionRef = useRef<string | null>(null);
@@ -231,13 +230,9 @@ export function ScriptCraftPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, section]);
 
-  useEffect(() => {
-    const node = chatEndRef.current;
-    // jsdom (and some embedded browsers) do not implement scrollIntoView.
-    if (node && typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [session?.messages, draft, streaming]);
+  // The chat no longer auto-scrolls. The operator keeps manual control of both
+  // the chat pane and the script book, including after reloads and while the
+  // answer is streaming.
 
   const selectSession = useCallback(
     async (id: string) => {
@@ -636,9 +631,9 @@ export function ScriptCraftPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5 lg:h-[calc(100vh-6.5rem)] lg:min-h-0">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Wand2 className="h-6 w-6 text-primary" />
@@ -677,7 +672,7 @@ export function ScriptCraftPage() {
       </div>
 
       {!activeModel && aiConfig !== null && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+        <div className="flex shrink-0 items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
           <div>
             <p className="font-medium">Choose an AI model first</p>
@@ -696,10 +691,10 @@ export function ScriptCraftPage() {
         </div>
       )}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.25fr)]">
+      <div className="grid min-h-0 items-start gap-5 lg:flex-1 lg:grid-cols-[minmax(340px,0.9fr)_minmax(0,1.25fr)] lg:items-stretch">
         {/* ── Chat column ── */}
-        <Card className="lg:sticky lg:top-4">
-          <CardHeader className="pb-3">
+        <Card className="flex min-h-0 flex-col overflow-hidden lg:h-full">
+          <CardHeader className="shrink-0 pb-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -760,8 +755,8 @@ export function ScriptCraftPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="max-h-[52vh] space-y-3 overflow-y-auto pr-1">
+          <CardContent className="flex min-h-0 flex-1 flex-col space-y-4">
+            <div className="max-h-[55vh] min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 lg:max-h-none">
               {session?.messages.length === 0 && !draft && (
                 <div className="rounded-2xl rounded-bl-sm bg-muted px-3.5 py-2.5 text-sm">
                   Tell me what to write — a pitch, a length, and any style you
@@ -782,9 +777,11 @@ export function ScriptCraftPage() {
                         Thinking
                         <ChevronDown className="h-3 w-3 transition group-open:rotate-180" />
                       </summary>
-                      <p className="mt-2 whitespace-pre-line border-l-2 border-primary/30 pl-3 text-xs italic text-muted-foreground">
-                        {draft.thinking}
-                      </p>
+                      <div className="mt-2 max-h-64 overflow-y-auto border-l-2 border-primary/30 pl-3">
+                        <p className="whitespace-pre-wrap text-xs italic text-muted-foreground">
+                          {draft.thinking}
+                        </p>
+                      </div>
                     </details>
                   )}
                   {draft.tools.length > 0 && (
@@ -813,13 +810,11 @@ export function ScriptCraftPage() {
                   chunk.
                 </div>
               )}
-
-              <div ref={chatEndRef} />
             </div>
 
             <Separator />
 
-            <div className="space-y-2">
+            <div className="shrink-0 space-y-2">
               {selectedSegment != null && activePage && (
                 <div className="flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs">
                   <span>
@@ -836,7 +831,7 @@ export function ScriptCraftPage() {
               )}
 
               {commandMatches.length > 0 && (
-                <div className="overflow-hidden rounded-md border bg-popover shadow-sm">
+                <div className="max-h-48 overflow-y-auto rounded-md border bg-popover shadow-sm">
                   {commandMatches.map((item) => (
                     <button
                       key={item.command}
@@ -910,8 +905,8 @@ export function ScriptCraftPage() {
         </Card>
 
         {/* ── Book ── */}
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0 pb-3">
+        <Card className="flex min-h-0 flex-col overflow-hidden lg:h-full">
+          <CardHeader className="flex shrink-0 flex-row flex-wrap items-center justify-between gap-3 space-y-0 pb-3">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <BookOpen className="h-4 w-4 text-primary" />
@@ -977,7 +972,7 @@ export function ScriptCraftPage() {
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="min-h-0 flex-1 overflow-y-auto">
             {pages.length > 1 && (
               <div className="mb-4 flex gap-1.5 overflow-x-auto pb-1">
                 {pages.map((page, index) => (
@@ -1089,9 +1084,11 @@ function ChatBubble({
             Thinking
             <ChevronDown className="h-3 w-3 transition group-open:rotate-180" />
           </summary>
-          <p className="mt-2 whitespace-pre-line border-l-2 border-primary/30 pl-3 text-xs italic text-muted-foreground">
-            {message.thinking}
-          </p>
+          <div className="mt-2 max-h-64 overflow-y-auto border-l-2 border-primary/30 pl-3">
+            <p className="whitespace-pre-wrap text-xs italic text-muted-foreground">
+              {message.thinking}
+            </p>
+          </div>
         </details>
       )}
 

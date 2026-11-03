@@ -318,6 +318,49 @@ class ChatAgentToolTests(SimpleTestCase):
         self.assertIn('token', kinds)
         self.assertIn('done', kinds)
 
+    def test_run_agent_turn_keeps_thinking_from_every_round(self):
+        calls = {'count': 0}
+
+        def fake_stream(**kwargs):
+            calls['count'] += 1
+            if calls['count'] == 1:
+                yield {'type': 'thinking', 'text': 'First thought. '}
+                yield {
+                    'type': 'tool_call',
+                    'index': 0,
+                    'id': 'call_1',
+                    'name': 'create_script',
+                    'arguments': json.dumps({
+                        'title': 'Ocean',
+                        'segments': SAMPLE_SCRIPT['segments'],
+                    }),
+                }
+                yield {'type': 'done', 'finish_reason': 'tool_calls'}
+            else:
+                yield {'type': 'thinking', 'text': 'Second thought.'}
+                yield {'type': 'content', 'text': 'Added the ocean page.'}
+                yield {'type': 'done', 'finish_reason': 'stop'}
+
+        with patch('core_engine.ai_client.stream_chat_completion', side_effect=fake_stream):
+            events = list(chat_agent.run_agent_turn(
+                base_url='http://localhost:11434/v1',
+                api_key='',
+                model='test-model',
+                temperature=0.7,
+                system_prompt='',
+                summary='',
+                transcript=[],
+                scripts=[],
+                user_text='Write about the ocean',
+            ))
+
+        final = [
+            event['message'] for event in events
+            if event['type'] == 'message' and event['message'].get('content')
+        ][-1]
+        self.assertIn('First thought.', final['thinking'])
+        self.assertIn('Second thought.', final['thinking'])
+
     def test_ask_user_stops_the_turn_with_a_question(self):
         def fake_stream(**kwargs):
             yield {

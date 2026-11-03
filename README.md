@@ -136,7 +136,14 @@ maintaining JSON files outside the app.
   reopened automatically when you return to the page.
 - **Questions** — the agent can call an `ask_user` tool and pause with a
   question (plus optional quick-reply buttons) instead of guessing.
-- **Slash commands** — type `/` in the composer:
+- **Manual scrolling** — the chat and the script book are separate scroll
+  panes. The chat never auto-scrolls to the bottom while streaming or after a
+  reload, so the book stays where you left it.
+- **Thinking** — the reasoning block stays expandable after the answer
+  completes and keeps the reasoning from every tool round, not just the last
+  one.
+- **Slash commands** — type `/` in the composer. The command panel scrolls
+  inside the chat pane, so it is never clipped by the viewport:
   - `/compact` summarises earlier turns into a note so the context stays small
     (the visible history is kept).
   - `/new` starts a fresh chat with an empty book.
