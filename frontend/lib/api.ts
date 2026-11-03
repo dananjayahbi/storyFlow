@@ -30,6 +30,7 @@ import {
   MusicEngineStatus,
   GenerateSoundtrackPayload,
   GenerateSoundtrackResponse,
+  PlaygroundState,
 } from './types';
 import { Voice } from './constants';
 import { getCurrentSection, type Section } from './section';
@@ -580,6 +581,59 @@ export async function generateBgmSoundtrack(
     '/api/bgm/generate/',
     payload
   );
+  return data;
+}
+
+// ── Audio Mix playground (Settings page) ──
+
+export async function getPlayground(): Promise<PlaygroundState> {
+  const { data } = await api.get<PlaygroundState>('/api/settings/playground/');
+  return data;
+}
+
+export async function savePlayground(payload: {
+  blocks: { text_content: string }[];
+  bgm_clip?: string | null;
+}): Promise<PlaygroundState> {
+  const { data } = await api.put<PlaygroundState>(
+    '/api/settings/playground/',
+    payload
+  );
+  return data;
+}
+
+export async function uploadPlaygroundImage(
+  index: number,
+  file: File
+): Promise<{ index: number; image_url: string }> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const { data } = await api.post(
+    `/api/settings/playground/blocks/${index}/image/`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } }
+  );
+  return data;
+}
+
+export async function removePlaygroundImage(
+  index: number
+): Promise<{ index: number; image_url: null }> {
+  const { data } = await api.delete(
+    `/api/settings/playground/blocks/${index}/image/`
+  );
+  return data;
+}
+
+export async function generatePlayground(payload: {
+  bgm_clip?: string | null;
+} = {}): Promise<{
+  task_id: string;
+  project_id: string;
+  status: string;
+  message: string;
+}> {
+  const { data } = await api.post('/api/settings/playground/generate/', payload);
   return data;
 }
 

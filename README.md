@@ -475,6 +475,38 @@ from **Project → Settings → Background Music** or with a normal `PATCH` to
 `/api/projects/<id>/`. If music mixing fails, the video still renders with
 narration only and the failure is returned in the render warnings.
 
+#### Audio Mix & demo playground
+
+The music level, voice-over ducking, echo and TTS voice volume are
+account-wide controls on **Settings → Audio Mix**:
+
+- **Base music level** (`bgm_gain_db`) — level of the bed under the narration.
+- **Voice-over ducking** (`bgm_ducking_db`) — attenuation while speech is active.
+- **Echo** (`bgm_echo_percent`) — short reflected tail applied to the music only.
+- **TTS voice volume** (`tts_gain_db`) — raises or lowers the narration against
+  the music.
+
+Saving these values writes them to the account's `AccountSettings` row and
+propagates them to every existing project, so the next render uses the new
+tuning. New projects inherit the values at creation time. The project editor
+keeps only the track picker, the MusicGen button and the enable checkbox.
+
+The same tab contains a three-block demo playground. Upload an image and paste
+the script text for each block, choose a BGM track, then press **Generate Demo
+Video**. StoryFlow narrates the blocks with the current account voice settings,
+mixes them with the current Audio Mix values and renders a preview in place.
+Every run replaces the previous demo video, so the controls can be tuned
+repeatedly without creating projects. The playground is stored as a hidden
+`Project` (`is_playground=True`) and never appears in the project list, gallery
+or account counts.
+
+Run the checks:
+
+```bash
+backend\venv\Scripts\python.exe backend\manage.py test tests.test_playground
+cd frontend && npm test
+```
+
 ### Gallery
 
 The Gallery shows rendered videos as a responsive masonry of compact

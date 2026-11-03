@@ -65,7 +65,9 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   active_bgm: string | null;
   bgm_gain_db: number;
   bgm_ducking_db: number;
+  bgm_echo_percent: number;
   bgm_crossfade_ms: number;
+  tts_gain_db: number;
   upscale_enabled: boolean;
   upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
   upscale_denoise_strength: number;
@@ -115,6 +117,10 @@ export interface GlobalSettings {
   logo_margin: number;
   outro_enabled: boolean;
   active_outro: string | null;  // OutroVideo UUID or null
+  bgm_gain_db: number;
+  bgm_ducking_db: number;
+  bgm_echo_percent: number;
+  tts_gain_db: number;
   upscale_enabled: boolean;
   upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
   upscale_denoise_strength: number;
@@ -444,6 +450,25 @@ export interface BgmClip {
   can_edit: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// ── Audio Mix playground (Settings page) ──
+
+export interface PlaygroundBlock {
+  index: number;
+  text_content: string;
+  image_url: string | null;
+  has_audio: boolean;
+  audio_duration: number | null;
+}
+
+export interface PlaygroundState {
+  project_id: string;
+  title: string;
+  status: 'DRAFT' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  output_url: string | null;
+  bgm_clip: string | null;
+  blocks: PlaygroundBlock[];
 }
 
 /** Metadata stored on a MusicGen-generated BGM clip. */

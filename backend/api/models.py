@@ -206,10 +206,18 @@ class Project(models.Model):
         related_name='projects_using',
     )
     # Level of the music bed relative to the narration and the side-chain
-    # attenuation applied while the voiceover is active.
+    # attenuation applied while the voiceover is active.  The values are
+    # account-level defaults copied here at creation time and refreshed when
+    # the Audio Mix settings are saved.
     bgm_gain_db = models.FloatField(default=-18.0)
     bgm_ducking_db = models.FloatField(default=-12.0)
+    bgm_echo_percent = models.FloatField(default=0.0)
     bgm_crossfade_ms = models.PositiveIntegerField(default=3000)
+    tts_gain_db = models.FloatField(default=0.0)
+    # A hidden project owned by the Settings page.  It never appears in the
+    # project list, gallery or account counts; it exists only to preview the
+    # Audio Mix settings with a three-block demo render.
+    is_playground = models.BooleanField(default=False, db_index=True)
 
     # Image upscaling (GAN)
     UPSCALE_MODEL_CHOICES = [
@@ -643,6 +651,14 @@ class GlobalSettings(models.Model):
     )
     upscale_denoise_strength = models.FloatField(default=0.5)
 
+    # ── Audio mix (background music + narration) ──
+    # These are account-level defaults for the render pipeline.  Saving them
+    # propagates the values to every project owned by the account.
+    bgm_gain_db = models.FloatField(default=-18.0)
+    bgm_ducking_db = models.FloatField(default=-12.0)
+    bgm_echo_percent = models.FloatField(default=0.0)
+    tts_gain_db = models.FloatField(default=0.0)
+
     # ── Timestamps ──
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -768,6 +784,12 @@ class AccountSettings(models.Model):
     )
     upscale_denoise_strength = models.FloatField(default=0.5)
 
+    # ── Audio mix (background music + narration) ──
+    bgm_gain_db = models.FloatField(default=-18.0)
+    bgm_ducking_db = models.FloatField(default=-12.0)
+    bgm_echo_percent = models.FloatField(default=0.0)
+    tts_gain_db = models.FloatField(default=0.0)
+
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -828,6 +850,10 @@ class AccountSettings(models.Model):
             upscale_enabled=defaults.upscale_enabled,
             upscale_model=defaults.upscale_model,
             upscale_denoise_strength=defaults.upscale_denoise_strength,
+            bgm_gain_db=defaults.bgm_gain_db,
+            bgm_ducking_db=defaults.bgm_ducking_db,
+            bgm_echo_percent=defaults.bgm_echo_percent,
+            tts_gain_db=defaults.tts_gain_db,
         )
 
 
@@ -871,6 +897,10 @@ PROJECT_SETTINGS_FIELD_MAP = {
     'upscale_enabled': 'upscale_enabled',
     'upscale_model': 'upscale_model',
     'upscale_denoise_strength': 'upscale_denoise_strength',
+    'bgm_gain_db': 'bgm_gain_db',
+    'bgm_ducking_db': 'bgm_ducking_db',
+    'bgm_echo_percent': 'bgm_echo_percent',
+    'tts_gain_db': 'tts_gain_db',
 }
 
 

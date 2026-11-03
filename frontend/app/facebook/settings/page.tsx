@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon,
   Trash2, Upload, Film, Cpu, Mic, AlertTriangle, CheckCircle2, Wand2,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -27,6 +28,7 @@ import { useSettingsStore } from '@/store/settingsStore';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { SettingsSkeleton } from '@/components/skeletons';
+import { SettingsMixPanel } from '@/components/SettingsMixPanel';
 
 type SettingsTab =
   | 'tester'
@@ -35,6 +37,7 @@ type SettingsTab =
   | 'subtitles'
   | 'logos'
   | 'outros'
+  | 'mix'
   | 'ai';
 
 const SETTINGS_TABS: Array<{
@@ -78,6 +81,12 @@ const SETTINGS_TABS: Array<{
     label: 'Outros',
     description: 'Clips appended at the end',
     icon: Film,
+  },
+  {
+    id: 'mix',
+    label: 'Audio Mix',
+    description: 'Music, echo & demo tune',
+    icon: SlidersHorizontal,
   },
   {
     id: 'ai',
@@ -1274,6 +1283,9 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
       )}
+      {/* ── Audio Mix + demo playground ── */}
+      {activeTab === 'mix' && <SettingsMixPanel />}
+
       {/* ── Script Craft AI Configuration ── */}
       {activeTab === 'ai' && (
         <Card>

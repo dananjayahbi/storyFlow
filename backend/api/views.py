@@ -125,8 +125,12 @@ def get_requested_account(request):
 
 
 def scoped_projects(request):
-    """Return a Project queryset restricted to the requested section/account."""
-    queryset = Project.objects.all()
+    """Return a Project queryset restricted to the requested section/account.
+
+    Playground projects are a Settings-page implementation detail and must
+    never appear in the project list, gallery, dashboard counts or exports.
+    """
+    queryset = Project.objects.filter(is_playground=False)
     section = get_requested_section(request)
     if section:
         queryset = queryset.filter(section=section)
@@ -1605,6 +1609,23 @@ def global_settings_view(request):
     )
     serializer.is_valid(raise_exception=True)
     serializer.save()
+
+    # Audio Mix values are account-level controls, but the render pipeline
+    # reads them from the Project row.  Keep every existing project in sync
+    # so a change takes effect on the next render without re-creating jobs.
+    if account:
+        mix_fields = (
+            'bgm_gain_db', 'bgm_ducking_db',
+            'bgm_echo_percent', 'tts_gain_db',
+        )
+        updates = {
+            field: getattr(settings_obj, field)
+            for field in mix_fields
+            if field in request.data
+        }
+        if updates:
+            Project.objects.filter(account=account).update(**updates)
+
     return Response(serializer.data)
 
 

@@ -113,6 +113,9 @@ class GlobalSettingsAPITests(APITestCase):
             'outro_enabled', 'active_outro',
             # Image upscaling
             'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
+            # Audio mix
+            'bgm_gain_db', 'bgm_ducking_db', 'bgm_echo_percent',
+            'tts_gain_db',
             'created_at', 'updated_at',
         }
         self.assertEqual(set(data.keys()), expected_fields)

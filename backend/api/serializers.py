@@ -98,10 +98,12 @@ class AccountSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_project_count(self, obj):
-        return obj.projects.count()
+        return obj.projects.filter(is_playground=False).count()
 
     def get_gallery_count(self, obj):
-        return obj.projects.filter(status='COMPLETED').count()
+        return obj.projects.filter(
+            is_playground=False, status='COMPLETED'
+        ).count()
 
     def validate_name(self, value):
         name = (value or '').strip()
@@ -372,6 +374,7 @@ class GlobalSettingsSerializer(TtsEngineValidationMixin, serializers.ModelSerial
             'logo_position', 'logo_opacity', 'logo_margin',
             'outro_enabled', 'active_outro',
             'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
+            'bgm_gain_db', 'bgm_ducking_db', 'bgm_echo_percent', 'tts_gain_db',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['custom_font_file', 'created_at', 'updated_at']
@@ -489,6 +492,34 @@ class GlobalSettingsSerializer(TtsEngineValidationMixin, serializers.ModelSerial
             )
         return value
 
+    def validate_bgm_gain_db(self, value):
+        if value < -60.0 or value > 0.0:
+            raise serializers.ValidationError(
+                'Music gain must be between -60 and 0 dB.'
+            )
+        return value
+
+    def validate_bgm_ducking_db(self, value):
+        if value < -30.0 or value > 0.0:
+            raise serializers.ValidationError(
+                'Ducking must be between -30 and 0 dB.'
+            )
+        return value
+
+    def validate_bgm_echo_percent(self, value):
+        if value < 0.0 or value > 100.0:
+            raise serializers.ValidationError(
+                'Echo must be between 0 and 100 percent.'
+            )
+        return value
+
+    def validate_tts_gain_db(self, value):
+        if value < -24.0 or value > 12.0:
+            raise serializers.ValidationError(
+                'TTS voice volume must be between -24 and +12 dB.'
+            )
+        return value
+
     # ── Cross-field validation ──────────────────────────────────────
 
     def validate(self, attrs):
@@ -549,7 +580,7 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
             'logo_position', 'logo_opacity', 'logo_margin',
             'outro_enabled', 'active_outro',
             'bgm_enabled', 'active_bgm', 'bgm_gain_db', 'bgm_ducking_db',
-            'bgm_crossfade_ms',
+            'bgm_echo_percent', 'bgm_crossfade_ms', 'tts_gain_db',
             'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
         ]
         # A project cannot be moved between Facebook/YouTube or between
@@ -649,6 +680,20 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
         if value < -30.0 or value > 0.0:
             raise serializers.ValidationError(
                 'Ducking must be between -30 and 0 dB.'
+            )
+        return value
+
+    def validate_bgm_echo_percent(self, value):
+        if value < 0.0 or value > 100.0:
+            raise serializers.ValidationError(
+                'Echo must be between 0 and 100 percent.'
+            )
+        return value
+
+    def validate_tts_gain_db(self, value):
+        if value < -24.0 or value > 12.0:
+            raise serializers.ValidationError(
+                'TTS voice volume must be between -24 and +12 dB.'
             )
         return value
 

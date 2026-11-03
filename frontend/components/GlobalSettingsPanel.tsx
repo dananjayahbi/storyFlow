@@ -78,16 +78,10 @@ export function GlobalSettingsPanel() {
   // Debounce timer ref for upscale denoise slider
   const denoiseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounce timers for the background-music sliders
-  const bgmGainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const bgmDuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   // Local slider value for responsive UI (updated immediately, saved after debounce)
   const [localSpeed, setLocalSpeed] = useState<number | null>(null);
   const [localSilence, setLocalSilence] = useState<number | null>(null);
   const [localDenoise, setLocalDenoise] = useState<number | null>(null);
-  const [localBgmGain, setLocalBgmGain] = useState<number | null>(null);
-  const [localBgmDuck, setLocalBgmDuck] = useState<number | null>(null);
 
   // Background-music library + MusicGen state lives in the shared BGM store
   // so the timeline toolbar and this panel stay in sync.
@@ -126,8 +120,6 @@ export function GlobalSettingsPanel() {
       setLocalSpeed(project.tts_speed);
       setLocalSilence(project.inter_segment_silence);
       setLocalDenoise(project.upscale_denoise_strength);
-      setLocalBgmGain(project.bgm_gain_db ?? -18);
-      setLocalBgmDuck(project.bgm_ducking_db ?? -12);
     }
   }, [project]);
 
@@ -218,30 +210,9 @@ export function GlobalSettingsPanel() {
     [handleSettingChange]
   );
 
-  // ── Background-music level sliders with debounce ──
-  const handleBgmGainChange = useCallback(
-    (values: number[]) => {
-      const value = values[0];
-      setLocalBgmGain(value);
-      if (bgmGainTimerRef.current) clearTimeout(bgmGainTimerRef.current);
-      bgmGainTimerRef.current = setTimeout(() => {
-        handleSettingChange({ bgm_gain_db: value });
-      }, 300);
-    },
-    [handleSettingChange]
-  );
-
-  const handleBgmDuckChange = useCallback(
-    (values: number[]) => {
-      const value = values[0];
-      setLocalBgmDuck(value);
-      if (bgmDuckTimerRef.current) clearTimeout(bgmDuckTimerRef.current);
-      bgmDuckTimerRef.current = setTimeout(() => {
-        handleSettingChange({ bgm_ducking_db: value });
-      }, 300);
-    },
-    [handleSettingChange]
-  );
+  // ── Background-music level sliders are configured on the Settings page
+  //    (Audio Mix).  The project panel keeps only the track + generation
+  //    controls so the same account-wide mix applies to every render.
 
   const handleBgmTrackChange = useCallback(
     async (value: string) => {
@@ -274,8 +245,6 @@ export function GlobalSettingsPanel() {
       if (speedTimerRef.current) clearTimeout(speedTimerRef.current);
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (denoiseTimerRef.current) clearTimeout(denoiseTimerRef.current);
-      if (bgmGainTimerRef.current) clearTimeout(bgmGainTimerRef.current);
-      if (bgmDuckTimerRef.current) clearTimeout(bgmDuckTimerRef.current);
     };
   }, []);
 
@@ -617,49 +586,14 @@ export function GlobalSettingsPanel() {
                   </p>
                 )}
 
-                {/* Music level */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs text-muted-foreground">
-                      Music level
-                    </label>
-                    <span className="text-xs font-medium tabular-nums">
-                      {(localBgmGain ?? project.bgm_gain_db ?? -18).toFixed(0)} dB
-                    </span>
-                  </div>
-                  <Slider
-                    value={[localBgmGain ?? project.bgm_gain_db ?? -18]}
-                    min={-40}
-                    max={0}
-                    step={1}
-                    onValueChange={handleBgmGainChange}
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Level of the music bed under the narration
-                  </p>
-                </div>
-
-                {/* Ducking */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs text-muted-foreground">
-                      Voice-over ducking
-                    </label>
-                    <span className="text-xs font-medium tabular-nums">
-                      {(localBgmDuck ?? project.bgm_ducking_db ?? -12).toFixed(0)} dB
-                    </span>
-                  </div>
-                  <Slider
-                    value={[localBgmDuck ?? project.bgm_ducking_db ?? -12]}
-                    min={-24}
-                    max={0}
-                    step={1}
-                    onValueChange={handleBgmDuckChange}
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Attenuation applied to the music while the voiceover speaks
-                  </p>
-                </div>
+                <p className="text-[10px] leading-relaxed text-muted-foreground">
+                  Music level, echo and voice-over ducking are account-wide
+                  settings. Adjust them in{' '}
+                  <span className="font-medium text-foreground">
+                    Settings → Audio Mix
+                  </span>{' '}
+                  and preview the result in the demo playground.
+                </p>
               </div>
             )}
           </section>

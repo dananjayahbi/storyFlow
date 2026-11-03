@@ -1995,6 +1995,37 @@ def _voice_ducking_envelope(
     return envelope.astype(np.float32)
 
 
+def apply_music_echo(
+    audio: np.ndarray,
+    sample_rate: int,
+    amount_percent: float = 0.0,
+    *,
+    delay_ms: float = 180.0,
+    feedback: float = 0.35,
+    taps: int = 3,
+) -> np.ndarray:
+    """Add a short stereo/dual-mono echo to the music bed.
+
+    ``amount_percent`` is the wet level (0 = dry, 100 = maximum).  The echo is
+    deliberately simple: a handful of decaying taps at ``delay_ms`` spacing.
+    It is applied to the music only, before the bed is mixed under the
+    narration, so the voice stays intelligible.
+    """
+    if amount_percent <= 0.0 or audio.size == 0:
+        return audio
+
+    wet = max(0.0, min(100.0, float(amount_percent))) / 100.0
+    delay = max(1, int(round(sample_rate * max(1.0, delay_ms) / 1000.0)))
+    echoed = audio.astype(np.float32, copy=True)
+    for tap in range(1, max(1, int(taps)) + 1):
+        shift = delay * tap
+        if shift >= audio.shape[0]:
+            break
+        gain = 0.5 * wet * (feedback ** (tap - 1))
+        echoed[shift:] += audio[:-shift] * gain
+    return echoed
+
+
 def mix_background_music(
     narration_path: str,
     music_path: str,
@@ -2003,6 +2034,8 @@ def mix_background_music(
     sample_rate: int = 44_100,
     music_gain_db: float = DEFAULT_MUSIC_GAIN_DB,
     ducking_db: float = DEFAULT_DUCKING_DB,
+    echo_percent: float = 0.0,
+    narration_gain_db: float = 0.0,
     ducking_threshold_db: float = -38.0,
     fade_seconds: float = 0.75,
     tail_fade_seconds: float = TAIL_FADE_SECONDS,
@@ -2010,9 +2043,12 @@ def mix_background_music(
 ) -> dict:
     """Mix a music bed under a narration track with side-chain ducking.
 
-    The music is looped/trimmed to the narration length, attenuated by
-    *music_gain_db*, then ducked by *ducking_db* whenever the narration RMS is
-    above *ducking_threshold_db*.  The result is written as a 16-bit WAV.
+    The music is looped/trimmed to the narration length, optionally given a
+    short echo, attenuated by *music_gain_db*, then ducked by *ducking_db*
+    whenever the narration RMS is above *ducking_threshold_db*.  The narration
+    itself is scaled by *narration_gain_db* (0 dB leaves it untouched), which
+    lets the operator balance the TTS voice against the music.  The result is
+    written as a 16-bit WAV.
 
     ``fade_seconds`` fades the bed in so the start (and every loop point) is
     click-free.  ``tail_fade_seconds`` closes the video smoothly — unless the
@@ -2035,6 +2071,7 @@ def mix_background_music(
             pad = target_length - music.shape[0]
             music = np.pad(music, ((0, pad), (0, 0)))
     music = music[:target_length]
+    music = apply_music_echo(music, sample_rate, echo_percent)
 
     envelope = _voice_ducking_envelope(
         narration,
@@ -2043,6 +2080,7 @@ def mix_background_music(
         threshold_db=ducking_threshold_db,
     )
     base_gain = 10.0 ** (float(music_gain_db) / 20.0)
+    voice_gain = 10.0 ** (float(narration_gain_db) / 20.0)
 
     # Does the bed already resolve into silence on its own?  Fading the same
     # region twice would pull the music out of the video far too early.
@@ -2060,7 +2098,7 @@ def mix_background_music(
         ramp = np.linspace(0.0, 1.0, tail, dtype=np.float32)[:, None]
         music[-tail:] *= ramp[::-1]
 
-    mixed = narration + music * (base_gain * envelope[:, None])
+    mixed = narration * voice_gain + music * (base_gain * envelope[:, None])
     np.clip(mixed, -1.0, 1.0, out=mixed)
 
     destination = output_path or narration_path
@@ -2079,10 +2117,12 @@ def mix_background_music(
 
     logger.info(
         "Music mixed under narration: %s (gain %.1f dB, ducking %.1f dB, "
-        "music %.2fs, narration %.2fs)",
+        "echo %.0f%%, voice %.1f dB, music %.2fs, narration %.2fs)",
         destination,
         music_gain_db,
         ducking_db,
+        echo_percent,
+        narration_gain_db,
         music.shape[0] / sample_rate,
         narration.shape[0] / sample_rate,
     )
@@ -2091,6 +2131,8 @@ def mix_background_music(
         "duration": round(target_length / float(sample_rate), 3),
         "music_gain_db": music_gain_db,
         "ducking_db": ducking_db,
+        "echo_percent": echo_percent,
+        "narration_gain_db": narration_gain_db,
         "tail_fade_applied": tail_applied,
         "source_tail_faded": already_faded,
     }

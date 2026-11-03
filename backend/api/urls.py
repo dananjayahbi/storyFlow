@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
+from . import playground_views
 
 router = DefaultRouter()
 router.register(r'accounts', views.AccountViewSet)
@@ -19,6 +20,21 @@ urlpatterns = [
     path('segments/reorder/', views.reorder_segments, name='segment-reorder'),
     path('tasks/<str:task_id>/status/', views.task_status_view, name='task-status'),
     path('settings/', views.global_settings_view, name='global-settings'),
+    path(
+        'settings/playground/',
+        playground_views.playground_view,
+        name='settings-playground',
+    ),
+    path(
+        'settings/playground/blocks/<int:index>/image/',
+        playground_views.playground_block_image_view,
+        name='settings-playground-block-image',
+    ),
+    path(
+        'settings/playground/generate/',
+        playground_views.playground_generate_view,
+        name='settings-playground-generate',
+    ),
     path('settings/ai/', views.ai_settings_view, name='ai-settings'),
     path('script-craft/generate/', views.script_generate_view, name='script-generate'),
     path('chat/sessions/', views.chat_sessions_view, name='chat-sessions'),

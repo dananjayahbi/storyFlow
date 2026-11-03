@@ -744,6 +744,8 @@ def render_project(
     bgm_enabled = bool(getattr(project, "bgm_enabled", False))
     bgm_gain_db = float(getattr(project, "bgm_gain_db", -18.0))
     bgm_ducking_db = float(getattr(project, "bgm_ducking_db", -12.0))
+    bgm_echo_percent = float(getattr(project, "bgm_echo_percent", 0.0))
+    tts_gain_db = float(getattr(project, "tts_gain_db", 0.0))
     bgm_path = None
     if bgm_enabled:
         active_bgm = getattr(project, "active_bgm", None)
@@ -1044,11 +1046,14 @@ def render_project(
                     bgm_path,
                     music_gain_db=bgm_gain_db,
                     ducking_db=bgm_ducking_db,
+                    echo_percent=bgm_echo_percent,
+                    narration_gain_db=tts_gain_db,
                 )
                 logger.info(
                     "Background music mixed (%.2fs timeline, gain %.1f dB, "
-                    "ducking %.1f dB).",
+                    "ducking %.1f dB, echo %.0f%%, voice %.1f dB).",
                     mix_result["duration"], bgm_gain_db, bgm_ducking_db,
+                    bgm_echo_percent, tts_gain_db,
                 )
             except Exception as bgm_err:
                 logger.warning(
