@@ -121,7 +121,9 @@ The renderer applies exactly the same geometry: `load_and_prepare_image()`
 cover-crops the source to the render aspect ratio using the saved focus and
 discards everything outside the frame *before* Ken Burns runs. The animation
 therefore only pans and zooms inside the visible frame instead of revealing
-the cropped-away parts of the image. Changing the resolution in
+the cropped-away parts of the image. Every preset in the deterministic
+seven-direction cycle moves the camera, including the first segment, so no
+block is rendered as a static still. Changing the resolution in
 **Project → Settings → Render** immediately reshapes every segment preview so
 the editor always matches the next render.
 

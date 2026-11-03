@@ -1949,11 +1949,11 @@ class KenBurnsIntegrationTests(TestCase):
         finally:
             clip.close()
 
-    def test_frames_identical_center_direction(self):
-        """Center-to-center direction produces identical frames."""
+    def test_first_segment_frames_animate(self):
+        """Issue #22: the first segment must animate, not stay static."""
         from core_engine.ken_burns import apply_ken_burns
 
-        # segment_index=0 selects center→center
+        # segment_index=0 is the first image in the rendered video.
         clip = apply_ken_burns(
             image_path=self.image_paths[0],
             duration=1.0,
@@ -1965,12 +1965,23 @@ class KenBurnsIntegrationTests(TestCase):
         try:
             frame_start = self._get_frame(clip, 0.0)
             frame_end = self._get_frame(clip, 1.0)
-            self.assertTrue(
+            self.assertFalse(
                 np.array_equal(frame_start, frame_end),
-                "Frames should be identical for center-to-center direction",
+                "The first segment's Ken Burns camera must move.",
             )
         finally:
             clip.close()
+
+    def test_all_directions_animate(self):
+        """No pan preset may leave the camera completely static."""
+        from core_engine.ken_burns import DIRECTIONS, get_pan_direction
+
+        for index in range(len(DIRECTIONS)):
+            start_name, end_name = get_pan_direction(index)
+            self.assertNotEqual(
+                start_name, end_name,
+                f"Direction {index} is static: {start_name} → {end_name}",
+            )
 
     def test_different_segments_different_directions(self):
         """Different segment indices produce different initial frames."""

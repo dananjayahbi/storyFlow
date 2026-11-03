@@ -50,18 +50,20 @@ logger = logging.getLogger(__name__)
 # Each tuple is (start_position_name, end_position_name) describing a
 # camera pan trajectory.  ``segment_index % 7`` selects the direction,
 # ensuring deterministic and visually varied motion across consecutive
-# segments.  The mapping from position names to pixel coordinates is
-# handled by ``position_to_coords`` (Task 04.02.05).
+# segments.  Every entry moves the camera: the first segment must animate
+# too, so there is deliberately no static "center → center" preset.
+# The mapping from position names to pixel coordinates is handled by
+# ``position_to_coords`` (Task 04.02.05).
 DIRECTIONS: Tuple[
     Tuple[str, str], ...
 ] = (
-    ("center", "center"),              # zoom-only, no pan
-    ("top_left", "bottom_right"),      # diagonal pan
+    ("top_left", "center"),            # pan from the top-left into frame
     ("bottom_right", "top_left"),      # reverse diagonal
     ("top_right", "bottom_left"),      # opposite diagonal
     ("bottom_left", "top_right"),      # reverse opposite diagonal
     ("center", "top_left"),            # drift upward-left
     ("center", "bottom_right"),        # drift downward-right
+    ("top_left", "bottom_right"),      # diagonal pan
 )
 
 
@@ -320,13 +322,13 @@ def get_pan_direction(
     ====  ==========================
     idx   Direction
     ====  ==========================
-    0     center → center (zoom only)
-    1     top_left → bottom_right
-    2     bottom_right → top_left
-    3     top_right → bottom_left
-    4     bottom_left → top_right
-    5     center → top_left
-    6     center → bottom_right
+    0     top_left → center
+    1     bottom_right → top_left
+    2     top_right → bottom_left
+    3     bottom_left → top_right
+    4     center → top_left
+    5     center → bottom_right
+    6     top_left → bottom_right
     7     (repeats from 0)
     ====  ==========================
 
