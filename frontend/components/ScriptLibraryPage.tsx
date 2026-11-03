@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   BookMarked,
   Clock,
   Eye,
+  FilePlus2,
   Loader2,
   RefreshCw,
   Search,
@@ -15,7 +16,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { deleteScript, getScripts } from '@/lib/api';
+import { deleteScript, getScripts, importProject } from '@/lib/api';
 import type { Script } from '@/lib/types';
 import { sectionFromPathname, sectionPath } from '@/lib/section';
 import { withAccount } from '@/lib/account';
@@ -55,6 +56,7 @@ function formatDate(value: string): string {
 
 export function ScriptLibraryPage() {
   const pathname = usePathname();
+  const router = useRouter();
   const section = sectionFromPathname(pathname);
   const accountId = useAccountId(section);
   const accountHref = (path: string) =>
@@ -66,6 +68,9 @@ export function ScriptLibraryPage() {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Script | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [creatingScript, setCreatingScript] = useState<Script | null>(null);
+  const [createTitle, setCreateTitle] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
 
   const fetchScripts = useCallback(async () => {
     setLoading(true);
@@ -104,6 +109,46 @@ export function ScriptLibraryPage() {
       toast.error('Failed to delete the script');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const openCreateDialog = (script: Script) => {
+    setCreatingScript(script);
+    setCreateTitle(script.title);
+  };
+
+  const handleCreateProject = async () => {
+    if (!creatingScript) return;
+    const segmentList = Array.isArray(creatingScript.content?.segments)
+      ? creatingScript.content.segments
+          .filter((segment) => segment.text_content?.trim())
+          .map((segment) => ({
+            text_content: segment.text_content,
+            image_prompt: segment.image_prompt || '',
+          }))
+      : [];
+    if (segmentList.length === 0) {
+      toast.error('This script has no segments to import.');
+      return;
+    }
+
+    const title = createTitle.trim() || creatingScript.title;
+    setIsCreating(true);
+    try {
+      const project = await importProject({
+        format: 'json',
+        title,
+        section,
+        account: accountId || undefined,
+        segments: segmentList,
+      });
+      toast.success(`Created “${title}”`);
+      setCreatingScript(null);
+      router.push(accountHref(sectionPath(section, `/projects/${project.id}`)));
+    } catch {
+      toast.error('Failed to create a project from this script');
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -225,6 +270,14 @@ export function ScriptLibraryPage() {
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => openCreateDialog(script)}
+                  >
+                    <FilePlus2 className="mr-2 h-4 w-4" />
+                    Create
+                  </Button>
+                  <Button
                     variant="outline"
                     size="sm"
                     className="flex-1"
@@ -275,6 +328,65 @@ export function ScriptLibraryPage() {
           ))}
         </div>
       )}
+
+      <Dialog
+        open={!!creatingScript}
+        onOpenChange={(open) => {
+          if (!open) setCreatingScript(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create a project</DialogTitle>
+            <DialogDescription>
+              Start a new project from “{creatingScript?.title}”. Keep the
+              original title or change it first.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="create-project-title" className="text-sm font-medium">
+                Project title
+              </label>
+              <Input
+                id="create-project-title"
+                value={createTitle}
+                onChange={(event) => setCreateTitle(event.target.value)}
+                placeholder={creatingScript?.title || 'Project title'}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleCreateProject();
+                }}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                {creatingScript?.segment_count ?? 0} segment
+                {(creatingScript?.segment_count ?? 0) === 1 ? '' : 's'} will be
+                imported. The original library script stays untouched.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setCreatingScript(null)}
+                disabled={isCreating}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleCreateProject()}
+                disabled={isCreating || !createTitle.trim()}
+              >
+                {isCreating ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <FilePlus2 className="mr-2 h-4 w-4" />
+                )}
+                Create Project
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">

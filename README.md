@@ -123,7 +123,11 @@ maintaining JSON files outside the app.
    refer to earlier scripts.
 4. Click **Save to Library** to keep the current page in **Script Library**,
    also in the top navigation and scoped to the same account.
-5. Select a block in the current page and either type an instruction or press
+5. In **Script Library**, each saved script has a **Create** button. It opens a
+   dialog where the title can be kept or changed, then imports the script into a
+   new project and opens that project. The original library script is not
+   modified or removed.
+6. Select a block in the current page and either type an instruction or press
    **Rewrite**. The agent rewrites only that segment and keeps the rest of the
    script intact.
 
