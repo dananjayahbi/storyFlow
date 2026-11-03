@@ -665,3 +665,6 @@ so a project can mix a fast draft pass with a final Qwen pass at any time.
 - **Local-only application** — no Docker, no cloud APIs, no authentication, no deployment.
 - **Privacy-first** — all data stays on your machine.
 - This project is designed for a single-user, local development workflow.
+- Source files and user-facing strings are UTF-8. Use real Unicode punctuation
+  (`—`, `…`, `·`) rather than double-encoded mojibake; the frontend encoding
+  regression test fails if those characters reappear.

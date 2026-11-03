@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { DashboardSkeleton } from '@/components/skeletons';
 
-// â”€â”€ Relative time utility â”€â”€
+// ── Relative time utility ──
 
 function formatRelativeTime(dateString: string): string {
   const date = new Date(dateString);
@@ -45,7 +45,7 @@ function formatRelativeTime(dateString: string): string {
   return `${diffYear}y ago`;
 }
 
-// â”€â”€ Status badge â”€â”€
+// ── Status badge ──
 
 function deriveBadge(status: Project['status']) {
   switch (status) {
@@ -60,7 +60,7 @@ function deriveBadge(status: Project['status']) {
   }
 }
 
-// â”€â”€ Stat card component â”€â”€
+// ── Stat card component ──
 
 interface StatCardProps {
   title: string;
@@ -87,7 +87,7 @@ function StatCard({ title, value, description, icon: Icon, iconClassName }: Stat
   );
 }
 
-// â”€â”€ Skeleton stat card (kept for reference; route-level loading.tsx now provides DashboardSkeleton) â”€â”€
+// ── Skeleton stat card (kept for reference; route-level loading.tsx now provides DashboardSkeleton) ──
 
 export default function DashboardPage() {
   const pathname = usePathname();
@@ -114,7 +114,7 @@ export default function DashboardPage() {
     })();
   }, [section]);
 
-  // â”€â”€ Computed stats â”€â”€
+  // ── Computed stats ──
 
   const stats = useMemo(() => {
     const total = projects.length;
@@ -165,7 +165,7 @@ export default function DashboardPage() {
         </Button>
       </div>
 
-      {/* â”€â”€ Stat Cards â”€â”€ */}
+      {/* ── Stat Cards ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         <StatCard
           title="Total Projects"
@@ -202,7 +202,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* â”€â”€ Recent Projects â”€â”€ */}
+      {/* ── Recent Projects ── */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold tracking-tight">Recent Activity</h3>
@@ -232,7 +232,7 @@ export default function DashboardPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{project.title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {project.segment_count} segment{project.segment_count !== 1 ? 's' : ''} Â·{' '}
+                      {project.segment_count} segment{project.segment_count !== 1 ? 's' : ''} ·{' '}
                       <Clock className="inline h-3 w-3 -mt-0.5" />{' '}
                       {formatRelativeTime(project.updated_at || project.created_at)}
                     </p>

@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
-// â”€â”€ Sidebar collapsed state persistence â”€â”€
+// ── Sidebar collapsed state persistence ──
 const EDITOR_SIDEBAR_KEY = 'storyflow-editor-sidebar-collapsed';
 
 /** Format seconds into a human-readable "Xh Ym Zs" string. */
@@ -82,7 +82,7 @@ export default function TimelineEditorPage() {
     startRender, resetRenderState, cancelRender, downloadVideo,
   } = useProjectStore();
 
-  // â”€â”€ Rename state â”€â”€
+  // ── Rename state ──
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -118,9 +118,9 @@ export default function TimelineEditorPage() {
   const isRendering = renderStatus === 'rendering' || renderStatus === 'validating';
   const renderPercentage = renderProgress?.percentage ?? 0;
 
-  // â”€â”€ Phase-aware render progress â”€â”€
+  // ── Phase-aware render progress ──
   // The backend reports an overall percentage that can jump backward when
-  // the fast compositor phase starts (segments 0-80% â†’ frames 5-96%).
+  // the fast compositor phase starts (segments 0-80% → frames 5-96%).
   // Instead of smoothing a jumpy number, we detect the current render
   // phase and compute a phase-specific 0-100% percentage so the bar
   // resets cleanly at each major phase transition.
@@ -138,7 +138,7 @@ export default function TimelineEditorPage() {
 
     const phase = renderProgress.current_phase || '';
 
-    // Detect frame rendering phase: "Rendering framesâ€¦ 552/5509 (23 fps, ~219s remaining)"
+    // Detect frame rendering phase: "Rendering frames… 552/5509 (23 fps, ~219s remaining)"
     const frameMatch = phase.match(/Rendering frames[^\d]*(\d+)\s*\/\s*(\d+)/);
     if (frameMatch) {
       const current = parseInt(frameMatch[1], 10);
@@ -276,7 +276,7 @@ export default function TimelineEditorPage() {
     };
   }, [id, fetchProject, cancelGeneration, resetRenderState, reset]);
 
-  // Loading state â€” also treat initial state (no project yet, no error) as loading
+  // Loading state — also treat initial state (no project yet, no error) as loading
   if (isLoading || (!project && !error)) {
     return (
       <TooltipProvider>
@@ -327,7 +327,7 @@ export default function TimelineEditorPage() {
     );
   }
 
-  // â”€â”€ Status badge styling â”€â”€
+  // ── Status badge styling ──
   const statusStyles: Record<string, string> = {
     DRAFT: 'bg-muted text-muted-foreground',
     IN_PROGRESS: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
@@ -339,7 +339,7 @@ export default function TimelineEditorPage() {
   return (
     <TooltipProvider>
       <div className="flex h-[calc(100vh-3.5rem)] bg-background text-foreground">
-        {/* â”€â”€ Left Sidebar â€” modern tabbed layout â”€â”€ */}
+        {/* ── Left Sidebar — modern tabbed layout ── */}
         <aside
           className={cn(
             'flex flex-col border-r bg-sidebar text-sidebar-foreground transition-all duration-200 ease-in-out shrink-0',
@@ -390,14 +390,14 @@ export default function TimelineEditorPage() {
                     {project.status.replace('_', ' ')}
                   </Badge>
                   <span className="text-[10px] text-sidebar-foreground/50">
-                    Â· {segments.length} seg{segments.length !== 1 ? 's' : ''}
+                    · {segments.length} seg{segments.length !== 1 ? 's' : ''}
                   </span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* â”€â”€ Tab Switcher (when expanded) â”€â”€ */}
+          {/* ── Tab Switcher (when expanded) ── */}
           {!sidebarCollapsed && (
             <div className="flex border-b shrink-0">
               <button
@@ -427,7 +427,7 @@ export default function TimelineEditorPage() {
             </div>
           )}
 
-          {/* â”€â”€ Collapsed icon tabs â”€â”€ */}
+          {/* ── Collapsed icon tabs ── */}
           {sidebarCollapsed && (
             <div className="px-2 py-2 space-y-1">
               <Tooltip delayDuration={0}>
@@ -461,11 +461,11 @@ export default function TimelineEditorPage() {
             </div>
           )}
 
-          {/* â”€â”€ Tab Content â”€â”€ */}
+          {/* ── Tab Content ── */}
           {!sidebarCollapsed && (
             <div className="flex-1 overflow-y-auto">
               {sidebarTab === 'info' ? (
-                /* â”€â”€ Info Tab â”€â”€ */
+                /* ── Info Tab ── */
                 <div className="p-4 space-y-4">
                   {/* Project details cards */}
                   <div className="space-y-3">
@@ -535,7 +535,7 @@ export default function TimelineEditorPage() {
                         ) : (
                           <Volume2 className="h-3.5 w-3.5 mr-2" />
                         )}
-                        {isGenerating ? 'Generatingâ€¦' : 'Generate All Audio'}
+                        {isGenerating ? 'Generating…' : 'Generate All Audio'}
                       </Button>
                     </div>
                   </div>
@@ -573,7 +573,7 @@ export default function TimelineEditorPage() {
                   </div>
                 </div>
               ) : (
-                /* â”€â”€ Settings Tab â”€â”€ */
+                /* ── Settings Tab ── */
                 <div className="py-2">
                   <GlobalSettingsPanel />
                 </div>
@@ -581,7 +581,7 @@ export default function TimelineEditorPage() {
             </div>
           )}
 
-          {/* â”€â”€ Collapse toggle at bottom â”€â”€ */}
+          {/* ── Collapse toggle at bottom ── */}
           <div className="border-t px-2 py-2 shrink-0">
             <Tooltip delayDuration={0}>
               <TooltipTrigger asChild>
@@ -610,9 +610,9 @@ export default function TimelineEditorPage() {
           </div>
         </aside>
 
-        {/* â”€â”€ Right content area â”€â”€ */}
+        {/* ── Right content area ── */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* â”€â”€ Top Bar â”€â”€ */}
+          {/* ── Top Bar ── */}
           <header className="flex items-center justify-between h-14 border-b bg-background px-4 sm:px-6 shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 sm:hidden" asChild>
@@ -663,13 +663,13 @@ export default function TimelineEditorPage() {
                       )}
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>{isRendering ? 'Renderingâ€¦' : 'Export Video'}</TooltipContent>
+                  <TooltipContent>{isRendering ? 'Rendering…' : 'Export Video'}</TooltipContent>
                 </Tooltip>
               )}
             </div>
           </header>
 
-          {/* â”€â”€ Timeline Content â”€â”€ */}
+          {/* ── Timeline Content ── */}
           <main className="flex-1 overflow-auto">
             <Timeline
               segments={segments}
@@ -681,7 +681,7 @@ export default function TimelineEditorPage() {
             />
           </main>
 
-          {/* â”€â”€ Action Bar â”€â”€ */}
+          {/* ── Action Bar ── */}
           <footer className="border-t bg-background shrink-0 py-4">
             {/* Progress / Status indicators (only when active) */}
             {(bulkGenerationProgress || bulkError || isRendering || renderStatus === 'completed' || renderStatus === 'failed') && (
@@ -736,8 +736,8 @@ export default function TimelineEditorPage() {
                       <p className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1.5">
                         <Loader2 className="h-3 w-3 animate-spin" />
                         {phaseLabel ? formatPhaseLabel(phaseLabel) : (renderProgress
-                          ? `${renderProgress.current_phase || 'Rendering'} â€” Segment ${renderProgress.current_segment}/${renderProgress.total_segments}`
-                          : 'Starting render pipelineâ€¦')}
+                          ? `${renderProgress.current_phase || 'Rendering'} — Segment ${renderProgress.current_segment}/${renderProgress.total_segments}`
+                          : 'Starting render pipeline…')}
                       </p>
                       <span className="text-xs tabular-nums text-muted-foreground">{Math.round(smoothRenderPct)}%</span>
                     </div>
@@ -749,13 +749,13 @@ export default function TimelineEditorPage() {
                 {renderStatus === 'completed' && outputUrl && (
                   <p className="text-xs font-medium text-green-600 dark:text-green-400 flex items-center gap-1.5">
                     <CheckCircle className="h-3 w-3" />
-                    Render complete â€” ready to download
+                    Render complete — ready to download
                   </p>
                 )}
                 {renderStatus === 'failed' && (
                   <p className="text-xs font-medium text-destructive flex items-center gap-1.5">
                     <AlertCircle className="h-3 w-3" />
-                    Render failed{renderProgress?.current_phase ? ` during: ${renderProgress.current_phase}` : ' â€” check segments have images & audio'}
+                    Render failed{renderProgress?.current_phase ? ` during: ${renderProgress.current_phase}` : ' — check segments have images & audio'}
                   </p>
                 )}
               </div>
@@ -777,7 +777,7 @@ export default function TimelineEditorPage() {
                   ) : (
                     <Volume2 className="h-3.5 w-3.5 mr-1.5" />
                   )}
-                  {isGenerating ? 'Generatingâ€¦' : 'Generate All Audio'}
+                  {isGenerating ? 'Generating…' : 'Generate All Audio'}
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -796,7 +796,7 @@ export default function TimelineEditorPage() {
                       onClick={() => generateAllAudio({ engine: 'kokoro' })}
                     >
                       <Zap className="h-4 w-4 mr-2" />
-                      Kokoro â€” draft audio
+                      Kokoro — draft audio
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() =>
@@ -804,7 +804,7 @@ export default function TimelineEditorPage() {
                       }
                     >
                       <Sparkles className="h-4 w-4 mr-2" />
-                      Qwen â€” finalize audio
+                      Qwen — finalize audio
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -861,7 +861,7 @@ export default function TimelineEditorPage() {
                       ) : (
                         <Film className="h-3.5 w-3.5 mr-1.5" />
                       )}
-                      {isRendering ? 'Renderingâ€¦' : 'Export'}
+                      {isRendering ? 'Rendering…' : 'Export'}
                     </Button>
                     {isRendering && (
                       <Button variant="ghost" size="sm" onClick={cancelRender} className="h-8 text-xs px-2">
