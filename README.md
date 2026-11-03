@@ -3,6 +3,9 @@
 A local-first web application for producing "faceless" narrative videos from text scripts. StoryFlow combines AI-powered text-to-speech, automated video assembly, and a human-in-the-loop editing workflow — all running entirely on your machine with no cloud dependencies.
 
 > ⚠️ **Work in Progress:** StoryFlow is under active development. TTS, video rendering, and other core features are coming in future phases.
+>
+> For a concise explanation of the system and its features, see
+> [`SYSTEM_OVERVIEW.md`](SYSTEM_OVERVIEW.md).
 
 ---
 
