@@ -33,6 +33,22 @@ export interface Project {
   thumbnail_source?: 'manual' | 'segment' | null;
 }
 
+/** One project's render preflight result from /api/projects/render-readiness/. */
+export interface ProjectRenderReadiness {
+  project_id: string;
+  title: string;
+  status: Project['status'];
+  segment_count: number;
+  /** Status allows a render (DRAFT, COMPLETED or FAILED). */
+  renderable: boolean;
+  /** Backend render validation passed (files exist on disk). */
+  ready: boolean;
+  is_processing: boolean;
+  missing_images: string[];
+  missing_audio: string[];
+  message: string;
+}
+
 /** Extended project data returned by the detail endpoint. */
 export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   output_path: string | null;

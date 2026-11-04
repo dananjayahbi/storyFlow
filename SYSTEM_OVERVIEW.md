@@ -169,6 +169,10 @@ The same tab has a three-block **demo playground**:
 - Background music is mixed under the narration during rendering.
 - Progress is reported per phase (segments, frames, encoding, finalising).
 - Renders can be cancelled.
+- **Bulk Create** is account-scoped: `GET /api/projects/render-readiness/`
+  applies the exact render validator (including on-disk files) and the page
+  only offers ready projects, rendering them sequentially with cancel and
+  automatic readiness refresh afterwards.
 - Completed videos appear in the **Gallery**, with hover previews, in-browser
   playback, seeking, download and fullscreen.
 - Each render is stored as its own asset linked to the project, so re-rendering

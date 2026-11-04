@@ -4,14 +4,15 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  getProjects,
-  getProject,
+  getProjectRenderReadiness,
   startRender,
   getRenderStatus,
   cancelRender,
 } from '@/lib/api';
 import { sectionFromPathname } from '@/lib/section';
-import { Project, ProjectDetail, Segment, RenderStatusResponse } from '@/lib/types';
+import { withAccount } from '@/lib/account';
+import { useAccountId } from '@/lib/useAccountId';
+import { Project } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -63,8 +64,10 @@ import { toast } from 'sonner';
 type ReadinessStatus = 'checking' | 'ready' | 'not-ready' | 'processing';
 
 interface ProjectReadiness {
-  project: Project;
-  detail: ProjectDetail | null;
+  id: string;
+  title: string;
+  status: Project['status'];
+  segmentCount: number;
   readiness: ReadinessStatus;
   missingImages: number;
   missingAudio: number;
@@ -91,27 +94,9 @@ interface QueueItem {
 
 // ── Constants ──
 
-const RENDERABLE_STATUSES: Project['status'][] = ['DRAFT', 'COMPLETED', 'FAILED'];
 const POLL_INTERVAL = 3000;
 
 // ── Helper functions ──
-
-function validateSegments(segments: Segment[]): {
-  missingImages: number;
-  missingAudio: number;
-  isEmpty: boolean;
-} {
-  if (segments.length === 0) {
-    return { missingImages: 0, missingAudio: 0, isEmpty: true };
-  }
-  let missingImages = 0;
-  let missingAudio = 0;
-  for (const seg of segments) {
-    if (!seg.image_file) missingImages++;
-    if (!seg.audio_file) missingAudio++;
-  }
-  return { missingImages, missingAudio, isEmpty: false };
-}
 
 function getReadinessBadge(item: ProjectReadiness) {
   switch (item.readiness) {
@@ -155,6 +140,13 @@ function getIssueTooltip(item: ProjectReadiness): string {
 export default function BulkCreatePage() {
   const pathname = usePathname();
   const section = sectionFromPathname(pathname);
+  const accountId = useAccountId(section);
+  const projectHref = useCallback(
+    (projectId: string) =>
+      withAccount(`/${section}/projects/${projectId}`, accountId),
+    [section, accountId],
+  );
+
   // ── State ──
   const [projectItems, setProjectItems] = useState<ProjectReadiness[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +158,7 @@ export default function BulkCreatePage() {
 
   const pollTimersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const cancelledRef = useRef(false);
+  const mountedRef = useRef(true);
 
   // ── Derived state ──
   const readyProjects = useMemo(
@@ -174,12 +167,12 @@ export default function BulkCreatePage() {
   );
 
   const selectedReadyCount = useMemo(
-    () => readyProjects.filter((p) => selectedIds.has(p.project.id)).length,
+    () => readyProjects.filter((p) => selectedIds.has(p.id)).length,
     [readyProjects, selectedIds]
   );
 
   const allReadySelected = useMemo(
-    () => readyProjects.length > 0 && readyProjects.every((p) => selectedIds.has(p.project.id)),
+    () => readyProjects.length > 0 && readyProjects.every((p) => selectedIds.has(p.id)),
     [readyProjects, selectedIds]
   );
 
@@ -190,87 +183,57 @@ export default function BulkCreatePage() {
 
   // ── Cleanup poll timers on unmount ──
   useEffect(() => {
+    mountedRef.current = true;
+    const timers = pollTimersRef.current;
     return () => {
-      pollTimersRef.current.forEach((timer) => clearInterval(timer));
-      pollTimersRef.current.clear();
+      mountedRef.current = false;
+      timers.forEach((timer) => clearInterval(timer));
+      timers.clear();
     };
   }, []);
 
-  // ── Fetch & validate projects ──
-  const fetchAndValidate = useCallback(async () => {
-    setLoading(true);
+  // ── Fetch the backend's real render preflight for this account ──
+  const fetchAndValidate = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     setError(null);
 
     try {
-      const response = await getProjects(section);
-      const projects = response.results;
+      const readiness = await getProjectRenderReadiness(section);
 
-      // Filter to renderable statuses only
-      const renderable = projects.filter((p) =>
-        RENDERABLE_STATUSES.includes(p.status) || p.status === 'PROCESSING'
-      );
+      // The endpoint returns every project; keep only statuses this page can
+      // act on (renderable drafts/completed/failed) plus in-flight renders.
+      const items: ProjectReadiness[] = readiness
+        .filter((item) => item.renderable || item.is_processing)
+        .map((item) => ({
+          id: item.project_id,
+          title: item.title,
+          status: item.status,
+          segmentCount: item.segment_count,
+          readiness: item.is_processing
+            ? ('processing' as const)
+            : item.ready
+              ? ('ready' as const)
+              : ('not-ready' as const),
+          missingImages: item.missing_images.length,
+          missingAudio: item.missing_audio.length,
+          emptySegments: item.segment_count === 0,
+        }));
 
-      // Initialize items with 'checking' readiness
-      const initial: ProjectReadiness[] = renderable.map((p) => ({
-        project: p,
-        detail: null,
-        readiness: p.status === 'PROCESSING' ? 'processing' : 'checking',
-        missingImages: 0,
-        missingAudio: 0,
-        emptySegments: false,
-      }));
-
-      setProjectItems(initial);
-      setLoading(false);
-
-      // Validate each project's segments in parallel
-      const validationPromises = renderable
-        .filter((p) => p.status !== 'PROCESSING')
-        .map(async (project) => {
-          try {
-            const detail = await getProject(project.id);
-            const { missingImages, missingAudio, isEmpty } = validateSegments(detail.segments);
-            const isReady = !isEmpty && missingImages === 0 && missingAudio === 0;
-
-            return {
-              projectId: project.id,
-              detail,
-              readiness: isReady ? ('ready' as const) : ('not-ready' as const),
-              missingImages,
-              missingAudio,
-              emptySegments: isEmpty,
-            };
-          } catch {
-            return {
-              projectId: project.id,
-              detail: null,
-              readiness: 'not-ready' as const,
-              missingImages: 0,
-              missingAudio: 0,
-              emptySegments: true,
-            };
-          }
-        });
-
-      const results = await Promise.all(validationPromises);
-
-      setProjectItems((prev) =>
-        prev.map((item) => {
-          const result = results.find((r) => r.projectId === item.project.id);
-          if (!result) return item;
-          return {
-            ...item,
-            detail: result.detail,
-            readiness: result.readiness,
-            missingImages: result.missingImages,
-            missingAudio: result.missingAudio,
-            emptySegments: result.emptySegments,
-          };
-        })
-      );
+      if (!mountedRef.current) return;
+      setProjectItems(items);
+      // Drop selections that are no longer ready after a refresh.
+      setSelectedIds((previous) => {
+        const readyIds = new Set(
+          items.filter((item) => item.readiness === 'ready').map((item) => item.id),
+        );
+        return new Set(Array.from(previous).filter((id) => readyIds.has(id)));
+      });
     } catch {
-      setError('Failed to load projects. Please try again.');
-      setLoading(false);
+      if (mountedRef.current) {
+        setError('Failed to load render readiness. Please try again.');
+      }
+    } finally {
+      if (mountedRef.current) setLoading(false);
     }
   }, [section]);
 
@@ -278,7 +241,6 @@ export default function BulkCreatePage() {
     fetchAndValidate();
   }, [fetchAndValidate]);
 
-  // ── Selection handlers ──
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -292,77 +254,13 @@ export default function BulkCreatePage() {
     if (allReadySelected) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(readyProjects.map((p) => p.project.id)));
+      setSelectedIds(new Set(readyProjects.map((p) => p.id)));
     }
   }, [allReadySelected, readyProjects]);
 
-  // ── Poll render status for a single project ──
-  const pollProjectRender = useCallback(
-    (projectId: string) => {
-      // Clear any existing timer
-      const existing = pollTimersRef.current.get(projectId);
-      if (existing) clearInterval(existing);
-
-      const timer = setInterval(async () => {
-        if (cancelledRef.current) {
-          clearInterval(timer);
-          pollTimersRef.current.delete(projectId);
-          return;
-        }
-
-        try {
-          const status: RenderStatusResponse = await getRenderStatus(projectId);
-
-          setQueue((prev) =>
-            prev.map((item) => {
-              if (item.projectId !== projectId) return item;
-
-              if (status.status === 'COMPLETED') {
-                clearInterval(timer);
-                pollTimersRef.current.delete(projectId);
-                return {
-                  ...item,
-                  status: 'completed' as const,
-                  progress: 100,
-                  currentPhase: 'Done',
-                };
-              }
-
-              if (status.status === 'FAILED') {
-                clearInterval(timer);
-                pollTimersRef.current.delete(projectId);
-                return {
-                  ...item,
-                  status: 'failed' as const,
-                  progress: 0,
-                  error: 'Render failed on the server',
-                };
-              }
-
-              // Still processing — update progress
-              return {
-                ...item,
-                status: 'rendering' as const,
-                progress: status.progress?.percentage ?? item.progress,
-                currentPhase: status.progress?.current_phase ?? item.currentPhase,
-                currentSegment: status.progress?.current_segment ?? item.currentSegment,
-                totalSegments: status.progress?.total_segments ?? item.totalSegments,
-              };
-            })
-          );
-        } catch {
-          // Transient error — keep polling
-        }
-      }, POLL_INTERVAL);
-
-      pollTimersRef.current.set(projectId, timer);
-    },
-    []
-  );
-
   // ── Start bulk render ──
   const startBulkRender = useCallback(async () => {
-    const selected = readyProjects.filter((p) => selectedIds.has(p.project.id));
+    const selected = readyProjects.filter((p) => selectedIds.has(p.id));
     if (selected.length === 0) return;
 
     cancelledRef.current = false;
@@ -371,13 +269,13 @@ export default function BulkCreatePage() {
 
     // Initialize queue
     const initialQueue: QueueItem[] = selected.map((p) => ({
-      projectId: p.project.id,
-      title: p.project.title,
+      projectId: p.id,
+      title: p.title,
       status: 'queued' as const,
       progress: 0,
       currentPhase: 'Waiting',
       currentSegment: 0,
-      totalSegments: p.project.segment_count,
+      totalSegments: p.segmentCount,
       error: null,
     }));
 
@@ -522,8 +420,14 @@ export default function BulkCreatePage() {
       }
     }
 
+    if (!mountedRef.current) return;
     setIsRunning(false);
-  }, [readyProjects, selectedIds]);
+    setIsCancelling(false);
+    cancelledRef.current = false;
+    // Re-run the backend preflight so statuses/readiness reflect the new
+    // renderings without forcing the user to press Refresh.
+    await fetchAndValidate({ silent: true });
+  }, [readyProjects, selectedIds, fetchAndValidate]);
 
   // ── Cancel bulk render ──
   const handleCancelBulk = useCallback(() => {
@@ -564,7 +468,7 @@ export default function BulkCreatePage() {
             Select ready projects and render them in batch
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchAndValidate} disabled={loading || isRunning}>
+        <Button variant="outline" size="sm" onClick={() => void fetchAndValidate()} disabled={loading || isRunning}>
           <RefreshCw className={`size-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
@@ -652,7 +556,7 @@ export default function BulkCreatePage() {
               <p className="font-medium">No projects found</p>
               <p className="text-sm mt-1">Create a project first, then come back here</p>
               <Button asChild variant="outline" size="sm" className="mt-4">
-                <Link href={`/${section}/projects`}>Go to Projects</Link>
+                <Link href={withAccount(`/${section}/projects`, accountId)}>Go to Projects</Link>
               </Button>
             </div>
           ) : (
@@ -678,35 +582,35 @@ export default function BulkCreatePage() {
               <TableBody>
                 {projectItems.map((item) => {
                   const isReady = item.readiness === 'ready';
-                  const isChecked = selectedIds.has(item.project.id);
+                  const isChecked = selectedIds.has(item.id);
                   const readinessBadge = getReadinessBadge(item);
-                  const statusBadge = deriveProjectBadge(item.project.status);
+                  const statusBadge = deriveProjectBadge(item.status);
                   const issueText = getIssueTooltip(item);
 
                   return (
                     <TableRow
-                      key={item.project.id}
+                      key={item.id}
                       className={isReady ? 'cursor-pointer' : 'opacity-60'}
-                      onClick={() => isReady && !isRunning && toggleSelect(item.project.id)}
+                      onClick={() => isReady && !isRunning && toggleSelect(item.id)}
                     >
-                      <TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
                         <Checkbox
                           checked={isChecked}
-                          onCheckedChange={() => toggleSelect(item.project.id)}
+                          onCheckedChange={() => toggleSelect(item.id)}
                           disabled={!isReady || isRunning}
-                          aria-label={`Select ${item.project.title}`}
+                          aria-label={`Select ${item.title}`}
                         />
                       </TableCell>
                       <TableCell className="font-medium max-w-75 truncate">
                         <Link
-                          href={`/${section}/projects/${item.project.id}`}
+                          href={projectHref(item.id)}
                           className="hover:underline"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {item.project.title}
+                          {item.title}
                         </Link>
                       </TableCell>
-                      <TableCell>{item.project.segment_count}</TableCell>
+                      <TableCell>{item.segmentCount}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={statusBadge.className}>
                           {statusBadge.label}
@@ -842,7 +746,7 @@ export default function BulkCreatePage() {
                           <XCircle className="size-4 text-muted-foreground" />
                         )}
                         <Link
-                          href={`/${section}/projects/${item.projectId}`}
+                          href={projectHref(item.projectId)}
                           className="font-medium hover:underline"
                         >
                           {item.title}

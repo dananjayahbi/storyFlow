@@ -333,6 +333,42 @@ class ProjectViewSet(viewsets.ModelViewSet):
         # 2. Delete database record (CASCADE handles segments)
         instance.delete()
 
+    @action(detail=False, methods=['get'], url_path='render-readiness')
+    def render_readiness(self, request):
+        """Report which projects are safe for Bulk Create to render.
+
+        Unlike the lightweight list endpoint, this runs the same validation as
+        ``POST /api/projects/<id>/render/`` (including checking that image and
+        audio files still exist on disk), so the batch picker can never offer a
+        project the renderer will reject.
+        """
+        items = []
+        for project in self.get_queryset():
+            validation = validate_project_for_render(project)
+            missing_images = (
+                validation.get('missing_images', []) if validation else []
+            )
+            missing_audio = (
+                validation.get('missing_audio', []) if validation else []
+            )
+            is_processing = project.status == STATUS_PROCESSING
+            renderable = project.status in RENDERABLE_STATUSES
+            items.append(
+                {
+                    'project_id': str(project.id),
+                    'title': project.title,
+                    'status': project.status,
+                    'segment_count': project.segments.count(),
+                    'renderable': renderable,
+                    'ready': renderable and validation is None,
+                    'is_processing': is_processing,
+                    'missing_images': missing_images,
+                    'missing_audio': missing_audio,
+                    'message': validation['message'] if validation else '',
+                }
+            )
+        return Response({'results': items})
+
     @action(detail=True, methods=['post'], url_path='generate-all-audio')
     def generate_all_audio(self, request, pk=None):
         """Generate TTS audio for all eligible segments in a project.

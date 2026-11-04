@@ -3,6 +3,7 @@ import {
   Account,
   Project,
   ProjectDetail,
+  ProjectRenderReadiness,
   Segment,
   CreateProjectPayload,
   ImportProjectRequest,
@@ -109,6 +110,20 @@ export async function getProjects(section?: Section): Promise<PaginatedResponse<
 export async function getProject(id: string): Promise<ProjectDetail> {
   const response = await api.get<ProjectDetail>(`/api/projects/${id}/`);
   return response.data;
+}
+
+/**
+ * Bulk Create preflight. Runs the backend's real render validation for every
+ * project in the selected account, including checking asset files on disk.
+ */
+export async function getProjectRenderReadiness(
+  section?: Section,
+): Promise<ProjectRenderReadiness[]> {
+  const response = await api.get<{ results: ProjectRenderReadiness[] }>(
+    '/api/projects/render-readiness/',
+    { params: section ? { section } : undefined },
+  );
+  return response.data.results;
 }
 
 export async function createProject(payload: CreateProjectPayload): Promise<Project> {

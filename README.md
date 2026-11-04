@@ -625,6 +625,25 @@ backend\venv\Scripts\python.exe backend\manage.py test tests.test_playground
 cd frontend && npm test
 ```
 
+### Bulk Create
+
+Bulk Create renders several projects from one page, scoped to the selected
+account:
+
+- The page asks `GET /api/projects/render-readiness/` for the backend's exact
+  render preflight. That endpoint runs the same validator as
+  `POST /api/projects/<id>/render/`, including checking that image and audio
+  files still exist on disk — not just that the database fields are set.
+- Only ready projects can be selected; rows show the exact number of missing
+  images/audio files and projects already rendering are excluded. Empty
+  projects and unsupported statuses are reported too.
+- Rendering is sequential with per-project phase/segment progress; the batch can
+  be cancelled and completed renders are preserved.
+- Project links carry the active `?account=` id, and the readiness table is
+  refreshed automatically after a batch so statuses match the new renderings.
+- Selection is never lost to double toggles: clicking the checkbox and the row
+  are handled independently.
+
 ### Dashboard
 
 The Dashboard is scoped to the selected page/channel and shows project KPIs
