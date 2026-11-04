@@ -7,7 +7,7 @@ from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
     OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
     DefaultProjectSettings, SECTION_CHOICES,
-    apply_project_profile, resolve_project_defaults,
+    apply_project_profile, resolve_project_defaults, normalize_subtitle_y,
 )
 from .parsers import JSONParser, TextParser, ParseError
 from .storage_paths import media_url
@@ -835,6 +835,10 @@ class ProjectDetailSerializer(
         into this project.  The project then owns that snapshot: editing it
         afterwards never changes another project or the saved defaults.
         ``reset_settings`` re-applies the profile without changing resolution.
+
+        Subtitle placement is resolution-aware: the manual Y override is
+        recomputed for the new frame height, and choosing a preset position
+        clears the manual override so the preset can take effect.
         """
         reset_settings = validated_data.pop('reset_settings', False)
         old_thumbnail = instance.thumbnail.name if instance.thumbnail else ''
@@ -842,6 +846,7 @@ class ProjectDetailSerializer(
             'resolution_width' in validated_data
             or 'resolution_height' in validated_data
         )
+        position_changed = 'subtitle_position' in validated_data
         instance = super().update(instance, validated_data)
         if 'thumbnail' in validated_data and old_thumbnail:
             new_thumbnail = instance.thumbnail.name if instance.thumbnail else ''
@@ -852,14 +857,8 @@ class ProjectDetailSerializer(
                     pass
 
         if reset_settings or resolution_changed:
-            defaults = resolve_project_defaults(
-                instance.account,
-                instance.resolution_width,
-                instance.resolution_height,
-            )
-            apply_project_profile(instance, defaults)
-            # The selected resolution is the profile key; never let the
-            # fallback account settings change the project's dimensions.
+            # The selected resolution is the profile key; restore it before
+            # applying defaults so Y scaling uses the final frame height.
             if resolution_changed:
                 instance.resolution_width = validated_data.get(
                     'resolution_width', instance.resolution_width,
@@ -867,7 +866,30 @@ class ProjectDetailSerializer(
                 instance.resolution_height = validated_data.get(
                     'resolution_height', instance.resolution_height,
                 )
+            defaults = resolve_project_defaults(
+                instance.account,
+                instance.resolution_width,
+                instance.resolution_height,
+            )
+            apply_project_profile(instance, defaults)
             instance.save()
+
+        if position_changed and 'subtitle_y_position' not in validated_data:
+            # Picking Bottom/Center/Top must actually move the subtitle;
+            # otherwise a stale manual Y would keep overriding the preset.
+            instance.subtitle_y_position = None
+            instance.save(update_fields=['subtitle_y_position'])
+        elif instance.subtitle_y_position is not None:
+            # A direct Y edit is also clamped so it can never leave the frame.
+            clamped = normalize_subtitle_y(
+                instance.subtitle_y_position,
+                None,
+                instance.resolution_height,
+                instance.subtitle_font_size,
+            )
+            if clamped != instance.subtitle_y_position:
+                instance.subtitle_y_position = clamped
+                instance.save(update_fields=['subtitle_y_position'])
         return instance
 
     # ── Field-level validators (mirror GlobalSettingsSerializer) ──

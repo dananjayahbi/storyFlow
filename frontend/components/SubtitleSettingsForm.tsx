@@ -303,7 +303,12 @@ export function SubtitleSettingsForm({
         <Select
           value={position}
           onValueChange={(value) => {
-            onChange({ subtitle_position: value as 'bottom' | 'center' | 'top' });
+            // Choosing a preset must clear any manual Y override; otherwise
+            // the old pixel value keeps winning over the new position.
+            onChange({
+              subtitle_position: value as 'bottom' | 'center' | 'top',
+              subtitle_y_position: null,
+            });
           }}
         >
           <SelectTrigger className="h-8 text-sm">

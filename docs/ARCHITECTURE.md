@@ -539,7 +539,7 @@ The `Project` model is the central entity representing a single video production
 - **TTS engine:** `tts_engine` (`kokoro` default / `qwen`), plus Qwen mode,
   speaker, language, instruct, token budget, cloning flag and active
   `VoiceReference` FK. Copied from GlobalSettings at import time.
-- **Subtitle settings:** Font family, size, color (hex), position, custom font file, enabled toggle
+- **Subtitle settings:** Font family, size, color (hex), position, optional manual Y override, custom font file, enabled toggle. Manual Y values are resolution-aware: they are scaled and clamped when the frame height changes, and selecting a preset position clears the override.
 - **Ken Burns effect:** Zoom intensity, transition duration
 - **Audio settings:** Inter-segment silence duration
 - **Logo watermark:** Enabled flag, active logo FK, scale, position, opacity, margin
@@ -678,6 +678,7 @@ The API uses layered serializers with extensive field-level and cross-field vali
 - Hex color format: `#RGB` or `#RRGGBB`
 - Subtitle font size: 12–120 px
 - Subtitle position: `bottom` / `center` / `top`
+- Manual subtitle Y: scaled from the profile/frame height, clamped to `0 … frame height − estimated text block`
 - Ken Burns zoom: 1.0–2.0
 - Transition duration: 0.0–2.0 seconds
 - FPS: 24, 30, or 60 only

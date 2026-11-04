@@ -1261,6 +1261,10 @@ def apply_project_profile(project, source):
 
     ``DefaultProjectSettings`` stores the framerate as ``framerate``;
     ``AccountSettings`` / ``GlobalSettings`` still call it ``render_fps``.
+
+    A manual subtitle Y is stored in pixels for a specific frame height, so it
+    is scaled to the project's resolution and clamped inside the frame.  This
+    keeps an account-wide default usable for every aspect ratio.
     """
     for field in PROJECT_PROFILE_FIELDS:
         source_field = field
@@ -1270,7 +1274,40 @@ def apply_project_profile(project, source):
         if field == 'custom_font_file':
             value = value.name if value else None
         setattr(project, field, value)
+
+    source_height = getattr(
+        source,
+        'resolution_height',
+        getattr(source, 'render_height', None),
+    )
+    project.subtitle_y_position = normalize_subtitle_y(
+        project.subtitle_y_position,
+        source_height,
+        project.resolution_height,
+        project.subtitle_font_size,
+    )
     return project
+
+
+def subtitle_block_height(font_size):
+    """Estimated rendered subtitle block height (matches the compositors)."""
+    size = max(1, int(font_size or 48))
+    pad = max(8, size // 4, 12)
+    return size + 2 * pad
+
+
+def normalize_subtitle_y(value, source_height, target_height, font_size):
+    """Scale and clamp a manual subtitle Y for a target frame height."""
+    if value is None:
+        return None
+    target_height = int(target_height or 0)
+    if target_height <= 0:
+        return max(0, int(value))
+    y = int(value)
+    if source_height and int(source_height) != target_height:
+        y = round(y * target_height / int(source_height))
+    max_top = max(0, target_height - subtitle_block_height(font_size))
+    return max(0, min(y, max_top))
 
 
 def project_settings_payload(source):

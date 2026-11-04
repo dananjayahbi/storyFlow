@@ -27,7 +27,7 @@ from .models import (
     STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
     RENDERING_STATUSES, RENDERING_STATUS_PUBLISHED,
     SECTION_CHOICES, apply_project_profile, resolve_project_defaults,
-    project_settings_payload,
+    project_settings_payload, normalize_subtitle_y,
 )
 from .serializers import (
     AccountSerializer, ProjectSerializer, ProjectDetailSerializer,
@@ -319,12 +319,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
         account_settings = AccountSettings.load(account)
         width = requested_width or account_settings.render_width
         height = requested_height or account_settings.render_height
+        project.resolution_width = width
+        project.resolution_height = height
         apply_project_profile(
             project,
             resolve_project_defaults(account, width, height),
         )
-        project.resolution_width = width
-        project.resolution_height = height
         project.save()
 
     def perform_destroy(self, instance):
@@ -1777,7 +1777,14 @@ def _serialize_default_profile(account, width, height, profile):
         data = dict(DefaultProjectSettingsSerializer(profile).data)
         data['is_customized'] = True
     else:
-        data = project_settings_payload(AccountSettings.load(account))
+        account_settings = AccountSettings.load(account)
+        data = project_settings_payload(account_settings)
+        data['subtitle_y_position'] = normalize_subtitle_y(
+            data.get('subtitle_y_position'),
+            account_settings.render_height,
+            height,
+            data.get('subtitle_font_size'),
+        )
         data.update({
             'id': None,
             'resolution_width': width,

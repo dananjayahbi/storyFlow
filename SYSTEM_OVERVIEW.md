@@ -166,7 +166,12 @@ The same tab has a three-block **demo playground**:
 
 - Optional burned-in subtitles.
 - Configurable font, size, colour and position (top/center/bottom).
-- Optional manual vertical position.
+- Optional manual vertical position. Manual Y values are stored as pixels for
+  the current frame height; changing resolution rescales and clamps them, and
+  choosing a preset position clears the manual override.
+- **Reset to bottom** calculates the top-edge Y from the current resolution and
+  font size (8% bottom margin plus the estimated text block), saving an
+  explicit position that is guaranteed to stay inside the frame.
 - Custom font upload.
 - A subtitle preview is available inside the editor.
 

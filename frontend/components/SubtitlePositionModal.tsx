@@ -96,7 +96,7 @@ export function SubtitlePositionModal({
   // This is exactly what the backend uses as y_pos — no conversion needed.
   const initialY =
     yPosition !== null && yPosition !== undefined
-      ? yPosition
+      ? Math.max(0, Math.min(yPosition, maxTopY))
       : presetToTopY(presetPosition, renderHeight, subtitleBlockH);
 
   const [localY, setLocalY] = useState(initialY);
@@ -109,11 +109,11 @@ export function SubtitlePositionModal({
     if (open) {
       const y =
         yPosition !== null && yPosition !== undefined
-          ? yPosition
+          ? Math.max(0, Math.min(yPosition, maxTopY))
           : presetToTopY(presetPosition, renderHeight, subtitleBlockH);
       setLocalY(y);
     }
-  }, [open, yPosition, presetPosition, renderHeight, subtitleBlockH]);
+  }, [open, yPosition, presetPosition, renderHeight, subtitleBlockH, maxTopY]);
 
   // ── Compute scale to fit preview in modal ──
   // Scale down so both width ≤ MAX_PREVIEW_WIDTH and height ≤ MAX_PREVIEW_HEIGHT
@@ -186,12 +186,16 @@ export function SubtitlePositionModal({
 
   // ── Reset to preset ──
   const handleReset = async () => {
-    const defaultY = presetToTopY(presetPosition, renderHeight, subtitleBlockH);
+    // Calculate an explicit, resolution-aware top-edge Y and persist it.
+    // Using the current frame height (not a stale pixel value) guarantees the
+    // subtitle lands inside the visible frame on this aspect ratio.
+    const defaultY = clampTopY(
+      presetToTopY(presetPosition, renderHeight, subtitleBlockH),
+    );
     setLocalY(defaultY);
-    // Also persist null to clear manual override
     setIsSaving(true);
     try {
-      await onSave(null);
+      await onSave(defaultY);
       onOpenChange(false);
     } finally {
       setIsSaving(false);
