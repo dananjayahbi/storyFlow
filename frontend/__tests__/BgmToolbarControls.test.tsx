@@ -3,7 +3,7 @@ import { BgmToolbarControls } from '@/components/BgmToolbarControls';
 import { BgmGenerationProgress } from '@/components/BgmGenerationProgress';
 import { useBgmStore, useProjectStore } from '@/lib/stores';
 import * as api from '@/lib/api';
-import type { BgmClip, ProjectDetail, TaskStatusResponse } from '@/lib/types';
+import type { BgmClip, ProjectDetail, Segment, TaskStatusResponse } from '@/lib/types';
 
 jest.mock('@/lib/api');
 jest.mock('sonner', () => ({
@@ -41,6 +41,11 @@ const project = {
   active_bgm: null,
 } as unknown as ProjectDetail;
 
+const readySegments = [
+  { id: 's1', audio_file: '/a.wav', audio_duration: 2.4 },
+  { id: 's2', audio_file: '/b.wav', audio_duration: 3.1 },
+] as unknown as Segment[];
+
 const done: TaskStatusResponse = {
   task_id: 'task-1',
   status: 'COMPLETED',
@@ -72,11 +77,33 @@ describe('BgmToolbarControls', () => {
   });
 
   it('shows the track picker and MusicGen button when enabled', async () => {
-    render(<BgmToolbarControls project={project} />);
+    render(<BgmToolbarControls project={project} segments={readySegments} />);
 
     expect(screen.getByText('Generate with MusicGen')).toBeInTheDocument();
     expect(screen.getByTitle('Background music track')).toBeInTheDocument();
     await waitFor(() => expect(mockApi.getBgmClips).toHaveBeenCalled());
+  });
+
+  it('disables MusicGen until every block has TTS audio', () => {
+    const missing = [
+      { id: 's1', audio_file: '/a.wav', audio_duration: 2.4 },
+      { id: 's2', audio_file: null, audio_duration: null },
+    ] as unknown as Segment[];
+    render(<BgmToolbarControls project={project} segments={missing} />);
+
+    const button = screen.getByRole('button', { name: /Generate with MusicGen/i });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute(
+      'title',
+      'Generate TTS audio for every block first (1 remaining)'
+    );
+  });
+
+  it('disables MusicGen when the project has no blocks', () => {
+    render(<BgmToolbarControls project={project} segments={[]} />);
+    expect(
+      screen.getByRole('button', { name: /Generate with MusicGen/i })
+    ).toBeDisabled();
   });
 
   it('queues a soundtrack and shows detailed progress', async () => {
@@ -112,7 +139,7 @@ describe('BgmToolbarControls', () => {
 
     render(
       <>
-        <BgmToolbarControls project={project} />
+        <BgmToolbarControls project={project} segments={readySegments} />
         <BgmGenerationProgress />
       </>
     );

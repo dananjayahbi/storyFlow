@@ -686,7 +686,7 @@ export default function TimelineEditorPage() {
                 {project?.bgm_enabled && (
                   <>
                     <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
-                    <BgmToolbarControls project={project} />
+                    <BgmToolbarControls project={project} segments={segments} />
                   </>
                 )}
               </div>

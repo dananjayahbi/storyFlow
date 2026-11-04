@@ -12,16 +12,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useBgmStore } from '@/lib/stores';
-import type { ProjectDetail } from '@/lib/types';
+import type { ProjectDetail, Segment } from '@/lib/types';
 
 /**
  * Background-music track picker + MusicGen trigger, shown beside the main
  * "Generate All Audio" action whenever the project has BG music enabled.
  *
- * Advanced MusicGen settings live in the project settings panel; this is the
- * fast path used while editing the timeline.
+ * MusicGen needs the measured duration of every narration block, so the
+ * trigger stays disabled until all TTS audio has been generated.
  */
-export function BgmToolbarControls({ project }: { project: ProjectDetail }) {
+export function BgmToolbarControls({
+  project,
+  segments = [],
+}: {
+  project: ProjectDetail;
+  segments?: Segment[];
+}) {
   const clips = useBgmStore((state) => state.clips);
   const engine = useBgmStore((state) => state.engine);
   const engineLoaded = useBgmStore((state) => state.engineLoaded);
@@ -29,6 +35,11 @@ export function BgmToolbarControls({ project }: { project: ProjectDetail }) {
   const ensureLoaded = useBgmStore((state) => state.ensureLoaded);
   const generate = useBgmStore((state) => state.generate);
   const setActiveTrack = useBgmStore((state) => state.setActiveTrack);
+
+  const missingTts = segments.filter(
+    (segment) => !segment.audio_file || !segment.audio_duration
+  );
+  const ttsReady = segments.length > 0 && missingTts.length === 0;
 
   useEffect(() => {
     if (project.bgm_enabled) void ensureLoaded(project.id);
@@ -62,6 +73,12 @@ export function BgmToolbarControls({ project }: { project: ProjectDetail }) {
       ? engine?.reason || 'MusicGen is unavailable'
       : undefined;
 
+  const missingTtsReason = !ttsReady
+    ? segments.length === 0
+      ? 'Add at least one narration block before generating music'
+      : `Generate TTS audio for every block first (${missingTts.length} remaining)`
+    : undefined;
+
   return (
     <div className="flex items-center gap-2">
       <Music className="hidden h-3.5 w-3.5 text-muted-foreground sm:block" />
@@ -90,9 +107,14 @@ export function BgmToolbarControls({ project }: { project: ProjectDetail }) {
         variant="outline"
         className="h-8 text-xs"
         onClick={() => void handleGenerate()}
-        disabled={generating || (engineLoaded && !engine?.available)}
+        disabled={
+          generating ||
+          !ttsReady ||
+          (engineLoaded && !engine?.available)
+        }
         title={
           unavailableReason ||
+          missingTtsReason ||
           'Generate a continuous MusicGen soundtrack from this script'
         }
       >

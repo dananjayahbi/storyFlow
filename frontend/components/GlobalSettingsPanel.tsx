@@ -49,6 +49,7 @@ function getInitialCollapsed(): boolean {
 export function GlobalSettingsPanel() {
   const {
     project,
+    segments,
     isLoading: isProjectLoading,
     updateProjectSettings,
   } = useProjectStore();
@@ -65,6 +66,11 @@ export function GlobalSettingsPanel() {
     generate: generateMusic,
     setActiveTrack,
   } = useBgmStore();
+
+  const missingTts = segments.filter(
+    (segment) => !segment.audio_file || !segment.audio_duration
+  );
+  const ttsReady = segments.length > 0 && missingTts.length === 0;
 
   // Start expanded to keep server/client markup identical, then restore the
   // persisted choice after hydration.
@@ -243,6 +249,14 @@ export function GlobalSettingsPanel() {
 
   const handleGenerateMusic = useCallback(async () => {
     if (!project) return;
+    if (!ttsReady) {
+      toast.error(
+        segments.length === 0
+          ? 'Add at least one narration block before generating music.'
+          : `Generate TTS audio for every block first (${missingTts.length} remaining).`
+      );
+      return;
+    }
     const result = await generateMusic(
       project.id,
       `${project.title} — Generated Soundtrack`
@@ -252,7 +266,7 @@ export function GlobalSettingsPanel() {
     } else if (result.error) {
       toast.error(result.error);
     }
-  }, [project, generateMusic]);
+  }, [project, generateMusic, ttsReady, segments.length, missingTts.length]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -579,11 +593,15 @@ export function GlobalSettingsPanel() {
                     variant="outline"
                     size="sm"
                     onClick={() => void handleGenerateMusic()}
-                    disabled={generatingMusic || !musicEngine?.available}
+                    disabled={generatingMusic || !ttsReady || !musicEngine?.available}
                     title={
-                      musicEngine?.available
-                        ? 'Generate a continuous MusicGen soundtrack from this script'
-                        : musicEngine?.reason || 'MusicGen is unavailable'
+                      !ttsReady
+                        ? segments.length === 0
+                          ? 'Add at least one narration block before generating music'
+                          : `Generate TTS audio for every block first (${missingTts.length} remaining)`
+                        : musicEngine?.available
+                          ? 'Generate a continuous MusicGen soundtrack from this script'
+                          : musicEngine?.reason || 'MusicGen is unavailable'
                     }
                   >
                     {generatingMusic ? (

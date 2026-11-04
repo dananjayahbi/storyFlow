@@ -1114,6 +1114,18 @@ explicit instructions and artefacts, then collapses whitespace.
 
 ---
 
+### 7.4.4 Music generation readiness (Issue #30)
+
+MusicGen plans are built from the measured duration of every narration block.
+`music_service.segments_from_project()` rejects a project as soon as one block
+has no `audio_duration`, so a soundtrack can never be generated against a
+half-narrated timeline. The editor mirrors that contract in both MusicGen
+buttons (`BgmToolbarControls` and the settings panel): they stay disabled until
+`segments.length > 0` and every segment has both `audio_file` and
+`audio_duration`, with a tooltip that reports how many blocks still need TTS.
+
+---
+
 ### 7.5 Subtitle Engine
 
 **File:** `core_engine/subtitle_engine.py` (~360 lines)
