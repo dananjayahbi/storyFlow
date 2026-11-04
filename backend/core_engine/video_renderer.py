@@ -921,6 +921,7 @@ def render_project(
                 "focus_x": getattr(segment, "image_focus_x", 0.5),
                 "focus_y": getattr(segment, "image_focus_y", 0.5),
                 "focus_area": getattr(segment, "image_focus_area", None),
+                "focus_areas": getattr(segment, "image_focus_areas", None),
             })
 
             if on_progress:

@@ -381,6 +381,7 @@ def render_task_function(project_id: str, task_id: str) -> None:
     # Step 2 — deferred imports
     from core_engine.video_renderer import render_project  # noqa: E402
     from api.models import Project, STATUS_COMPLETED, STATUS_FAILED  # noqa: E402
+    from api.renderings import register_rendering  # noqa: E402
 
     tm = get_task_manager()
 
@@ -434,11 +435,25 @@ def render_task_function(project_id: str, task_id: str) -> None:
         # Step 4 — blocking render call
         result = render_project(project_id, on_progress=on_progress)
 
-        # Step 5 — success: update Project model
+        # Step 5 — success: keep every render as its own gallery asset.
+        # register_rendering moves the exported final.mp4 into a permanent
+        # renderings/<id>.mp4 file, creates the Rendering row and updates the
+        # project so its detail player points at the newest version.
         project = Project.objects.get(id=project_id)
-        project.status = STATUS_COMPLETED
-        project.output_path = _media_relative_path(result.get("output_path", ""))
-        project.save(update_fields=["status", "output_path"])
+        if project.is_playground:
+            project.status = STATUS_COMPLETED
+            project.output_path = _media_relative_path(
+                result.get("output_path", "")
+            )
+            project.save(update_fields=["status", "output_path"])
+        else:
+            register_rendering(
+                project,
+                result.get("output_path", ""),
+                duration=result.get("duration"),
+                file_size=result.get("file_size"),
+                segment_count=result.get("total_segments"),
+            )
 
         # Store result data in TaskManager progress for the status endpoint
         tm.update_task_progress(

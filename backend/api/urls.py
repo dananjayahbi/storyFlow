@@ -94,6 +94,21 @@ urlpatterns = [
     path('settings/outros/', views.outros_view, name='outros-list'),
     path('settings/outros/<str:outro_id>/', views.outro_detail_view, name='outro-detail'),
     path('gallery/', views.gallery_list_view, name='gallery-list'),
+    path(
+        'gallery/bulk-status/',
+        views.gallery_bulk_status_view,
+        name='gallery-bulk-status',
+    ),
+    path(
+        'gallery/bulk-delete/',
+        views.gallery_bulk_delete_view,
+        name='gallery-bulk-delete',
+    ),
+    path(
+        'gallery/<str:rendering_id>/',
+        views.gallery_detail_view,
+        name='gallery-detail',
+    ),
     path('gallery/<str:project_id>/stream/', views.gallery_stream_view, name='gallery-stream'),
     path('gallery/<str:project_id>/download/', views.gallery_download_view, name='gallery-download'),
     path('', include(router.urls)),

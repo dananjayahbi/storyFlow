@@ -21,8 +21,12 @@ interface ImageUploaderProps {
   focusY?: number;
   /** Optional marked subject area inside the frame. */
   focusArea?: ImageFocusArea | null;
+  /** Optional ordered list of marked subject areas (takes precedence). */
+  focusAreas?: ImageFocusArea[] | null;
   onFocusChange?: (segmentId: string, focus: { x: number; y: number }) => Promise<void>;
+  /** Legacy single-area callback (used when no list callback is supplied). */
   onFocusAreaChange?: (segmentId: string, area: ImageFocusArea | null) => Promise<void>;
+  onFocusAreasChange?: (segmentId: string, areas: ImageFocusArea[]) => Promise<void>;
   onUpload: (segmentId: string, file: File) => Promise<void>;
   onRemove: (segmentId: string) => Promise<void>;
 }
@@ -54,12 +58,13 @@ interface SelectionState {
 }
 
 const MIN_FOCUS_AREA = 0.03;
+const MAX_FOCUS_AREAS = 6;
 
 export function ImageUploader({
   segmentId, currentImage, isLocked,
   frameWidth = 1920, frameHeight = 1080, focusX = 0.5, focusY = 0.5,
-  focusArea = null,
-  onFocusChange, onFocusAreaChange, onUpload, onRemove,
+  focusArea = null, focusAreas = null,
+  onFocusChange, onFocusAreaChange, onFocusAreasChange, onUpload, onRemove,
 }: ImageUploaderProps) {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -68,7 +73,8 @@ export function ImageUploader({
   const [isMarking, setIsMarking] = useState(false);
   const [selection, setSelection] = useState<ImageFocusArea | null>(null);
   const [focus, setFocus] = useState({ x: focusX, y: focusY });
-  const [area, setArea] = useState<ImageFocusArea | null>(focusArea);
+  const initialAreas = focusAreas ?? (focusArea ? [focusArea] : []);
+  const [areas, setAreas] = useState<ImageFocusArea[]>(initialAreas);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -91,8 +97,8 @@ export function ImageUploader({
   }, [focusX, focusY, segmentId, currentImage]);
 
   useEffect(() => {
-    setArea(focusArea ?? null);
-  }, [focusArea, segmentId, currentImage]);
+    setAreas(focusAreas ?? (focusArea ? [focusArea] : []));
+  }, [focusAreas, focusArea, segmentId, currentImage]);
 
   useEffect(() => {
     // New image or aspect ratio → any in-flight drag is stale.
@@ -188,6 +194,19 @@ export function ImageUploader({
     };
   };
 
+  const emitAreas = (next: ImageFocusArea[]) => {
+    setAreas(next);
+    if (onFocusAreasChange) {
+      onFocusAreasChange(segmentId, next).catch(() => {
+        setError('Failed to save the focus areas.');
+      });
+    } else if (onFocusAreaChange) {
+      onFocusAreaChange(segmentId, next[0] ?? null).catch(() => {
+        setError('Failed to save the focus area.');
+      });
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isLocked) return;
     e.preventDefault();
@@ -268,19 +287,18 @@ export function ImageUploader({
       setSelection(null);
 
       if (w >= MIN_FOCUS_AREA && h >= MIN_FOCUS_AREA) {
+        if (areas.length >= MAX_FOCUS_AREAS) {
+          setError(`You can mark up to ${MAX_FOCUS_AREAS} focus areas.`);
+          return;
+        }
         const next = {
           x: Number(x.toFixed(4)),
           y: Number(y.toFixed(4)),
           w: Number(w.toFixed(4)),
           h: Number(h.toFixed(4)),
         };
-        setArea(next);
         setIsMarking(false);
-        if (onFocusAreaChange) {
-          onFocusAreaChange(segmentId, next).catch(() => {
-            setError('Failed to save the focus area.');
-          });
-        }
+        emitAreas([...areas, next]);
       } else {
         setError('Draw a larger area to mark the focus.');
       }
@@ -315,16 +333,16 @@ export function ImageUploader({
     }
   };
 
-  const clearFocusArea = () => {
+  const clearFocusAreas = () => {
     if (isLocked) return;
-    setArea(null);
     setIsMarking(false);
     setSelection(null);
-    if (onFocusAreaChange) {
-      onFocusAreaChange(segmentId, null).catch(() => {
-        setError('Failed to clear the focus area.');
-      });
-    }
+    emitAreas([]);
+  };
+
+  const removeFocusArea = (index: number) => {
+    if (isLocked) return;
+    emitAreas(areas.filter((_, position) => position !== index));
   };
 
   const toggleMarking = () => {
@@ -335,7 +353,7 @@ export function ImageUploader({
     selectionRef.current = null;
   };
 
-  const shownArea = selection ?? area;
+  const shownArea = selection;
 
   // State B — Image uploaded: show the render frame with draggable pan
   if (imageUrl) {
@@ -383,13 +401,30 @@ export function ImageUploader({
             {/* Frame crop guides */}
             <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/20" />
 
-            {/* Marked Ken Burns focus area (or the live selection) */}
+            {/* Marked Ken Burns focus areas */}
+            {areas.map((marked, index) => (
+              <div
+                key={`${marked.x}-${marked.y}-${index}`}
+                className="pointer-events-none absolute border-2 border-primary bg-primary/15"
+                style={{
+                  left: `${marked.x * 100}%`,
+                  top: `${marked.y * 100}%`,
+                  width: `${marked.w * 100}%`,
+                  height: `${marked.h * 100}%`,
+                }}
+              >
+                <span className="absolute -top-5 left-0 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground whitespace-nowrap">
+                  {areas.length > 1
+                    ? `Ken Burns focus ${index + 1}`
+                    : 'Ken Burns focus'}
+                </span>
+              </div>
+            ))}
+
+            {/* Live selection while marking a new area */}
             {shownArea && shownArea.w > 0 && shownArea.h > 0 && (
               <div
-                className={cn(
-                  'pointer-events-none absolute border-2',
-                  isMarking ? 'border-amber-300 bg-amber-300/20' : 'border-primary bg-primary/20',
-                )}
+                className="pointer-events-none absolute border-2 border-amber-300 bg-amber-300/20"
                 style={{
                   left: `${shownArea.x * 100}%`,
                   top: `${shownArea.y * 100}%`,
@@ -399,7 +434,7 @@ export function ImageUploader({
                 }}
               >
                 <span className="absolute -top-5 left-0 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground whitespace-nowrap">
-                  {isMarking ? 'Drawing focus…' : 'Ken Burns focus'}
+                  Drawing focus…
                 </span>
               </div>
             )}
@@ -420,15 +455,15 @@ export function ImageUploader({
                 >
                   <Scan className="h-3.5 w-3.5" />
                 </Button>
-                {area && (
+                {areas.length > 0 && (
                   <Button
                     type="button"
                     variant="secondary"
                     size="icon"
                     className="h-7 w-7"
-                    onClick={clearFocusArea}
+                    onClick={clearFocusAreas}
                     aria-label="Clear focus area"
-                    title="Clear focus area"
+                    title="Clear all focus areas"
                   >
                     <Focus className="h-3.5 w-3.5" />
                   </Button>
@@ -468,6 +503,34 @@ export function ImageUploader({
             </Button>
           )}
         </div>
+        {!isLocked && areas.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-1">
+              {areas.map((marked, index) => (
+                <span
+                  key={`${marked.x}-${marked.y}-${index}`}
+                  className="inline-flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                >
+                  Focus {index + 1}
+                  <button
+                    type="button"
+                    onClick={() => removeFocusArea(index)}
+                    className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`Remove focus area ${index + 1}`}
+                    title={`Remove focus area ${index + 1}`}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {areas.length > 1
+                ? 'Ken Burns centres each marked area in turn over the clip.'
+                : 'Ken Burns keeps this marked area centred and in view.'}
+            </p>
+          </div>
+        )}
         {error && (
           <p className="text-xs text-destructive">{error}</p>
         )}

@@ -10,6 +10,7 @@ import { GlobalSettingsPanel } from '@/components/GlobalSettingsPanel';
 import { BgmToolbarControls } from '@/components/BgmToolbarControls';
 import { BgmGenerationProgress } from '@/components/BgmGenerationProgress';
 import ImportDialog from '@/components/ImportDialog';
+import { ProjectGalleryModal } from '@/components/ProjectGalleryModal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -17,7 +18,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrowLeft, Volume2, Film, Loader2, X, FileUp, Download, CheckCircle, AlertCircle,
-  ChevronLeft, ChevronRight, ChevronDown, Pencil, Sparkles, Zap,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, Sparkles, Zap, Images,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -65,6 +66,7 @@ export default function TimelineEditorPage() {
   const section = sectionFromPathname(pathname);
   const id = params.id as string;
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showGalleryModal, setShowGalleryModal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const {
@@ -447,6 +449,24 @@ export default function TimelineEditorPage() {
               >
                 {project.status.replace('_', ' ')}
               </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 text-xs"
+                onClick={() => setShowGalleryModal(true)}
+                title="View every rendering produced by this project"
+              >
+                <Images className="mr-1.5 size-3.5" />
+                Project gallery
+                {(project.rendering_count ?? 0) > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="ml-1.5 h-4 px-1 text-[10px] tabular-nums"
+                  >
+                    {project.rendering_count}
+                  </Badge>
+                )}
+              </Button>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <Tooltip delayDuration={0}>
@@ -708,6 +728,14 @@ export default function TimelineEditorPage() {
             // Re-fetch project to pick up title change if user renamed
             fetchProject(id);
           }}
+        />
+
+        <ProjectGalleryModal
+          open={showGalleryModal}
+          onOpenChange={setShowGalleryModal}
+          projectId={id}
+          projectTitle={project.title}
+          onChanged={() => fetchProject(id)}
         />
       </div>
     </TooltipProvider>

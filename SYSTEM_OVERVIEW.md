@@ -60,8 +60,11 @@ the origin they tried and support retrying after a backend restart.
   (`image_focus_x` / `image_focus_y`) is used by the renderer to cover-crop the
   source before Ken Burns pans and zooms inside that frame. All seven camera
   presets move, so the first block animates like every other block. A block
-  can also mark a subject rectangle (`image_focus_area`); the camera zooms out
-  enough to keep it in view and pans only inside the region around it.
+  can also mark up to six subject rectangles (`image_focus_areas`); the camera
+  zooms out enough to fit the largest one and travels through each area's
+  centre over the clip, so every highlighted subject is centred dynamically in
+  turn. A single area gets a gentle pan around its centre. Blocks with no
+  marked area keep the default full-frame path.
 - The editor supports adding, deleting, reordering, renaming and locking blocks.
 - The left sidebar has one **Settings** panel. The old Details tab was removed;
   the Story Template JSON reference now lives on the Settings page.
@@ -161,6 +164,13 @@ The same tab has a three-block **demo playground**:
 - Renders can be cancelled.
 - Completed videos appear in the **Gallery**, with hover previews, in-browser
   playback, seeking, download and fullscreen.
+- Each render is stored as its own asset linked to the project, so re-rendering
+  never overwrites an earlier version.
+- Assets move through **Rendered → Ready to publish → Published**; the Gallery
+  supports status/project/title filters, multi-select status changes and
+  deletion of one or many rendered MP4s.
+- A project's detail header has **Project gallery**, a full-viewport modal that
+  lists every rendering for that project (including its own delete actions).
 
 ### 3.9 Script Craft (AI writer)
 

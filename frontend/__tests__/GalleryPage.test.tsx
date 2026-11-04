@@ -10,14 +10,20 @@ jest.mock('next/navigation', () => ({
 
 const mockItem: GalleryItem = {
   id: 'video-1',
+  project_id: 'project-1',
+  project_title: 'First video',
   title: 'First video',
+  status: 'rendered',
+  status_label: 'Rendered',
   created_at: '2026-01-01T00:00:00+00:00',
   updated_at: '2026-01-01T00:00:00+00:00',
+  published_at: null,
   resolution_width: 1080,
   resolution_height: 1440,
   framerate: 30,
   segment_count: 8,
   file_size: 12 * 1024 * 1024,
+  duration: 42,
   stream_url: '/api/gallery/video-1/stream/',
   download_url: '/api/gallery/video-1/download/',
 };

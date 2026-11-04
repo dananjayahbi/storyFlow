@@ -22,6 +22,7 @@
     - [6.1 Django Project Configuration](#61-django-project-configuration)
     - [6.2 Data Models](#62-data-models)
       - [Project Model (Core Entity)](#project-model-core-entity)
+      - [Rendering Model (Gallery Asset)](#rendering-model-gallery-asset)
       - [Segment Model (Content Unit)](#segment-model-content-unit)
       - [GlobalSettings Model (Singleton)](#globalsettings-model-singleton)
       - [Logo \& OutroVideo Models](#logo--outrovideo-models)
@@ -544,7 +545,17 @@ The `Project` model is the central entity representing a single video production
 - **Logo watermark:** Enabled flag, active logo FK, scale, position, opacity, margin
 - **Outro video:** Enabled flag, active outro FK
 - **Upscaling:** Enabled flag, model selection, denoise strength
-- **Output:** Path to rendered video file
+- **Output:** Path to the newest rendered video file
+
+#### Rendering Model (Gallery Asset)
+
+Each completed export creates one `Rendering` row. It is the durable link between a project and one MP4 file:
+
+- **Project link:** FK to `Project` (`related_name="renderings"`); deleting the project cascades the rows, while deleting a rendering never deletes the project/script.
+- **File:** `file_path` points at `<Section>/<account>/<project>/renderings/<rendering-id>.mp4`, so re-rendering cannot overwrite an earlier version.
+- **Publishing workflow:** `status` is `rendered`, `ready_to_publish` or `published`; `published_at` records the transition to published.
+- **Metadata:** title snapshot, resolution, framerate, segment count, duration, file size and timestamps.
+- **Compatibility:** rows backfilled from pre-feature projects reuse the project id, so old `/api/gallery/<project-id>/...` links continue to resolve.
 
 #### Segment Model (Content Unit)
 
@@ -646,9 +657,13 @@ All project, segment and gallery endpoints additionally accept
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/tasks/<task_id>/status/` | Poll background task progress |
-| `GET` | `/api/gallery/` | List completed projects with videos |
-| `GET` | `/api/gallery/<id>/stream/` | Stream video (HTTP Range / 206) |
-| `GET` | `/api/gallery/<id>/download/` | Download video as attachment |
+| `GET` | `/api/gallery/` | List rendering assets (`project`, `status`, `q`, `sort` filters) |
+| `PATCH` | `/api/gallery/<rendering_id>/` | Change an asset's publishing status |
+| `DELETE` | `/api/gallery/<rendering_id>/` | Delete one rendering and its MP4 |
+| `POST` | `/api/gallery/bulk-status/` | Change status for several renderings |
+| `POST` | `/api/gallery/bulk-delete/` | Delete several renderings and their MP4s |
+| `GET` | `/api/gallery/<rendering_id>/stream/` | Stream video (HTTP Range / 206) |
+| `GET` | `/api/gallery/<rendering_id>/download/` | Download video as attachment |
 
 ---
 

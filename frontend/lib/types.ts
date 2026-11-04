@@ -22,12 +22,15 @@ export interface Project {
   resolution_height: number;
   framerate: number;
   segment_count: number;
+  /** Number of rendered gallery assets linked to this project. */
+  rendering_count?: number;
 }
 
 /** Extended project data returned by the detail endpoint. */
 export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   output_path: string | null;
   segments: Segment[];
+  rendering_count?: number;
 
   // ── Per-project settings ──
   default_voice_id: string;
@@ -99,6 +102,8 @@ export interface Segment {
   image_focus_y?: number;
   /** Optional subject rectangle used to centre the Ken Burns camera. */
   image_focus_area?: ImageFocusArea | null;
+  /** Ordered subject areas visited by the Ken Burns camera (2+ = dynamic). */
+  image_focus_areas?: ImageFocusArea[] | null;
 }
 
 export interface GlobalSettings {
@@ -216,6 +221,7 @@ export interface UpdateSegmentPayload {
   image_focus_x?: number;
   image_focus_y?: number;
   image_focus_area?: ImageFocusArea | null;
+  image_focus_areas?: ImageFocusArea[];
 }
 
 export interface ReorderPayload {
@@ -578,17 +584,30 @@ export interface GenerateSoundtrackResponse {
 
 // ── Gallery ──
 
-/** A rendered video item returned by the Gallery API. */
+/** Publishing workflow state of one rendered gallery asset. */
+export type RenderingStatus = 'rendered' | 'ready_to_publish' | 'published';
+
+/**
+ * One rendered video asset returned by the Gallery API.  A project can have
+ * many renderings; each one has its own file, status and metadata.
+ */
 export interface GalleryItem {
+  /** Rendering id (the project id for assets rendered before this feature). */
   id: string;
+  project_id: string;
+  project_title: string;
   title: string;
+  status: RenderingStatus;
+  status_label: string;
   created_at: string;
   updated_at: string;
+  published_at: string | null;
   resolution_width: number;
   resolution_height: number;
   framerate: number;
   segment_count: number;
   file_size: number;
+  duration: number | null;
   stream_url: string;
   download_url: string;
 }

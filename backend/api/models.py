@@ -263,6 +263,66 @@ class Project(models.Model):
         ordering = ['-created_at']
 
 
+RENDERING_STATUS_RENDERED = 'rendered'
+RENDERING_STATUS_READY = 'ready_to_publish'
+RENDERING_STATUS_PUBLISHED = 'published'
+
+RENDERING_STATUS_CHOICES = [
+    (RENDERING_STATUS_RENDERED, 'Rendered'),
+    (RENDERING_STATUS_READY, 'Ready to publish'),
+    (RENDERING_STATUS_PUBLISHED, 'Published'),
+]
+
+RENDERING_STATUSES = {
+    RENDERING_STATUS_RENDERED,
+    RENDERING_STATUS_READY,
+    RENDERING_STATUS_PUBLISHED,
+}
+
+
+class Rendering(models.Model):
+    """One rendered video produced from a project.
+
+    A project can be rendered any number of times (for example after editing
+    its segments).  Every render is stored as its own immutable asset so the
+    Gallery can keep the complete history and track the publishing workflow
+    independently for each version.  The project remains the source script;
+    this row is the link between that project and one rendered file.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='renderings',
+    )
+    # Snapshot of the project title at render time.  Renaming the project
+    # later must not change the name of an already published asset.
+    title = models.CharField(max_length=255)
+    file_path = models.CharField(max_length=500, blank=True, default='')
+    status = models.CharField(
+        max_length=20,
+        choices=RENDERING_STATUS_CHOICES,
+        default=RENDERING_STATUS_RENDERED,
+        db_index=True,
+    )
+    resolution_width = models.PositiveIntegerField(default=1920)
+    resolution_height = models.PositiveIntegerField(default=1080)
+    framerate = models.PositiveIntegerField(default=30)
+    segment_count = models.PositiveIntegerField(default=0)
+    file_size = models.PositiveBigIntegerField(default=0)
+    duration = models.FloatField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.title} ({self.get_status_display()})'
+
+
 def segment_image_path(instance, filename):
     """Store images in Storage/<Section>/<account-id>/<project-id>/images/."""
     return project_relpath(
@@ -311,8 +371,13 @@ class Segment(models.Model):
     image_focus_y = models.FloatField(default=0.5)
     # Optional rectangle (normalised x/y/w/h inside the rendered frame) that
     # marks the subject.  Ken Burns keeps this area in view and centres the
-    # camera path around it.
+    # camera path around it.  Retained for older clients; new edits write the
+    # list below and mirror its first entry here.
     image_focus_area = models.JSONField(null=True, blank=True, default=None)
+    # Optional ordered list of subject rectangles.  With more than one area
+    # the Ken Burns camera travels through their centres over the clip so the
+    # highlighted subjects are centred dynamically instead of blindly.
+    image_focus_areas = models.JSONField(null=True, blank=True, default=None)
 
     def __str__(self):
         return f"Segment {self.sequence_index} of {self.project.title}"

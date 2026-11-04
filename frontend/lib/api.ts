@@ -14,6 +14,7 @@ import {
   TaskStatusResponse,
   GlobalSettings,
   GalleryItem,
+  RenderingStatus,
   Logo,
   OutroVideo,
   VoiceReference,
@@ -669,21 +670,81 @@ export async function cancelPlayground(): Promise<PlaygroundState & { message: s
 
 // ── Gallery ──
 
-export async function getGalleryItems(section?: Section): Promise<GalleryItem[]> {
+export interface GalleryQuery {
+  /** Only assets linked to this project. */
+  project?: string;
+  /** One or more publishing statuses. */
+  status?: RenderingStatus[];
+  /** Search in asset/project title. */
+  q?: string;
+  sort?: 'newest' | 'oldest';
+}
+
+export async function getGalleryItems(
+  section?: Section,
+  query: GalleryQuery = {},
+): Promise<GalleryItem[]> {
   const { data } = await api.get<GalleryItem[]>('/api/gallery/', {
-    params: section ? { section } : undefined,
+    params: {
+      ...(section ? { section } : {}),
+      ...(query.project ? { project: query.project } : {}),
+      ...(query.status?.length ? { status: query.status.join(',') } : {}),
+      ...(query.q ? { q: query.q } : {}),
+      ...(query.sort ? { sort: query.sort } : {}),
+    },
   });
   return data;
 }
 
-export function getStreamUrl(projectId: string, section: Section = getCurrentSection()): string {
-  const base = getApiBaseUrl();
-  return `${base}/api/gallery/${projectId}/stream/?section=${section}`;
+export async function updateGalleryItemStatus(
+  id: string,
+  status: RenderingStatus,
+): Promise<GalleryItem> {
+  const { data } = await api.patch<GalleryItem>(`/api/gallery/${id}/`, {
+    status,
+  });
+  return data;
 }
 
-export function getDownloadUrl(projectId: string, section: Section = getCurrentSection()): string {
+export async function bulkUpdateGalleryStatus(
+  ids: string[],
+  status: RenderingStatus,
+): Promise<{ updated: number; status: RenderingStatus; ids: string[] }> {
+  const { data } = await api.post('/api/gallery/bulk-status/', { ids, status });
+  return data;
+}
+
+export async function deleteGalleryItem(id: string): Promise<void> {
+  await api.delete(`/api/gallery/${id}/`);
+}
+
+export async function bulkDeleteGalleryItems(
+  ids: string[],
+): Promise<{ deleted: number; ids: string[] }> {
+  const { data } = await api.post('/api/gallery/bulk-delete/', { ids });
+  return data;
+}
+
+export function getStreamUrl(
+  renderingId: string,
+  section: Section = getCurrentSection(),
+): string {
   const base = getApiBaseUrl();
-  return `${base}/api/gallery/${projectId}/download/?section=${section}`;
+  const account = getCurrentAccountId(section);
+  const params = new URLSearchParams({ section });
+  if (account) params.set('account', account);
+  return `${base}/api/gallery/${renderingId}/stream/?${params.toString()}`;
+}
+
+export function getDownloadUrl(
+  renderingId: string,
+  section: Section = getCurrentSection(),
+): string {
+  const base = getApiBaseUrl();
+  const account = getCurrentAccountId(section);
+  const params = new URLSearchParams({ section });
+  if (account) params.set('account', account);
+  return `${base}/api/gallery/${renderingId}/download/?${params.toString()}`;
 }
 
 export function getSegmentAudioDownloadUrl(

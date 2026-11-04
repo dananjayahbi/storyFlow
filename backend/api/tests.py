@@ -416,6 +416,63 @@ class TestSegmentUpdate(APITestCase):
             )
             self.assertEqual(response.status_code, 400, area)
 
+    def test_patch_image_focus_areas_keeps_legacy_field_in_sync(self):
+        areas = [
+            {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4},
+            {'x': 0.6, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+        ]
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_areas': areas},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['image_focus_areas'], areas)
+        self.assertEqual(response.data['image_focus_area'], areas[0])
+
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.image_focus_areas, areas)
+        self.assertEqual(self.segment.image_focus_area, areas[0])
+
+    def test_patch_image_focus_areas_can_be_cleared(self):
+        self.segment.image_focus_areas = [
+            {'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+        ]
+        self.segment.image_focus_area = self.segment.image_focus_areas[0]
+        self.segment.save()
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'image_focus_areas': []},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['image_focus_areas'], [])
+        self.assertIsNone(response.data['image_focus_area'])
+
+    def test_patch_image_focus_areas_rejects_invalid_values(self):
+        invalid_payloads = [
+            'not-a-list',
+            [
+                {'x': -0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+            ],
+            [
+                {'x': 0.1, 'y': 0.1},
+            ],
+            [
+                {'x': 0.9, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+            ],
+            [
+                {'x': 0.1, 'y': 0.1, 'w': 0.1, 'h': 0.1},
+            ] * 7,
+        ]
+        for payload in invalid_payloads:
+            response = self.client.patch(
+                f'/api/segments/{self.segment.id}/',
+                {'image_focus_areas': payload},
+                format='json',
+            )
+            self.assertEqual(response.status_code, 400, payload)
+
     def test_lock_segment(self):
         response = self.client.patch(
             f'/api/segments/{self.segment.id}/',
@@ -1865,6 +1922,81 @@ class KenBurnsMathTests(TestCase):
         self.assertEqual((sx, sy), (200, 200))
         self.assertEqual((ex, ey), (400, 400))
 
+    # ------------------------------------------------------------------
+    # Multiple focus-area path tests (Feature #18)
+    # ------------------------------------------------------------------
+
+    def test_focus_sweep_stays_near_the_subject_centre(self):
+        """A single marked area pans gently around its centre, not the frame."""
+        from core_engine.ken_burns import get_focus_sweep_coords
+
+        area = {'x': 0.4, 'y': 0.4, 'w': 0.2, 'h': 0.2}
+        (sx, sy), (ex, ey) = get_focus_sweep_coords(
+            'top_left', 'bottom_right', area, 1000, 1000, 400, 400,
+        )
+        self.assertEqual((sx, sy), (250, 250))
+        self.assertEqual((ex, ey), (350, 350))
+
+    def test_normalise_focus_areas_accepts_single_and_list(self):
+        from core_engine.ken_burns import MAX_FOCUS_AREAS, normalise_focus_areas
+
+        single = {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4}
+        self.assertEqual(normalise_focus_areas(single), [single])
+        self.assertEqual(
+            normalise_focus_areas([
+                single, {'x': 0.6, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+            ]),
+            [single, {'x': 0.6, 'y': 0.1, 'w': 0.2, 'h': 0.2}],
+        )
+        self.assertEqual(normalise_focus_areas(None), [])
+        self.assertEqual(normalise_focus_areas('invalid'), [])
+
+        too_many = [single] * (MAX_FOCUS_AREAS + 2)
+        self.assertEqual(
+            len(normalise_focus_areas(too_many)), MAX_FOCUS_AREAS
+        )
+
+    def test_focus_camera_path_centres_each_area(self):
+        from core_engine.ken_burns import get_focus_camera_path
+
+        path = get_focus_camera_path(
+            [
+                {'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+                {'x': 0.7, 'y': 0.7, 'w': 0.2, 'h': 0.2},
+            ],
+            1000, 1000, 400, 400,
+        )
+        # The crop centre lands on each rectangle centre.
+        self.assertEqual(path, [(0, 0), (600, 600)])
+
+    def test_focus_camera_path_clamps_to_frame_edges(self):
+        from core_engine.ken_burns import get_focus_camera_path
+
+        path = get_focus_camera_path(
+            [{'x': 0.0, 'y': 0.0, 'w': 0.05, 'h': 0.05}],
+            1000, 1000, 400, 400,
+        )
+        self.assertEqual(path, [(0, 0)])
+
+    def test_interpolate_focus_path_visits_each_keyframe(self):
+        from core_engine.ken_burns import interpolate_focus_path
+
+        path = [(0, 0), (300, 500), (600, 600)]
+        self.assertEqual(interpolate_focus_path(path, 0.0, 10.0), (0.0, 0.0))
+        self.assertEqual(
+            interpolate_focus_path(path, 5.0, 10.0), (300.0, 500.0)
+        )
+        self.assertEqual(
+            interpolate_focus_path(path, 10.0, 10.0), (600.0, 600.0)
+        )
+        # Clamped progress and single-keyframe paths stay stable.
+        self.assertEqual(
+            interpolate_focus_path(path, 99.0, 10.0), (600.0, 600.0)
+        )
+        self.assertEqual(
+            interpolate_focus_path([(12, 34)], 3.0, 10.0), (12.0, 34.0)
+        )
+
 
 # ===================================================================
 # Ken Burns Integration Tests (Task 04.02.12)
@@ -2260,6 +2392,33 @@ class KenBurnsIntegrationTests(TestCase):
         finally:
             clip.close()
 
+    def test_apply_ken_burns_with_multiple_focus_areas(self):
+        """Multiple marked areas produce a camera path through each one."""
+        from core_engine.ken_burns import apply_ken_burns
+
+        clip = apply_ken_burns(
+            image_path=self.image_paths[0],
+            duration=1.0,
+            resolution=(640, 360),
+            zoom_intensity=1.3,
+            fps=24,
+            segment_index=0,
+            focus_areas=[
+                {'x': 0.05, 'y': 0.1, 'w': 0.2, 'h': 0.25},
+                {'x': 0.7, 'y': 0.6, 'w': 0.2, 'h': 0.25},
+            ],
+        )
+        try:
+            start = self._get_frame(clip, 0.0)
+            middle = self._get_frame(clip, 0.5)
+            end = self._get_frame(clip, 1.0)
+            self.assertEqual(start.shape, (360, 640, 3))
+            self.assertFalse(np.array_equal(start, end))
+            self.assertFalse(np.array_equal(start, middle))
+            self.assertFalse(np.array_equal(middle, end))
+        finally:
+            clip.close()
+
     # ------------------------------------------------------------------
     # Full Render Pipeline Tests
     # ------------------------------------------------------------------
@@ -2316,6 +2475,24 @@ class KenBurnsIntegrationTests(TestCase):
         output_path = result["output_path"]
         self.output_paths.append(output_path)
 
+        self.assertTrue(os.path.exists(output_path))
+        self.assertGreater(result["file_size"], 0)
+
+
+    def test_render_with_multiple_focus_areas(self):
+        """The full render path honours the ordered multi-area camera path."""
+        from core_engine.video_renderer import render_project
+
+        self.segments[0].image_focus_areas = [
+            {'x': 0.05, 'y': 0.1, 'w': 0.2, 'h': 0.25},
+            {'x': 0.7, 'y': 0.6, 'w': 0.2, 'h': 0.25},
+        ]
+        self.segments[0].save(update_fields=['image_focus_areas'])
+
+        result = render_project(str(self.project.id))
+
+        output_path = result["output_path"]
+        self.output_paths.append(output_path)
         self.assertTrue(os.path.exists(output_path))
         self.assertGreater(result["file_size"], 0)
 

@@ -22,8 +22,9 @@ from rest_framework.response import Response
 
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
-    OutroVideo, VoiceReference, Script, ChatSession, BGMClip,
+    OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
     STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
+    RENDERING_STATUSES, RENDERING_STATUS_PUBLISHED,
     SECTION_CHOICES, apply_settings_to_project,
 )
 from .serializers import (
@@ -34,6 +35,7 @@ from .serializers import (
     BGMClipSerializer,
 )
 from .parsers import ParseError
+from .renderings import delete_rendering, resolve_rendering_video
 from .storage import write_project_artifacts, save_story_json
 from .storage_paths import (
     media_url,
@@ -2876,65 +2878,338 @@ def _resolve_video_path(project):
     return None
 
 
+def _ensure_legacy_rendering(project):
+    """Create a gallery row for a completed project rendered before assets.
+
+    Releases before the asset-management upgrade only stored one output path
+    on the project.  Looking at the gallery should surface those videos too,
+    so a Rendering row is created lazily with the project id as its id.  That
+    keeps old gallery URLs (``/api/gallery/<project-id>/...``) working.
+    """
+    if Rendering.objects.filter(project=project).exists():
+        return None
+
+    video_path = _resolve_video_path(project)
+    if not video_path:
+        return None
+
+    try:
+        file_size = os.path.getsize(video_path)
+    except OSError:
+        file_size = 0
+
+    try:
+        rendering, _created = Rendering.objects.get_or_create(
+            pk=project.id,
+            defaults={
+                'project': project,
+                'title': project.title,
+                'file_path': project.output_path or '',
+                'resolution_width': project.resolution_width,
+                'resolution_height': project.resolution_height,
+                'framerate': project.framerate,
+                'segment_count': Segment.objects.filter(project=project).count(),
+                'file_size': file_size,
+            },
+        )
+        return rendering
+    except Exception:
+        logger.debug(
+            'Could not create legacy rendering for project %s',
+            project.id,
+            exc_info=True,
+        )
+        return None
+
+
+def _gallery_item(rendering, video_path):
+    """Serialise one Rendering for the Gallery API."""
+    project = rendering.project
+    try:
+        file_size = os.path.getsize(video_path) if video_path else rendering.file_size
+    except OSError:
+        file_size = rendering.file_size
+
+    return {
+        # ``id`` is the rendering id.  Legacy rows reuse the project id so old
+        # links and API consumers keep working.
+        'id': str(rendering.id),
+        'project_id': str(project.id),
+        'project_title': project.title,
+        'title': rendering.title,
+        'status': rendering.status,
+        'status_label': rendering.get_status_display(),
+        'created_at': rendering.created_at.isoformat(),
+        'updated_at': rendering.updated_at.isoformat(),
+        'published_at': (
+            rendering.published_at.isoformat()
+            if rendering.published_at else None
+        ),
+        'resolution_width': rendering.resolution_width,
+        'resolution_height': rendering.resolution_height,
+        'framerate': rendering.framerate,
+        'segment_count': rendering.segment_count,
+        'file_size': file_size or 0,
+        'duration': rendering.duration,
+        'stream_url': f'/api/gallery/{rendering.id}/stream/',
+        'download_url': f'/api/gallery/{rendering.id}/download/',
+    }
+
+
 @api_view(['GET'])
 def gallery_list_view(request):
-    """List all completed projects that have rendered videos.
+    """List rendered video assets with optional filters.
 
-    Returns a JSON array of gallery items with project metadata and video info.
-    Only projects with status COMPLETED and an existing video file are included.
+    Query parameters:
+        project  — only renderings linked to this project id
+        status   — one or more statuses (``rendered``,
+                   ``ready_to_publish``, ``published``)
+        q        — case-insensitive search in title/project title
+        sort     — ``newest`` (default) or ``oldest``
 
     GET /api/gallery/
     """
-    projects = scoped_projects(request).filter(status=STATUS_COMPLETED).order_by('-updated_at')
-    items = []
+    projects = scoped_projects(request)
 
-    for project in projects:
-        video_path = _resolve_video_path(project)
-        if not video_path:
-            continue
-
-        # Get file metadata
+    project_filter = (request.GET.get('project') or '').strip()
+    if project_filter:
         try:
-            file_size = os.path.getsize(video_path)
-        except OSError:
-            file_size = 0
+            projects = projects.filter(id=project_filter)
+        except (ValueError, DjangoValidationError):
+            return Response(
+                {'error': 'Invalid project id.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        segment_count = Segment.objects.filter(project=project).count()
+    # Statuses may arrive as ``?status=a&status=b`` or ``?status=a,b``.
+    raw_statuses = []
+    for value in request.GET.getlist('status'):
+        raw_statuses.extend(
+            part.strip() for part in value.split(',') if part.strip()
+        )
+    invalid = [value for value in raw_statuses if value not in RENDERING_STATUSES]
+    if invalid:
+        return Response(
+            {'error': f"Unknown status: {', '.join(sorted(set(invalid)))}."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-        items.append({
-            'id': str(project.id),
-            'title': project.title,
-            'created_at': project.created_at.isoformat(),
-            'updated_at': project.updated_at.isoformat(),
-            'resolution_width': project.resolution_width,
-            'resolution_height': project.resolution_height,
-            'framerate': project.framerate,
-            'segment_count': segment_count,
-            'file_size': file_size,
-            'stream_url': f'/api/gallery/{project.id}/stream/',
-            'download_url': f'/api/gallery/{project.id}/download/',
-        })
+    queryset = Rendering.objects.select_related('project').filter(
+        project__in=projects
+    )
+
+    query = (request.GET.get('q') or request.GET.get('search') or '').strip()
+    if query:
+        queryset = queryset.filter(
+            Q(title__icontains=query) | Q(project__title__icontains=query)
+        )
+
+    if raw_statuses:
+        queryset = queryset.filter(status__in=set(raw_statuses))
+
+    sort = (request.GET.get('sort') or 'newest').lower()
+    queryset = queryset.order_by(
+        'created_at' if sort == 'oldest' else '-created_at'
+    )
+
+    # Surface videos rendered before the Rendering model existed.
+    existing_project_ids = set(
+        queryset.values_list('project_id', flat=True)
+    )
+    for project in projects.filter(status=STATUS_COMPLETED):
+        if project.id in existing_project_ids:
+            continue
+        _ensure_legacy_rendering(project)
+
+    # Re-run the query so freshly-created legacy rows participate in filters.
+    queryset = Rendering.objects.select_related('project').filter(
+        project__in=projects
+    )
+    if query:
+        queryset = queryset.filter(
+            Q(title__icontains=query) | Q(project__title__icontains=query)
+        )
+    if raw_statuses:
+        queryset = queryset.filter(status__in=set(raw_statuses))
+    queryset = queryset.order_by(
+        'created_at' if sort == 'oldest' else '-created_at'
+    )
+
+    items = []
+    for rendering in queryset:
+        video_path = (
+            resolve_rendering_video(rendering)
+            or _resolve_video_path(rendering.project)
+        )
+        if not video_path:
+            # Never advertise an asset whose file has disappeared.
+            continue
+        items.append(_gallery_item(rendering, video_path))
 
     return Response(items)
+
+
+def _get_rendering(request, asset_id):
+    """Resolve a gallery asset scoped to the request's section/account."""
+    try:
+        return Rendering.objects.select_related('project').get(
+            id=asset_id,
+            project__in=scoped_projects(request),
+        )
+    except (Rendering.DoesNotExist, ValueError, DjangoValidationError):
+        return None
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+def gallery_detail_view(request, rendering_id):
+    """Read, change the publishing status of, or delete one gallery asset.
+
+    PATCH  /api/gallery/<rendering_id>/   {"status": "ready_to_publish"}
+    DELETE /api/gallery/<rendering_id>/
+    """
+    rendering = _get_rendering(request, rendering_id)
+    if not rendering:
+        return Response(
+            {'error': 'Rendering not found'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == 'DELETE':
+        delete_rendering(rendering)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    if request.method == 'PATCH':
+        new_status = (request.data.get('status') or '').strip()
+        if new_status not in RENDERING_STATUSES:
+            return Response(
+                {
+                    'error': (
+                        'Status must be one of: '
+                        f"{', '.join(sorted(RENDERING_STATUSES))}."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rendering.status = new_status
+        if new_status == RENDERING_STATUS_PUBLISHED:
+            if not rendering.published_at:
+                rendering.published_at = django_timezone.now()
+        else:
+            rendering.published_at = None
+        rendering.save(update_fields=['status', 'published_at', 'updated_at'])
+
+    video_path = (
+        resolve_rendering_video(rendering)
+        or _resolve_video_path(rendering.project)
+    )
+    return Response(_gallery_item(rendering, video_path))
+
+
+@api_view(['POST'])
+def gallery_bulk_status_view(request):
+    """Change the publishing status of several renderings at once.
+
+    POST /api/gallery/bulk-status/
+         {"ids": ["..."], "status": "published"}
+    """
+    ids = request.data.get('ids') or request.data.get('rendering_ids') or []
+    if not isinstance(ids, list) or not ids:
+        return Response(
+            {'error': 'Provide a non-empty list of rendering ids.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    new_status = (request.data.get('status') or '').strip()
+    if new_status not in RENDERING_STATUSES:
+        return Response(
+            {
+                'error': (
+                    'Status must be one of: '
+                    f"{', '.join(sorted(RENDERING_STATUSES))}."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    renderings = list(
+        Rendering.objects.filter(
+            id__in=ids,
+            project__in=scoped_projects(request),
+        )
+    )
+    for rendering in renderings:
+        rendering.status = new_status
+        rendering.published_at = (
+            django_timezone.now()
+            if new_status == RENDERING_STATUS_PUBLISHED
+            else None
+        )
+    Rendering.objects.bulk_update(
+        renderings, ['status', 'published_at', 'updated_at']
+    )
+    return Response({
+        'updated': len(renderings),
+        'status': new_status,
+        'ids': [str(rendering.id) for rendering in renderings],
+    })
+
+
+@api_view(['POST'])
+def gallery_bulk_delete_view(request):
+    """Delete several renderings (and their MP4 files) at once.
+
+    POST /api/gallery/bulk-delete/   {"ids": ["..."]}
+    """
+    ids = request.data.get('ids') or request.data.get('rendering_ids') or []
+    if not isinstance(ids, list) or not ids:
+        return Response(
+            {'error': 'Provide a non-empty list of rendering ids.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    renderings = list(
+        Rendering.objects.select_related('project').filter(
+            id__in=ids,
+            project__in=scoped_projects(request),
+        )
+    )
+    for rendering in renderings:
+        delete_rendering(rendering)
+
+    return Response({
+        'deleted': len(renderings),
+        'ids': [str(rendering.id) for rendering in renderings],
+    })
 
 
 @api_view(['GET'])
 def gallery_stream_view(request, project_id):
     """Stream a rendered video for in-browser playback.
 
-    Supports HTTP Range requests for seeking/progressive playback.
+    ``project_id`` is the rendering id (the project id for assets created
+    before the Rendering model).  Supports HTTP Range requests for seeking.
 
-    GET /api/gallery/<project_id>/stream/
+    GET /api/gallery/<rendering_id>/stream/
     """
-    try:
-        project = scoped_projects(request).get(id=project_id)
-    except Project.DoesNotExist:
-        return Response(
-            {'error': 'Project not found'},
-            status=status.HTTP_404_NOT_FOUND,
+    rendering = _get_rendering(request, project_id)
+    if rendering:
+        video_path = (
+            resolve_rendering_video(rendering)
+            or _resolve_video_path(rendering.project)
         )
+        title = rendering.title
+    else:
+        # Compatibility path: callers that still pass a project id.
+        try:
+            project = scoped_projects(request).get(id=project_id)
+        except (Project.DoesNotExist, ValueError, DjangoValidationError):
+            return Response(
+                {'error': 'Project not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        video_path = _resolve_video_path(project)
+        title = project.title
 
-    video_path = _resolve_video_path(project)
     if not video_path:
         return Response(
             {'error': 'Video file not found'},
@@ -2986,7 +3261,8 @@ def gallery_stream_view(request, project_id):
     )
     response['Content-Length'] = str(file_size)
     response['Accept-Ranges'] = 'bytes'
-    response['Content-Disposition'] = f'inline; filename="{project.title}.mp4"'
+    safe_title = (title or 'rendering').replace('"', "'").replace('\n', ' ')
+    response['Content-Disposition'] = f'inline; filename="{safe_title}.mp4"'
     return response
 
 
@@ -2994,17 +3270,29 @@ def gallery_stream_view(request, project_id):
 def gallery_download_view(request, project_id):
     """Download a rendered video as an attachment.
 
-    GET /api/gallery/<project_id>/download/
+    GET /api/gallery/<rendering_id>/download/
     """
-    try:
-        project = scoped_projects(request).get(id=project_id)
-    except Project.DoesNotExist:
-        return Response(
-            {'error': 'Project not found'},
-            status=status.HTTP_404_NOT_FOUND,
+    rendering = _get_rendering(request, project_id)
+    if rendering:
+        video_path = (
+            resolve_rendering_video(rendering)
+            or _resolve_video_path(rendering.project)
         )
+        title = rendering.title
+        fallback_id = rendering.id
+    else:
+        # Compatibility path: callers that still pass a project id.
+        try:
+            project = scoped_projects(request).get(id=project_id)
+        except (Project.DoesNotExist, ValueError, DjangoValidationError):
+            return Response(
+                {'error': 'Project not found'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        video_path = _resolve_video_path(project)
+        title = project.title
+        fallback_id = project.id
 
-    video_path = _resolve_video_path(project)
     if not video_path:
         return Response(
             {'error': 'Video file not found'},
@@ -3012,9 +3300,9 @@ def gallery_download_view(request, project_id):
         )
 
     # Sanitize filename for Content-Disposition
-    safe_title = project.title.replace('"', "'").replace('\n', ' ').strip()
+    safe_title = (title or '').replace('"', "'").replace('\n', ' ').strip()
     if not safe_title:
-        safe_title = str(project.id)
+        safe_title = str(fallback_id)
 
     response = FileResponse(
         open(video_path, 'rb'),

@@ -532,9 +532,13 @@ def fast_render_segments(
         load_and_prepare_image,
         calculate_crop_dimensions,
         calculate_focus_crop_dimensions,
+        get_focus_camera_path,
+        get_focus_sweep_coords,
         get_pan_direction,
         get_start_end_coords,
+        interpolate_focus_path,
         interpolate_position,
+        normalise_focus_areas,
     )
     from core_engine.subtitle_engine import chunk_text, calculate_subtitle_timing
 
@@ -593,27 +597,46 @@ def fast_render_segments(
             seg.get("focus_x", 0.5), seg.get("focus_y", 0.5),
         )
         src_h, src_w = source_image.shape[:2]
-        focus_area = seg.get("focus_area")
-        if focus_area:
+        focus_areas = normalise_focus_areas(
+            seg.get("focus_areas")
+        ) or normalise_focus_areas(seg.get("focus_area"))
+        if focus_areas:
             crop_w, crop_h = calculate_focus_crop_dimensions(
-                width, height, zoom_intensity, focus_area, src_w, src_h,
+                width, height, zoom_intensity, focus_areas, src_w, src_h,
             )
         else:
             crop_w, crop_h = calculate_crop_dimensions(
                 width, height, zoom_intensity,
             )
-        start_name, end_name = get_pan_direction(seg["sequence_index"])
-        (sx, sy), (ex, ey) = get_start_end_coords(
-            start_name, end_name, src_w, src_h, crop_w, crop_h,
-            focus_area=focus_area,
+        camera_path = (
+            get_focus_camera_path(
+                focus_areas, src_w, src_h, crop_w, crop_h,
+            )
+            if len(focus_areas) >= 2
+            else []
         )
+        if camera_path:
+            start_coords = camera_path[0]
+            end_coords = camera_path[-1]
+        elif focus_areas:
+            start_name, end_name = get_pan_direction(seg["sequence_index"])
+            start_coords, end_coords = get_focus_sweep_coords(
+                start_name, end_name, focus_areas[0],
+                src_w, src_h, crop_w, crop_h,
+            )
+        else:
+            start_name, end_name = get_pan_direction(seg["sequence_index"])
+            start_coords, end_coords = get_start_end_coords(
+                start_name, end_name, src_w, src_h, crop_w, crop_h,
+            )
 
         segments_info.append({
             "source_image": source_image,
             "crop_w": crop_w,
             "crop_h": crop_h,
-            "start_coords": (sx, sy),
-            "end_coords": (ex, ey),
+            "start_coords": start_coords,
+            "end_coords": end_coords,
+            "camera_path": camera_path,
             "visual_duration": visual_duration,
             "subtitle_overlays": sub_overlays,
         })
@@ -711,10 +734,16 @@ def fast_render_segments(
                     if frames_until_end < fade_frames:
                         weight = min(weight, frames_until_end / fade_frames)
 
-            # Generate Ken Burns frame
-            interp_x, interp_y = interpolate_position(
-                si["start_coords"], si["end_coords"], t_local, seg_duration,
-            )
+            # Generate Ken Burns frame (multi-area focus path or legacy pan)
+            if si.get("camera_path"):
+                interp_x, interp_y = interpolate_focus_path(
+                    si["camera_path"], t_local, seg_duration,
+                )
+            else:
+                interp_x, interp_y = interpolate_position(
+                    si["start_coords"], si["end_coords"], t_local,
+                    seg_duration,
+                )
             x = int(round(interp_x))
             y = int(round(interp_y))
             src_h, src_w = si["source_image"].shape[:2]

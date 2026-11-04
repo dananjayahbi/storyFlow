@@ -67,6 +67,9 @@ DIRECTIONS: Tuple[
     ("top_left", "bottom_right"),      # diagonal pan
 )
 
+#: Maximum number of marked subject areas the camera path will visit.
+MAX_FOCUS_AREAS = 6
+
 
 # ===================================================================
 # Helper function stubs (Tasks 04.02.02 — 04.02.07)
@@ -490,6 +493,105 @@ def get_focus_area_bounds(
     return (min_x, max_x, min_y, max_y)
 
 
+def normalise_focus_areas(focus_areas) -> list[dict]:
+    """Normalise one rectangle or a list of rectangles into a clean list.
+
+    Older segments store a single rectangle in ``image_focus_area``; newer
+    ones store an ordered list in ``image_focus_areas``.  Both shapes are
+    accepted here so the renderer has one code path.  Invalid entries are
+    skipped rather than crashing a render, and rectangles are clipped to the
+    frame.
+    """
+    if not focus_areas:
+        return []
+    items = [focus_areas] if isinstance(focus_areas, dict) else focus_areas
+    areas: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            x = float(item['x'])
+            y = float(item['y'])
+            w = float(item['w'])
+            h = float(item['h'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(0.0 <= number <= 1.0 for number in (x, y, w, h)):
+            continue
+        w = min(w, 1.0 - x)
+        h = min(h, 1.0 - y)
+        if w <= 0.0 or h <= 0.0:
+            continue
+        areas.append({'x': x, 'y': y, 'w': w, 'h': h})
+    return areas[:MAX_FOCUS_AREAS]
+
+
+def get_focus_camera_path(
+    focus_areas,
+    source_width: int,
+    source_height: int,
+    crop_width: int,
+    crop_height: int,
+) -> list[Tuple[int, int]]:
+    """Return the crop top-left positions that centre each focus area.
+
+    Each entry is the crop position whose centre sits on the centre of the
+    matching subject rectangle (clamped inside the prepared frame).  With two
+    or more areas the Ken Burns camera travels through this ordered path, so
+    every marked subject is centred in turn.
+    """
+    areas = normalise_focus_areas(focus_areas)
+    if not areas:
+        return []
+
+    max_x = max(0, source_width - crop_width)
+    max_y = max(0, source_height - crop_height)
+    path: list[Tuple[int, int]] = []
+    for area in areas:
+        centre_x = (area['x'] + area['w'] / 2.0) * source_width
+        centre_y = (area['y'] + area['h'] / 2.0) * source_height
+        x = int(round(centre_x - crop_width / 2.0))
+        y = int(round(centre_y - crop_height / 2.0))
+        path.append((max(0, min(x, max_x)), max(0, min(y, max_y))))
+    logger.debug(
+        "get_focus_camera_path: %d area(s) → %s", len(areas), path
+    )
+    return path
+
+
+def interpolate_focus_path(
+    path: list[Tuple[int, int]],
+    t: float,
+    duration: float,
+) -> Tuple[float, float]:
+    """Interpolate the camera position along an ordered focus path.
+
+    Keyframes are spread evenly over the clip: the first area is centred at
+    ``t=0``, the last at ``t=duration``, and every intermediate area is
+    centred at its proportional time.  Each leg uses smoothstep easing so the
+    camera settles on a subject instead of whipping past it.
+    """
+    if not path:
+        return (0.0, 0.0)
+    if len(path) == 1 or duration <= 0:
+        return (float(path[0][0]), float(path[0][1]))
+
+    progress = max(0.0, min(1.0, t / duration))
+    legs = len(path) - 1
+    scaled = progress * legs
+    index = min(int(scaled), legs - 1)
+    local = scaled - index
+    # Smoothstep: zero velocity at both keyframes.
+    eased = local * local * (3.0 - 2.0 * local)
+
+    start = path[index]
+    end = path[index + 1]
+    return (
+        start[0] + (end[0] - start[0]) * eased,
+        start[1] + (end[1] - start[1]) * eased,
+    )
+
+
 def get_position_in_bounds(
     position: str,
     bounds: Tuple[int, int, int, int],
@@ -509,6 +611,41 @@ def get_position_in_bounds(
             f"Unknown position name '{position}'. Valid names are: {valid}"
         )
     return mapping[position]
+
+
+def get_focus_sweep_coords(
+    start_name: str,
+    end_name: str,
+    focus_area: dict,
+    source_width: int,
+    source_height: int,
+    crop_width: int,
+    crop_height: int,
+    spread: float = 0.5,
+) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+    """Return a gentle pan path centred on a single marked subject.
+
+    The full bounds allow the crop to travel from one side of the subject
+    to the other.  Pulling those endpoints toward the bounds centre by
+    ``spread`` keeps the subject near the middle of the frame while still
+    giving the shot visible motion.
+    """
+    bounds = get_focus_area_bounds(
+        focus_area, source_width, source_height, crop_width, crop_height,
+    )
+    start = get_position_in_bounds(start_name, bounds)
+    end = get_position_in_bounds(end_name, bounds)
+    centre_x = (bounds[0] + bounds[1]) / 2.0
+    centre_y = (bounds[2] + bounds[3]) / 2.0
+    spread = max(0.0, min(1.0, float(spread)))
+
+    def settled(point: Tuple[int, int]) -> Tuple[int, int]:
+        return (
+            int(round(centre_x + (point[0] - centre_x) * spread)),
+            int(round(centre_y + (point[1] - centre_y) * spread)),
+        )
+
+    return settled(start), settled(end)
 
 
 def get_start_end_coords(
@@ -568,27 +705,31 @@ def calculate_focus_crop_dimensions(
     output_width: int,
     output_height: int,
     zoom_intensity: float,
-    focus_area: dict,
+    focus_area,
     source_width: int,
     source_height: int,
 ) -> Tuple[int, int]:
     """Grow the crop box just enough to keep the marked subject in view.
 
-    The base crop is the normal zoom crop.  If the focus rectangle is
-    larger than that crop, the box is scaled up (zooming out) with a small
-    padding until it contains the subject, then capped at the prepared
-    frame size.
+    ``focus_area`` may be a single rectangle or an ordered list of
+    rectangles.  The base crop is the normal zoom crop.  If any focus
+    rectangle is larger than that crop, the box is scaled up (zooming out)
+    with a small padding until it contains the largest subject, then capped
+    at the prepared frame size.
     """
     base_crop_w, base_crop_h = calculate_crop_dimensions(
         output_width, output_height, zoom_intensity
     )
-    if not focus_area:
+    areas = normalise_focus_areas(focus_area)
+    if not areas:
         return base_crop_w, base_crop_h
 
+    focus_w = max(area['w'] for area in areas)
+    focus_h = max(area['h'] for area in areas)
     padding = 1.1
     needed_scale = max(
-        (float(focus_area['w']) * output_width) / base_crop_w,
-        (float(focus_area['h']) * output_height) / base_crop_h,
+        (focus_w * output_width) / base_crop_w,
+        (focus_h * output_height) / base_crop_h,
         1.0,
     ) * padding
     max_scale = min(
@@ -601,9 +742,9 @@ def calculate_focus_crop_dimensions(
     crop_h = max(1, min(source_height, int(round(base_crop_h * scale))))
     logger.debug(
         "calculate_focus_crop_dimensions: base %dx%d → focus %dx%d "
-        "(scale %.2f, focus %.2f×%.2f)",
+        "(scale %.2f, largest subject %.2f×%.2f, %d area(s))",
         base_crop_w, base_crop_h, crop_w, crop_h, scale,
-        focus_area['w'], focus_area['h'],
+        focus_w, focus_h, len(areas),
     )
     return crop_w, crop_h
 
@@ -675,6 +816,7 @@ def apply_ken_burns(
     focus_x: float = 0.5,
     focus_y: float = 0.5,
     focus_area: dict | None = None,
+    focus_areas: list | None = None,
 ) -> VideoClip:
     """Apply the Ken Burns (zoom-and-pan) effect to a still image.
 
@@ -714,6 +856,10 @@ def apply_ken_burns(
             normalised to the prepared frame.  The crop zooms out if
             needed and pans only inside the region that keeps the subject
             visible.
+        focus_areas: Optional ordered list of subject rectangles.  When two
+            or more are supplied the camera travels through their centres
+            over the clip, so each marked subject is centred dynamically.
+            Takes precedence over ``focus_area``.
 
     Returns:
         A MoviePy :class:`VideoClip` with the specified duration and FPS,
@@ -749,8 +895,13 @@ def apply_ken_burns(
     # ------------------------------------------------------------------
     # 2. Calculate crop dimensions
     # ------------------------------------------------------------------
+    # ``image_focus_areas`` is the new ordered list; ``image_focus_area``
+    # is the legacy single-rectangle field.  Merge them into one list.
+    areas = normalise_focus_areas(focus_areas) or normalise_focus_areas(
+        focus_area
+    )
     crop_width, crop_height = calculate_focus_crop_dimensions(
-        output_width, output_height, zoom_intensity, focus_area,
+        output_width, output_height, zoom_intensity, areas or None,
         source_width, source_height,
     )
     logger.debug(
@@ -766,20 +917,44 @@ def apply_ken_burns(
     )
 
     # ------------------------------------------------------------------
-    # 4. Compute start and end pixel coordinates
+    # 4. Compute the camera path
     # ------------------------------------------------------------------
-    (start_x, start_y), (end_x, end_y) = get_start_end_coords(
-        start_name,
-        end_name,
-        source_width,
-        source_height,
-        crop_width,
-        crop_height,
-        focus_area=focus_area,
-    )
+    # Two or more marked areas become keyframes: the camera centres each
+    # one in turn.  A single area keeps the previous behaviour (a pan
+    # inside the bounds that keep that subject visible).
+    camera_path: list[Tuple[int, int]] = []
+    if len(areas) >= 2:
+        camera_path = get_focus_camera_path(
+            areas, source_width, source_height, crop_width, crop_height,
+        )
+
+    if camera_path:
+        start_x, start_y = camera_path[0]
+        end_x, end_y = camera_path[-1]
+    elif areas:
+        # A single subject: pan gently around its centre instead of
+        # sweeping from one edge of the whole frame to the other.
+        (start_x, start_y), (end_x, end_y) = get_focus_sweep_coords(
+            start_name,
+            end_name,
+            areas[0],
+            source_width,
+            source_height,
+            crop_width,
+            crop_height,
+        )
+    else:
+        (start_x, start_y), (end_x, end_y) = get_start_end_coords(
+            start_name,
+            end_name,
+            source_width,
+            source_height,
+            crop_width,
+            crop_height,
+        )
     logger.debug(
-        "  Start coords: (%d, %d), End coords: (%d, %d)",
-        start_x, start_y, end_x, end_y,
+        "  Start coords: (%d, %d), End coords: (%d, %d), path=%d",
+        start_x, start_y, end_x, end_y, len(camera_path),
     )
 
     # ------------------------------------------------------------------
@@ -793,14 +968,14 @@ def apply_ken_burns(
         """Generate a single frame at time *t* by interpolating the crop.
 
         Called by MoviePy once per frame during rendering.  The closure
-        captures the source image, start/end coordinates, crop
-        dimensions, output resolution, and duration from the enclosing
+        captures the source image, camera keyframes, crop dimensions,
+        output resolution, and duration from the enclosing
         :func:`apply_ken_burns` scope.
 
         Algorithm per frame:
 
-        1. Call :func:`interpolate_position` to get the float crop-box
-           position at time *t* (with clamped progress).
+        1. Interpolate the crop-box position along the focus-area path
+           (or the legacy start→end pan) with clamped progress.
         2. Round to integer pixel coordinates.
         3. Clamp to valid image bounds.
         4. Extract the crop via NumPy slicing ``[y:y+h, x:x+w]``
@@ -825,11 +1000,17 @@ def apply_ken_burns(
             NumPy array of shape ``(output_height, output_width, 3)``
             with dtype ``uint8``.
         """
-        # Step 1: Interpolate the crop-box position (progress clamped
-        # to [0, 1] inside interpolate_position)
-        interp_x, interp_y = interpolate_position(
-            start_coords, end_coords, t, duration
-        )
+        # Step 1: Interpolate the crop-box position.  A multi-area path
+        # centres each marked subject in turn; otherwise the legacy
+        # start→end pan is used (progress clamped inside helpers).
+        if camera_path:
+            interp_x, interp_y = interpolate_focus_path(
+                camera_path, t, duration
+            )
+        else:
+            interp_x, interp_y = interpolate_position(
+                start_coords, end_coords, t, duration
+            )
 
         # Step 2: Convert float coordinates to integer pixels
         x = int(round(interp_x))

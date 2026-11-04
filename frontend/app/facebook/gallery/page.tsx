@@ -1,15 +1,54 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { getGalleryItems, getStreamUrl, getDownloadUrl } from '@/lib/api';
-import { GalleryItem } from '@/lib/types';
+import { toast } from 'sonner';
+import {
+  getGalleryItems,
+  getStreamUrl,
+  getDownloadUrl,
+  bulkUpdateGalleryStatus,
+  deleteGalleryItem,
+  bulkDeleteGalleryItems,
+} from '@/lib/api';
+import { GalleryItem, RenderingStatus } from '@/lib/types';
+import {
+  GALLERY_STATUS_OPTIONS,
+  filterGalleryItems,
+  formatGalleryFileSize,
+  galleryStatusMeta,
+} from '@/lib/gallery';
 import { sectionFromPathname } from '@/lib/section';
+import { GalleryAssetCard } from '@/components/GalleryAssetCard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Tooltip,
   TooltipContent,
@@ -25,7 +64,6 @@ import {
   Download,
   Play,
   RefreshCw,
-  Clock,
   Maximize2,
   MonitorPlay,
   X,
@@ -37,37 +75,13 @@ import {
   SkipForward,
   Repeat,
   PictureInPicture2,
+  Search,
+  Trash2,
+  CheckSquare,
+  XCircle,
 } from 'lucide-react';
 
 // ── Utilities ──
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const size = bytes / Math.pow(1024, i);
-  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-}
-
-function formatRelativeTime(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHr / 24);
-
-  if (diffSec < 60) return 'Just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
-  if (diffDay === 1) return 'Yesterday';
-  if (diffDay < 30) return `${diffDay}d ago`;
-  const diffMonth = Math.floor(diffDay / 30);
-  if (diffMonth < 12) return `${diffMonth}mo ago`;
-  const diffYear = Math.floor(diffDay / 365);
-  return `${diffYear}y ago`;
-}
 
 function formatAbsoluteDate(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -82,6 +96,135 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
+
+  // ── Asset-management state ──
+  const [statusFilter, setStatusFilter] = useState<RenderingStatus | 'all'>('all');
+  const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteTargets, setDeleteTargets] = useState<GalleryItem[] | null>(null);
+  const [isMutating, setIsMutating] = useState(false);
+
+  const visibleItems = useMemo(
+    () =>
+      filterGalleryItems(items, {
+        status: statusFilter,
+        project: projectFilter,
+        query,
+        sort,
+      }),
+    [items, statusFilter, projectFilter, query, sort],
+  );
+
+  const projectOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    items.forEach((item) => map.set(item.project_id, item.project_title));
+    return Array.from(map, ([id, title]) => ({ id, title })).sort((a, b) =>
+      a.title.localeCompare(b.title),
+    );
+  }, [items]);
+
+  const allVisibleSelected =
+    visibleItems.length > 0 &&
+    visibleItems.every((item) => selectedIds.has(item.id));
+
+  const toggleSelection = useCallback((id: string, selected: boolean) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (allVisibleSelected) {
+        visibleItems.forEach((item) => next.delete(item.id));
+      } else {
+        visibleItems.forEach((item) => next.add(item.id));
+      }
+      return next;
+    });
+  }, [allVisibleSelected, visibleItems]);
+
+  const clearFilters = useCallback(() => {
+    setStatusFilter('all');
+    setProjectFilter('all');
+    setQuery('');
+    setSort('newest');
+  }, []);
+
+  const handleBulkStatus = useCallback(
+    async (status: RenderingStatus) => {
+      if (selectedIds.size === 0) return;
+      const ids = Array.from(selectedIds);
+      setIsMutating(true);
+      try {
+        await bulkUpdateGalleryStatus(ids, status);
+        setItems((previous) =>
+          previous.map((item) =>
+            ids.includes(item.id)
+              ? {
+                  ...item,
+                  status,
+                  status_label: galleryStatusMeta(status).label,
+                  published_at:
+                    status === 'published'
+                      ? new Date().toISOString()
+                      : null,
+                }
+              : item,
+          ),
+        );
+        setSelectedIds(new Set());
+        toast.success(
+          `${ids.length} rendering${ids.length === 1 ? '' : 's'} marked ${galleryStatusMeta(status).label.toLowerCase()}`,
+        );
+      } catch {
+        toast.error('Could not update the selected renderings.');
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [selectedIds],
+  );
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleteTargets?.length) return;
+    const ids = deleteTargets.map((item) => item.id);
+    setIsMutating(true);
+    try {
+      if (ids.length === 1) {
+        await deleteGalleryItem(ids[0]);
+      } else {
+        await bulkDeleteGalleryItems(ids);
+      }
+      setItems((previous) => previous.filter((item) => !ids.includes(item.id)));
+      if (selectedItem && ids.includes(selectedItem.id)) {
+        setSelectedItem(null);
+        setIsPlaying(false);
+        setCurrentTime(0);
+        setDuration(0);
+        setPlaybackRate(1);
+      }
+      setSelectedIds((previous) => {
+        const next = new Set(previous);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      toast.success(
+        `${ids.length} rendering${ids.length === 1 ? '' : 's'} deleted`,
+      );
+    } catch {
+      toast.error('Could not delete the selected rendering(s).');
+    } finally {
+      setIsMutating(false);
+      setDeleteTargets(null);
+    }
+  }, [deleteTargets, selectedItem]);
 
   // ── Video player state ──
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -211,21 +354,180 @@ export default function GalleryPage() {
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
+  const hasFilters =
+    statusFilter !== 'all' ||
+    projectFilter !== 'all' ||
+    query.trim().length > 0 ||
+    sort !== 'newest';
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Gallery</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Browse and download your rendered videos
+            Manage every rendering produced by this account&apos;s projects
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchGallery} disabled={loading}>
-          <RefreshCw className={`size-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="hidden sm:inline-flex">
+            {items.length} asset{items.length === 1 ? '' : 's'}
+          </Badge>
+          <Button variant="outline" size="sm" onClick={fetchGallery} disabled={loading}>
+            <RefreshCw className={`size-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {/* Filter bar */}
+      <Card>
+        <CardContent className="p-3 sm:p-4 space-y-3">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search video or project title…"
+                className="h-9 pl-9"
+              />
+            </div>
+
+            <Select
+              value={statusFilter}
+              onValueChange={(value) =>
+                setStatusFilter(value as RenderingStatus | 'all')
+              }
+            >
+              <SelectTrigger className="h-9 w-full lg:w-[170px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {GALLERY_STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={projectFilter} onValueChange={setProjectFilter}>
+              <SelectTrigger className="h-9 w-full lg:w-[210px]">
+                <SelectValue placeholder="Project" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All projects</SelectItem>
+                {projectOptions.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={sort}
+              onValueChange={(value) => setSort(value as 'newest' | 'oldest')}
+            >
+              <SelectTrigger className="h-9 w-full lg:w-[140px]">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest first</SelectItem>
+                <SelectItem value="oldest">Oldest first</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {hasFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 shrink-0"
+                onClick={clearFilters}
+              >
+                <XCircle className="mr-1.5 size-4" />
+                Clear
+              </Button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={toggleSelectAll}
+                disabled={visibleItems.length === 0}
+              >
+                <CheckSquare className="mr-1.5 size-3.5" />
+                {allVisibleSelected ? 'Deselect all' : 'Select all'}
+              </Button>
+              <span>
+                {visibleItems.length} of {items.length} shown
+              </span>
+            </div>
+
+            {selectedIds.size > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/40 px-2 py-1.5">
+                <span className="px-1 text-xs font-medium">
+                  {selectedIds.size} selected
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      disabled={isMutating}
+                    >
+                      Change status
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {GALLERY_STATUS_OPTIONS.map((option) => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onClick={() => handleBulkStatus(option.value)}
+                      >
+                        <span
+                          className={`mr-2 size-2 rounded-full ${galleryStatusMeta(option.value).dot}`}
+                        />
+                        {option.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-7 text-xs"
+                  disabled={isMutating}
+                  onClick={() =>
+                    setDeleteTargets(
+                      items.filter((item) => selectedIds.has(item.id)),
+                    )
+                  }
+                >
+                  <Trash2 className="mr-1.5 size-3.5" />
+                  Delete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Error state */}
       {error && (
@@ -254,7 +556,7 @@ export default function GalleryPage() {
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty state — no assets at all */}
       {!loading && !error && items.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <MonitorPlay className="size-16 mb-4 opacity-30" />
@@ -266,90 +568,31 @@ export default function GalleryPage() {
         </div>
       )}
 
-      {/* Video grid — masonry layout for mixed aspect ratios */}
-      {!loading && items.length > 0 && (
-        <div className="columns-2 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-3 [column-fill:_balance]">
-          {items.map((item) => (
-            <Card
-              key={item.id}
-              className="overflow-hidden cursor-pointer group hover:ring-2 hover:ring-primary/20 transition-all break-inside-avoid mb-3"
-              onClick={() => setSelectedItem(item)}
-            >
-              {/* Video preview */}
-              <div
-                className="relative bg-black"
-                style={{
-                  aspectRatio: `${item.resolution_width} / ${item.resolution_height}`,
-                }}
-              >
-                <video
-                  src={getStreamUrl(item.id)}
-                  className="w-full h-full object-contain"
-                  preload="metadata"
-                  muted
-                  playsInline
-                  onMouseEnter={(e) => {
-                    const v = e.currentTarget;
-                    v.currentTime = 0;
-                    v.play().catch(() => {});
-                  }}
-                  onMouseLeave={(e) => {
-                    const v = e.currentTarget;
-                    v.pause();
-                    v.currentTime = 0;
-                  }}
-                />
-                {/* Play overlay */}
-                <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  <div className="bg-white/90 dark:bg-black/70 rounded-full p-3">
-                    <Play className="size-6 text-foreground" />
-                  </div>
-                </div>
-                {/* Resolution badge */}
-                <div className="absolute top-2 right-2">
-                  <Badge variant="outline" className="bg-black/60 text-white border-white/20 text-xs">
-                    {item.resolution_width}×{item.resolution_height}
-                  </Badge>
-                </div>
-              </div>
+      {/* Empty state — filters exclude everything */}
+      {!loading && items.length > 0 && visibleItems.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <Search className="size-12 mb-3 opacity-30" />
+          <p className="text-base font-medium">No assets match these filters</p>
+          <p className="mt-1 text-sm">Try another status, project or search term</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
+            Clear filters
+          </Button>
+        </div>
+      )}
 
-              {/* Info */}
-              <CardContent className="pt-2.5 pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-sm font-medium">{item.title}</h3>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="flex items-center gap-1">
-                            <Clock className="size-3" />
-                            {formatRelativeTime(item.updated_at)}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="text-xs">{formatAbsoluteDate(item.updated_at)}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <span>{item.segment_count} segments</span>
-                      <span>{formatFileSize(item.file_size)}</span>
-                    </div>
-                  </div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 shrink-0"
-                        onClick={(e) => handleDownload(item, e)}
-                      >
-                        <Download className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Download</TooltipContent>
-                  </Tooltip>
-                </div>
-              </CardContent>
-            </Card>
+      {/* Asset grid — masonry layout for mixed aspect ratios */}
+      {!loading && visibleItems.length > 0 && (
+        <div className="columns-2 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6 gap-3 [column-fill:_balance]">
+          {visibleItems.map((item) => (
+            <GalleryAssetCard
+              key={item.id}
+              item={item}
+              selected={selectedIds.has(item.id)}
+              onSelectedChange={(selected) => toggleSelection(item.id, selected)}
+              onOpen={() => setSelectedItem(item)}
+              onDownload={(event) => handleDownload(item, event)}
+              onDelete={() => setDeleteTargets([item])}
+            />
           ))}
         </div>
       )}
@@ -382,7 +625,7 @@ export default function GalleryPage() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" className="size-8" asChild>
-                    <Link href={`/${section}/projects/${selectedItem?.id}`}>
+                    <Link href={`/${section}/projects/${selectedItem?.project_id}`}>
                       <ExternalLink className="size-4" />
                     </Link>
                   </Button>
@@ -569,12 +812,52 @@ export default function GalleryPage() {
               <span>{selectedItem.resolution_width}×{selectedItem.resolution_height}</span>
               <span>{selectedItem.framerate} fps</span>
               <span>{selectedItem.segment_count} segments</span>
-              <span>{formatFileSize(selectedItem.file_size)}</span>
-              <span className="ml-auto">{formatAbsoluteDate(selectedItem.updated_at)}</span>
+              <span>{formatGalleryFileSize(selectedItem.file_size)}</span>
+              <span>{galleryStatusMeta(selectedItem.status).label}</span>
+              <span className="ml-auto">{formatAbsoluteDate(selectedItem.created_at)}</span>
             </div>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deleteTargets}
+        onOpenChange={(open) => {
+          if (!open && !isMutating) setDeleteTargets(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete{' '}
+              {deleteTargets && deleteTargets.length === 1
+                ? `"${deleteTargets[0].title}"`
+                : `${deleteTargets?.length ?? 0} renderings`}
+              ?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the rendered video file
+              {deleteTargets && deleteTargets.length > 1 ? 's' : ''} from the
+              gallery and storage. The project, script and segments stay intact
+              and can be rendered again later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isMutating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isMutating}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDelete();
+              }}
+            >
+              {isMutating ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

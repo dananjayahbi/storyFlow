@@ -84,6 +84,57 @@ describe('ImageUploader', () => {
     expect(onFocusAreaChange).toHaveBeenCalledWith('seg-1', null);
   });
 
+  it('shows each marked focus area and removes one', () => {
+    const onFocusAreasChange = jest.fn().mockResolvedValue(undefined);
+    const areas = [
+      { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+      { x: 0.6, y: 0.5, w: 0.25, h: 0.3 },
+    ];
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        focusAreas={areas}
+        onFocusAreasChange={onFocusAreasChange}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    expect(screen.getByText('Ken Burns focus 1')).toBeInTheDocument();
+    expect(screen.getByText('Ken Burns focus 2')).toBeInTheDocument();
+    expect(
+      screen.getByText(/centres each marked area in turn/i)
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Remove focus area 2/i })
+    );
+    expect(onFocusAreasChange).toHaveBeenCalledWith('seg-1', [areas[0]]);
+  });
+
+  it('clears every focus area through the list callback', () => {
+    const onFocusAreasChange = jest.fn().mockResolvedValue(undefined);
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        focusAreas={[
+          { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
+          { x: 0.6, y: 0.5, w: 0.2, h: 0.2 },
+        ]}
+        onFocusAreasChange={onFocusAreasChange}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Clear focus area/i }));
+    expect(onFocusAreasChange).toHaveBeenCalledWith('seg-1', []);
+  });
+
   it('exposes the focus-area marking tool', () => {
     render(
       <ImageUploader

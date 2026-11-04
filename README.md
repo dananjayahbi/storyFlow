@@ -152,12 +152,17 @@ block is rendered as a static still. Changing the resolution in
 the editor always matches the next render.
 
 Each block also has a **focus-area** tool. After aligning the image, press the
-scan button and drag a rectangle around the subject. The rectangle is stored
-as `image_focus_area` (`{x, y, w, h}`, normalised to the frame) and the
-renderer keeps it inside the Ken Burns crop: it zooms out just enough when the
-subject is larger than the normal crop and confines the pan to the region that
-keeps the subject visible. Clear the rectangle with the focus button to return
-to the normal full-frame camera path.
+scan button and drag a rectangle around a subject. Repeat to mark up to six
+areas; the ordered list is stored as `image_focus_areas`
+(`[{x, y, w, h}, …]`, normalised to the frame) and the legacy single rectangle
+is mirrored in `image_focus_area` for older clients. The renderer zooms out
+just enough to fit the largest marked subject and then moves the camera
+through each area's centre over the clip, so every highlighted subject is
+centred dynamically in turn. With a single area the pan stays close to its
+centre instead of sweeping the whole frame. Remove individual chips or press
+the focus button to clear all areas; a block with no area keeps the default
+full-frame camera path. Because the setting is per segment, images that do not
+need highlighting are rendered exactly as before.
 
 ---
 
@@ -603,10 +608,28 @@ cd frontend && npm test
 
 ### Gallery
 
-The Gallery shows rendered videos as a responsive masonry of compact
-thumbnails: 2 columns on phones, scaling up to 6 columns on wide screens. Hover
-a tile for a muted preview, click it for the full player (seek, volume, speed,
-loop, picture-in-picture and fullscreen), or use the download button.
+The Gallery is an asset manager for every rendering produced in the selected
+account. A project can be rendered many times, and each render is kept as its
+own gallery asset linked back to the project.
+
+- **Publishing workflow** — every asset starts as **Rendered** and can move to
+  **Ready to publish** and **Published**. Use the status filter or select
+  several tiles and change their status together.
+- **Filters** — search by video/project title, filter by status or project, and
+  switch between newest/oldest first.
+- **Full titles** — long names scroll like a news headline when the tile is
+  hovered, without changing the tile size.
+- **Bulk actions** — select multiple assets to change status or delete their
+  rendered MP4 files in one go. Deleting a rendering removes only that video
+  file; the project, script and segments stay intact and can be rendered again.
+- **Project gallery** — the project detail header has a **Project gallery**
+  button that opens a full-viewport view of every rendering for that project,
+  with the same preview, status, download and delete actions.
+
+Tiles use a responsive masonry layout: 2 columns on phones, scaling up to 6
+columns on wide screens. Hover a tile for a muted preview, click it for the full
+player (seek, volume, speed, loop, picture-in-picture and fullscreen), or use
+the download button.
 
 ### Configuring the AI model
 

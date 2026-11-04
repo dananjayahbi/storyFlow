@@ -5,8 +5,8 @@ from rest_framework import serializers
 
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
-    OutroVideo, VoiceReference, Script, ChatSession, BGMClip, SECTION_CHOICES,
-    apply_settings_to_project,
+    OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
+    SECTION_CHOICES, apply_settings_to_project,
 )
 from .parsers import JSONParser, TextParser, ParseError
 from .validators import validate_import_data, HEX_COLOR_REGEX
@@ -41,6 +41,9 @@ ALLOWED_RESOLUTIONS = {
 }
 
 ALLOWED_FPS = {24, 30, 60}
+
+#: Upper bound on the number of marked Ken Burns subject areas per segment.
+MAX_IMAGE_FOCUS_AREAS = 6
 
 
 class TtsEngineValidationMixin:
@@ -101,8 +104,8 @@ class AccountSerializer(serializers.ModelSerializer):
         return obj.projects.filter(is_playground=False).count()
 
     def get_gallery_count(self, obj):
-        return obj.projects.filter(
-            is_playground=False, status='COMPLETED'
+        return Rendering.objects.filter(
+            project__account=obj, project__is_playground=False
         ).count()
 
     def validate_name(self, value):
@@ -136,6 +139,7 @@ class AccountSerializer(serializers.ModelSerializer):
 
 class ProjectSerializer(serializers.ModelSerializer):
     segment_count = serializers.SerializerMethodField()
+    rendering_count = serializers.SerializerMethodField()
     account_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -144,6 +148,7 @@ class ProjectSerializer(serializers.ModelSerializer):
             'id', 'title', 'section', 'account', 'account_name',
             'created_at', 'updated_at', 'status', 'resolution_width',
             'resolution_height', 'framerate', 'segment_count',
+            'rendering_count',
         ]
         read_only_fields = [
             'id', 'account', 'created_at', 'updated_at', 'status',
@@ -151,6 +156,9 @@ class ProjectSerializer(serializers.ModelSerializer):
 
     def get_segment_count(self, obj):
         return obj.segments.count()
+
+    def get_rendering_count(self, obj):
+        return obj.renderings.count()
 
     def get_account_name(self, obj):
         return obj.account.name if obj.account_id else None
@@ -164,6 +172,7 @@ class SegmentSerializer(serializers.ModelSerializer):
             'image_prompt', 'image_file', 'audio_file',
             'audio_duration', 'audio_engine', 'is_locked',
             'image_focus_x', 'image_focus_y', 'image_focus_area',
+            'image_focus_areas',
         ]
         read_only_fields = [
             'id', 'project', 'sequence_index',
@@ -192,18 +201,49 @@ class SegmentSerializer(serializers.ModelSerializer):
         """
         if value is None:
             return None
-        if not isinstance(value, dict):
+        return self._validate_focus_rectangle(value)
+
+    def validate_image_focus_areas(self, value):
+        """Validate the optional ordered list of focus rectangles.
+
+        Each entry uses the same normalised ``x``/``y``/``w``/``h`` shape as
+        :attr:`image_focus_area`.  The list may be empty (or ``null``) to fall
+        back to the default blind Ken Burns animation.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, (list, tuple)):
+            raise serializers.ValidationError(
+                'Image focus areas must be a list of rectangles.'
+            )
+        if len(value) > MAX_IMAGE_FOCUS_AREAS:
+            raise serializers.ValidationError(
+                f'Mark at most {MAX_IMAGE_FOCUS_AREAS} focus areas per image.'
+            )
+        return [self._validate_focus_rectangle(item) for item in value]
+
+    @staticmethod
+    def _validate_focus_rectangle(value):
+        if isinstance(value, dict):
+            try:
+                x = float(value['x'])
+                y = float(value['y'])
+                w = float(value['w'])
+                h = float(value['h'])
+            except (KeyError, TypeError, ValueError):
+                raise serializers.ValidationError(
+                    'Image focus area needs numeric x, y, w and h values.'
+                )
+        elif isinstance(value, (list, tuple)) and len(value) == 4:
+            try:
+                x, y, w, h = (float(number) for number in value)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    'Image focus area needs numeric x, y, w and h values.'
+                )
+        else:
             raise serializers.ValidationError(
                 'Image focus area must be an object with x, y, w and h.'
-            )
-        try:
-            x = float(value['x'])
-            y = float(value['y'])
-            w = float(value['w'])
-            h = float(value['h'])
-        except (KeyError, TypeError, ValueError):
-            raise serializers.ValidationError(
-                'Image focus area needs numeric x, y, w and h values.'
             )
         if not all(0.0 <= number <= 1.0 for number in (x, y, w, h)):
             raise serializers.ValidationError(
@@ -218,6 +258,16 @@ class SegmentSerializer(serializers.ModelSerializer):
                 'Image focus area must stay inside the render frame.'
             )
         return {'x': x, 'y': y, 'w': w, 'h': h}
+
+    def update(self, instance, validated_data):
+        """Keep the legacy single area in sync with the ordered list."""
+        if 'image_focus_areas' in validated_data:
+            areas = validated_data.get('image_focus_areas') or []
+            validated_data['image_focus_area'] = areas[0] if areas else None
+        elif 'image_focus_area' in validated_data:
+            area = validated_data.get('image_focus_area')
+            validated_data['image_focus_areas'] = [area] if area else None
+        return super().update(instance, validated_data)
 
 
 class VoiceReferenceSerializer(serializers.ModelSerializer):
@@ -606,6 +656,7 @@ class AccountSettingsSerializer(GlobalSettingsSerializer):
 
 class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSerializer):
     segments = SegmentSerializer(many=True, read_only=True)
+    rendering_count = serializers.SerializerMethodField()
     account_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -614,6 +665,7 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
             'id', 'title', 'section', 'account', 'account_name',
             'created_at', 'updated_at', 'status', 'resolution_width',
             'resolution_height', 'framerate', 'output_path', 'segments',
+            'rendering_count',
             # ── Per-project settings ──
             'default_voice_id', 'tts_speed',
             'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
@@ -639,6 +691,9 @@ class ProjectDetailSerializer(TtsEngineValidationMixin, serializers.ModelSeriali
             'id', 'created_at', 'updated_at', 'custom_font_file', 'section',
             'account',
         ]
+
+    def get_rendering_count(self, obj):
+        return obj.renderings.count()
 
     def get_account_name(self, obj):
         return obj.account.name if obj.account_id else None
