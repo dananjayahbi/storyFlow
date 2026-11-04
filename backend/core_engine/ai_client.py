@@ -15,6 +15,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from core_engine.image_prompt_rules import (
+    merge_prompt_rules,
+    sanitize_image_prompt,
+)
+
 DEFAULT_SYSTEM_PROMPT = (
     "You are Script Craft, the staff writer for StoryFlow, a channel that "
     "produces faceless narrative documentary videos. Write in a cinematic, "
@@ -42,6 +47,9 @@ Rules:
 - 8 to 16 segments unless the user explicitly asks for a different length.
 - Every segment must contain both `text_content` and `image_prompt`.
 - No markdown, no code fences, no commentary outside the JSON object.
+- image_prompt must contain no text/letter/caption/signage/typography request,
+  no split-screen/side-by-side/before-after comparison, and no aspect ratio or
+  resolution.
 """
 
 
@@ -111,7 +119,7 @@ def normalize_script(payload: dict[str, Any], fallback_title: str = '') -> dict[
             continue
         segments.append({
             'text_content': text_content,
-            'image_prompt': str(image_prompt).strip(),
+            'image_prompt': sanitize_image_prompt(str(image_prompt).strip()),
         })
 
     if not segments:
@@ -409,7 +417,9 @@ def generate_script(
     Returns ``{'script': {...}, 'raw': '<assistant text>', 'model': model}``.
     """
     history = history or []
-    system = (system_prompt or '').strip() or DEFAULT_SYSTEM_PROMPT
+    system = merge_prompt_rules(
+        (system_prompt or '').strip() or DEFAULT_SYSTEM_PROMPT
+    )
     messages: list[dict[str, str]] = [
         {'role': 'system', 'content': system},
         {

@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
 
 from core_engine import ai_client
+from core_engine.image_prompt_rules import sanitize_image_prompt
 
 AGENT_INSTRUCTIONS = """You are Script Craft, the staff writer and writing partner
 inside StoryFlow. You talk to the channel owner in a chat while the scripts you
@@ -57,6 +58,17 @@ Script rules:
   `image_prompt` (a detailed cinematic text-to-image prompt).
 - Keep lighting, palette and camera language consistent across image prompts.
 - Give each script a concise, compelling title.
+
+Image prompt rules:
+- Describe only visual subjects, lighting, palette and camera language.
+- Never request text of any kind: no words, letters, numbers, captions,
+  subtitles, title cards, labels, signage with writing, typography, logos or
+  watermarks.
+- Never request a comparison image: no split-screen, side-by-side, diptych,
+  before-and-after, two-panel or "X vs Y" composition. One single scene only.
+- Never mention an aspect ratio, frame size, resolution or orientation
+  (16:9, 9:16, 4:3, 1:1, vertical, landscape, widescreen, --ar ...).
+- Do not quote text that should appear inside the image.
 """
 
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -80,7 +92,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                             'type': 'object',
                             'properties': {
                                 'text_content': {'type': 'string'},
-                                'image_prompt': {'type': 'string'},
+                                'image_prompt': {
+                                    'type': 'string',
+                                    'description': (
+                                        'Cinematic visual prompt. No text, '
+                                        'captions, typography or signage; no '
+                                        'comparison/split-screen composition; '
+                                        'no aspect ratio or resolution.'
+                                    ),
+                                },
                             },
                             'required': ['text_content'],
                         },
@@ -106,7 +126,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                             'type': 'object',
                             'properties': {
                                 'text_content': {'type': 'string'},
-                                'image_prompt': {'type': 'string'},
+                                'image_prompt': {
+                                    'type': 'string',
+                                    'description': (
+                                        'Cinematic visual prompt. No text, '
+                                        'captions, typography or signage; no '
+                                        'comparison/split-screen composition; '
+                                        'no aspect ratio or resolution.'
+                                    ),
+                                },
                             },
                             'required': ['text_content'],
                         },
@@ -134,7 +162,14 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                         'description': '1-based segment number.',
                     },
                     'text_content': {'type': 'string'},
-                    'image_prompt': {'type': 'string'},
+                    'image_prompt': {
+                        'type': 'string',
+                        'description': (
+                            'Cinematic visual prompt. No text, captions, '
+                            'typography or signage; no comparison/split-screen '
+                            'composition; no aspect ratio or resolution.'
+                        ),
+                    },
                 },
                 'required': ['script_id', 'segment_index', 'text_content'],
             },
@@ -355,9 +390,9 @@ def _rewrite_segment(scripts: list[dict], args: dict[str, Any]) -> tuple[dict | 
         return None, []
     segments[index] = {
         'text_content': text_content,
-        'image_prompt': str(
-            args.get('image_prompt', old.get('image_prompt', ''))
-        ).strip(),
+        'image_prompt': sanitize_image_prompt(
+            str(args.get('image_prompt', old.get('image_prompt', ''))).strip()
+        ),
     }
     content['segments'] = segments
     script['content'] = content

@@ -1094,6 +1094,26 @@ back to the cleaned subtitle text otherwise.
 
 ---
 
+### 7.4.3 Image prompt contract (Issue #28)
+
+**File:** `core_engine/image_prompt_rules.py`
+
+Script Craft image prompts are constrained in three places:
+
+1. `SCRIPT_FORMAT_INSTRUCTIONS`, `DEFAULT_SYSTEM_PROMPT` and
+   `chat_agent.AGENT_INSTRUCTIONS` state the rules explicitly.
+2. The `create_script` / `update_script` / `rewrite_segment` tool schemas
+   describe the same restrictions.
+3. `sanitize_image_prompt()` is applied to every AI-generated, chat-edited and
+   imported prompt before it reaches a project.
+
+The rules are: no text or lettering of any kind, no comparison/split-screen
+composition, and no aspect ratio, resolution or orientation instruction.
+The sanitizer is deliberately conservative with normal prose — it strips
+explicit instructions and artefacts, then collapses whitespace.
+
+---
+
 ### 7.5 Subtitle Engine
 
 **File:** `core_engine/subtitle_engine.py` (~360 lines)

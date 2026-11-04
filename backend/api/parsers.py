@@ -1,5 +1,7 @@
 import re
 
+from core_engine.image_prompt_rules import sanitize_image_prompt
+
 
 class ParseError(Exception):
     """Raised when import data cannot be parsed into the normalized format."""
@@ -46,7 +48,7 @@ class JSONParser:
 
             normalized_segments.append({
                 'text_content': text_content,
-                'image_prompt': image_prompt.strip(),
+                'image_prompt': sanitize_image_prompt(image_prompt.strip()),
                 'sequence_index': i,
             })
 
@@ -125,7 +127,7 @@ class TextParser:
 
             normalized_segments.append({
                 'text_content': text_content,
-                'image_prompt': image_prompt,
+                'image_prompt': sanitize_image_prompt(image_prompt),
                 'sequence_index': len(normalized_segments),  # 0-based
             })
 
