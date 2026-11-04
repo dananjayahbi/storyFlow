@@ -606,6 +606,22 @@ backend\venv\Scripts\python.exe backend\manage.py test tests.test_playground
 cd frontend && npm test
 ```
 
+### Dashboard
+
+The Dashboard is scoped to the selected page/channel and shows project KPIs
+plus publishing activity for that account:
+
+- **KPIs** — total projects, drafts, rendered, **published**, in progress and
+  failed. The published KPI counts gallery assets whose status is
+  **Published**.
+- **Published videos chart** — a bar chart of published gallery assets. Switch
+  between **Day** (last 14 days), **Month** (last 12 months, the default),
+  **Year** (last 5 years) or **Custom** with From/To date pickers. Custom ranges
+  automatically bucket per day (up to 62 days), per month (up to two years) or
+  per year.
+- Publishing counts come from the account-scoped gallery, so two accounts on
+  the same workspace never share chart data.
+
 ### Projects page
 
 The Projects page can be shown as a **table** or a **grid of tiles**. The

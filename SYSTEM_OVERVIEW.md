@@ -51,6 +51,9 @@ the origin they tried and support retrying after a backend restart.
 
 ### 3.1 Projects and the timeline editor
 
+- The Dashboard is account-scoped: six KPIs (including **Published**) plus a
+  published-videos bar chart with Day, Month (default), Year and Custom date
+  ranges. Counts come from published gallery assets, not project status.
 - The Projects page switches between **table** and **tile** layouts; the choice
   is saved per account in `AccountSettings.projects_view_mode`. Both layouts
   lead with a cover thumbnail: a manual upload when present, otherwise the

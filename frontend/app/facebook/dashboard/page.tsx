@@ -3,14 +3,15 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { getProjects } from '@/lib/api';
-import { Project } from '@/lib/types';
+import { getProjects, getGalleryItems } from '@/lib/api';
+import { GalleryItem, Project } from '@/lib/types';
 import { sectionFromPathname, SECTION_LABELS } from '@/lib/section';
 import { withAccount } from '@/lib/account';
 import { useAccountId } from '@/lib/useAccountId';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { PublishedVideosChart } from '@/components/PublishedVideosChart';
 import {
   FolderOpen,
   Film,
@@ -20,6 +21,7 @@ import {
   Clock,
   ArrowRight,
   Loader2,
+  Send,
 } from 'lucide-react';
 import { DashboardSkeleton } from '@/components/skeletons';
 
@@ -96,6 +98,7 @@ export default function DashboardPage() {
   const accountHref = (path: string) =>
     accountId ? withAccount(path, accountId) : path;
   const [projects, setProjects] = useState<Project[]>([]);
+  const [publishedItems, setPublishedItems] = useState<GalleryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,8 +106,14 @@ export default function DashboardPage() {
     (async () => {
       try {
         setLoading(true);
-        const data = await getProjects(section);
+        const [data, published] = await Promise.all([
+          getProjects(section),
+          // Publishing data is secondary: a gallery failure must not hide the
+          // rest of the dashboard.
+          getGalleryItems(section, { status: ['published'] }).catch(() => []),
+        ]);
         setProjects(data.results);
+        setPublishedItems(published);
       } catch (err) {
         setError('Failed to load dashboard data.');
         console.error(err);
@@ -123,9 +132,10 @@ export default function DashboardPage() {
     const failed = projects.filter((p) => p.status === 'FAILED').length;
     const processing = projects.filter((p) => p.status === 'PROCESSING').length;
     const totalSegments = projects.reduce((sum, p) => sum + (p.segment_count || 0), 0);
+    const published = publishedItems.length;
 
-    return { total, drafts, rendered, failed, processing, totalSegments };
-  }, [projects]);
+    return { total, drafts, rendered, failed, processing, totalSegments, published };
+  }, [projects, publishedItems]);
 
   const recentProjects = useMemo(() => {
     return [...projects]
@@ -166,7 +176,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Stat Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <StatCard
           title="Total Projects"
           value={stats.total}
@@ -187,6 +197,13 @@ export default function DashboardPage() {
           iconClassName="text-green-500"
         />
         <StatCard
+          title="Published"
+          value={stats.published}
+          description="Live from the gallery"
+          icon={Send}
+          iconClassName="text-emerald-500"
+        />
+        <StatCard
           title="In Progress"
           value={stats.processing}
           description="Currently rendering"
@@ -201,6 +218,9 @@ export default function DashboardPage() {
           iconClassName="text-destructive"
         />
       </div>
+
+      {/* ── Published videos chart ── */}
+      <PublishedVideosChart items={publishedItems} className="mb-8" />
 
       {/* ── Recent Projects ── */}
       <div>
