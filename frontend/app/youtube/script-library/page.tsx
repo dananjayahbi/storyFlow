@@ -1,5 +1,1 @@
-import { ScriptLibraryPage } from '@/components/ScriptLibraryPage';
-
-export default function YoutubeScriptLibraryPage() {
-  return <ScriptLibraryPage />;
-}
+﻿export { default } from '@/app/facebook/script-library/page';

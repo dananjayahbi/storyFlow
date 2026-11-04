@@ -39,6 +39,13 @@ channels). Projects, gallery items, script chats, script libraries, BGM tracks
 and settings are scoped to the active account. Facebook and YouTube data never
 mix, and two accounts on the same side never see each other's projects.
 
+Both domains are first-class and feature-identical: every `/youtube` page
+re-exports the `/facebook` implementation, all API list/detail endpoints filter
+by `section` + `account`, and parity is enforced by
+`backend/tests/test_domain_parity.py` and
+`frontend/__tests__/domainParity.test.ts`. Domain-specific tools can be added
+later without affecting the shared routes.
+
 Account-specific settings are stored in an `AccountSettings` row. New projects
 snapshot those values when they are created. The frontend resolves the Django
 origin through `NEXT_PUBLIC_API_URL` or, when unset, by probing

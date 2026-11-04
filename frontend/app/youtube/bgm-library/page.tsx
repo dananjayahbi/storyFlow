@@ -1,5 +1,1 @@
-import { BgmLibraryPage } from '@/components/BgmLibraryPage';
-
-export default function YoutubeBgmLibraryPage() {
-  return <BgmLibraryPage />;
-}
+﻿export { default } from '@/app/facebook/bgm-library/page';

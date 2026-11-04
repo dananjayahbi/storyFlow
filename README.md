@@ -644,6 +644,27 @@ account:
 - Selection is never lost to double toggles: clicking the checkbox and the row
   are handled independently.
 
+### Domain parity (Facebook / YouTube)
+
+Both workspaces are first-class and must expose the same functionality:
+
+- Every route under `frontend/app/youtube` is a direct re-export of the
+  corresponding `frontend/app/facebook` page, so a feature added to one side is
+  automatically available on the other with the same layout and behaviour.
+- Shared components never hardcode `/facebook/` or `/youtube/` links; they
+  resolve the active section with `sectionFromPathname` / `sectionPath` and pass
+  `section` + `account` to every API call.
+- Backend list/detail endpoints, gallery, scripts, chat sessions, BGM, settings
+  and render readiness all filter by both `section` and `account`. Requests
+  cannot cross domains, even with a known UUID.
+- Parity is guarded by `frontend/__tests__/domainParity.test.ts` (route tree,
+  re-exports, no hardcoded domain links) and
+  `backend/tests/test_domain_parity.py` (accounts, projects, gallery, scripts,
+  chat, BGM, settings and Bulk Create/import on both sides).
+
+When a genuinely domain-specific tool is added later, add a real YouTube page
+instead of changing the shared Facebook implementation.
+
 ### Dashboard
 
 The Dashboard is scoped to the selected page/channel and shows project KPIs

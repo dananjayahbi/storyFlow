@@ -1,5 +1,1 @@
-import { ScriptCraftPage } from '@/components/ScriptCraftPage';
-
-export default function YoutubeScriptCraftPage() {
-  return <ScriptCraftPage />;
-}
+﻿export { default } from '@/app/facebook/script-craft/page';
