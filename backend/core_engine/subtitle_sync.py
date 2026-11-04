@@ -191,6 +191,7 @@ def _snap_boundaries(
     tolerance = max(0.35, total_duration / max(len(expected) + 1, 2) * 0.55)
     used: set[int] = set()
     snapped: list[float] = []
+    latest = 0.0
 
     for position in expected:
         best_index = None
@@ -206,9 +207,11 @@ def _snap_boundaries(
             value = centres[best_index]
         else:
             value = position
-        if snapped and value <= snapped[-1]:
-            value = snapped[-1] + 0.05
-        snapped.append(min(max(value, 0.0), total_duration))
+        value = min(max(value, 0.0), max(total_duration - 0.05, 0.0))
+        if value <= latest:
+            value = min(latest + 0.05, max(total_duration - 0.05, 0.0))
+        snapped.append(value)
+        latest = value
 
     return snapped
 
