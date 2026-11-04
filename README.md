@@ -128,12 +128,14 @@ accounts and reloads the dashboard with the newly selected account's data.
 The header is a fixed 56 px rail. Navigation is a single horizontal row (it
 scrolls sideways on narrow screens), so no vertical scrollbar appears in the
 header. The active-page underline sits inside each link instead of overflowing
-below it. The project editor sidebar starts directly with the project title and
-status; the StoryFlow mark is shown only once, in the shared top header. The
-editor sidebar has a single **Settings** panel — the old Details tab was
-removed. The **Story Template** JSON reference now lives on the account
-Settings page under **Settings → Story Template**. The expanded editor sidebar
-is 298 px wide (10 px wider than the original 288 px) and collapses to 56 px.
+below it. The project title appears once, in the editor's top header (where it
+can also be renamed); the settings sidebar starts directly with the Settings
+panel, so the name and status are never duplicated. The StoryFlow mark is shown
+only once, in the shared top header. The editor sidebar has a single
+**Settings** panel — the old Details tab was removed. The **Story Template**
+JSON reference now lives on the account Settings page under
+**Settings → Story Template**. The expanded editor sidebar is 298 px wide
+(10 px wider than the original 288 px) and collapses to 56 px.
 
 ### Per-account settings
 

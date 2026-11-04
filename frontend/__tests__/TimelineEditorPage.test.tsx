@@ -134,11 +134,12 @@ describe('TimelineEditorPage', () => {
 
     const { container } = renderPage();
 
-    // Header — project title in top bar (also appears in sidebar)
+    // The project title is rendered once, in the top header. The settings
+    // sidebar no longer repeats it.
     await waitFor(() => {
-      const matches = screen.getAllByText('Test Story');
-      expect(matches.length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Test Story')).toHaveLength(1);
     });
+    expect(screen.getByRole('button', { name: /Rename project/i })).toBeInTheDocument();
 
     // The expanded editor sidebar is 10 px wider than the original w-72.
     const sidebar = container.querySelector('aside');

@@ -347,55 +347,6 @@ export default function TimelineEditorPage() {
               : 'w-[298px]'
           )}
         >
-          {/* ── Project header ── */}
-          <div className={cn(
-            'flex items-center h-14 border-b px-3 shrink-0 gap-2.5',
-            sidebarCollapsed && 'hidden'
-          )}>
-            {!sidebarCollapsed && (
-              <div className="flex-1 min-w-0">
-                {isRenaming ? (
-                  <div className="flex items-center gap-1">
-                    <input
-                      ref={renameInputRef}
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') submitRename();
-                        if (e.key === 'Escape') setIsRenaming(false);
-                      }}
-                      onBlur={submitRename}
-                      className="text-sm font-semibold bg-transparent border-b border-primary outline-none w-full py-0.5"
-                      autoFocus
-                    />
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1 group/title">
-                    <p className="text-sm font-semibold truncate">{project.title}</p>
-                    <button
-                      onClick={startRenaming}
-                      className="opacity-0 group-hover/title:opacity-100 transition-opacity p-0.5 rounded hover:bg-sidebar-accent/50"
-                      aria-label="Rename project"
-                    >
-                      <Pencil className="h-3 w-3 text-sidebar-foreground/50" />
-                    </button>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5">
-                  <Badge
-                    variant="secondary"
-                    className={cn('text-[10px] px-1.5 py-0 h-4', statusStyles[project.status] || '')}
-                  >
-                    {project.status.replace('_', ' ')}
-                  </Badge>
-                  <span className="text-[10px] text-sidebar-foreground/50">
-                    · {segments.length} seg{segments.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* ── Settings panel (the old Details tab was removed) ── */}
           {!sidebarCollapsed && (
             <div className="flex-1 overflow-y-auto py-2">
@@ -440,9 +391,34 @@ export default function TimelineEditorPage() {
               <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 sm:hidden" asChild>
                 <Link href={`/${section}`}><ArrowLeft className="h-4 w-4" /></Link>
               </Button>
-              <h1 className="text-sm font-semibold truncate">
-                {project.title}
-              </h1>
+              {isRenaming ? (
+                <input
+                  ref={renameInputRef}
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') submitRename();
+                    if (e.key === 'Escape') setIsRenaming(false);
+                  }}
+                  onBlur={submitRename}
+                  className="min-w-0 max-w-xs text-sm font-semibold bg-transparent border-b border-primary outline-none py-0.5"
+                  aria-label="Project title"
+                  autoFocus
+                />
+              ) : (
+                <div className="flex items-center gap-1 group/title min-w-0">
+                  <h1 className="text-sm font-semibold truncate">
+                    {project.title}
+                  </h1>
+                  <button
+                    onClick={startRenaming}
+                    className="opacity-0 group-hover/title:opacity-100 transition-opacity p-0.5 rounded hover:bg-muted"
+                    aria-label="Rename project"
+                  >
+                    <Pencil className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                </div>
+              )}
               <Badge
                 variant="secondary"
                 className={cn('text-[10px] px-1.5 py-0 h-4 shrink-0 hidden sm:inline-flex', statusStyles[project.status] || '')}
