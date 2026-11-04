@@ -39,12 +39,16 @@ describe('GalleryPage layout', () => {
     (getGalleryItems as jest.Mock).mockResolvedValue([mockItem]);
   });
 
-  it('uses compact tiles with more columns on wide screens', async () => {
-    const { container } = render(
+  function renderPage() {
+    return render(
       <TooltipProvider>
         <GalleryPage />
       </TooltipProvider>
     );
+  }
+
+  it('uses compact tiles with more columns on wide screens', async () => {
+    const { container } = renderPage();
     await screen.findByText('First video');
 
     const grid = container.querySelector('.columns-2');
@@ -54,5 +58,30 @@ describe('GalleryPage layout', () => {
     expect(grid?.className).toContain('xl:columns-5');
     expect(grid?.className).toContain('2xl:columns-6');
     expect(grid?.className).not.toContain('lg:columns-3');
+  });
+
+  it('keeps the filter section compact and on one row', async () => {
+    renderPage();
+    await screen.findByText('First video');
+
+    const search = screen.getByPlaceholderText(/search video or project/i);
+    expect(search).toHaveClass('h-8');
+
+    const filterCard = search.closest('[data-slot="card"]');
+    expect(filterCard).toHaveClass('py-0');
+    expect(filterCard).toHaveClass('gap-0');
+
+    const content = filterCard?.querySelector('[data-slot="card-content"]');
+    expect(content).toHaveClass('p-2');
+    expect(content).not.toHaveClass('space-y-3');
+
+    // Only the filter row is rendered while nothing is selected.
+    expect(content?.children).toHaveLength(1);
+    expect(content?.firstElementChild).toHaveClass('flex-wrap');
+
+    // All filter selects follow the same compact height.
+    filterCard
+      ?.querySelectorAll('[data-slot="select-trigger"]')
+      .forEach((trigger) => expect(trigger).toHaveClass('h-8'));
   });
 });

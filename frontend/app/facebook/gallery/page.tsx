@@ -280,17 +280,17 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      {/* Filter bar */}
-      <Card>
-        <CardContent className="p-3 sm:p-4 space-y-3">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-            <div className="relative min-w-[200px] flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      {/* Filter bar — compact, single row on desktop */}
+      <Card className="gap-0 py-0">
+        <CardContent className="p-2 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[180px] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search video or project title…"
-                className="h-9 pl-9"
+                className="h-8 pl-8 text-sm"
               />
             </div>
 
@@ -300,7 +300,7 @@ export default function GalleryPage() {
                 setStatusFilter(value as RenderingStatus | 'all')
               }
             >
-              <SelectTrigger className="h-9 w-full lg:w-[170px]">
+              <SelectTrigger className="h-8 w-[150px] text-xs">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -314,7 +314,7 @@ export default function GalleryPage() {
             </Select>
 
             <Select value={projectFilter} onValueChange={setProjectFilter}>
-              <SelectTrigger className="h-9 w-full lg:w-[210px]">
+              <SelectTrigger className="h-8 w-[180px] text-xs">
                 <SelectValue placeholder="Project" />
               </SelectTrigger>
               <SelectContent>
@@ -331,7 +331,7 @@ export default function GalleryPage() {
               value={sort}
               onValueChange={(value) => setSort(value as 'newest' | 'oldest')}
             >
-              <SelectTrigger className="h-9 w-full lg:w-[140px]">
+              <SelectTrigger className="h-8 w-[130px] text-xs">
                 <SelectValue placeholder="Sort" />
               </SelectTrigger>
               <SelectContent>
@@ -344,17 +344,15 @@ export default function GalleryPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-9 shrink-0"
+                className="h-8 shrink-0 px-2 text-xs"
                 onClick={clearFilters}
               >
-                <XCircle className="mr-1.5 size-4" />
+                <XCircle className="mr-1 size-3.5" />
                 Clear
               </Button>
             )}
-          </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
               <Button
                 variant="ghost"
                 size="sm"
@@ -365,66 +363,66 @@ export default function GalleryPage() {
                 <CheckSquare className="mr-1.5 size-3.5" />
                 {allVisibleSelected ? 'Deselect all' : 'Select all'}
               </Button>
-              <span>
-                {visibleItems.length} of {items.length} shown
+              <span className="whitespace-nowrap tabular-nums">
+                {visibleItems.length}/{items.length}
               </span>
             </div>
-
-            {selectedIds.size > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-muted/40 px-2 py-1.5">
-                <span className="px-1 text-xs font-medium">
-                  {selectedIds.size} selected
-                </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      disabled={isMutating}
-                    >
-                      Change status
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {GALLERY_STATUS_OPTIONS.map((option) => (
-                      <DropdownMenuItem
-                        key={option.value}
-                        onClick={() => handleBulkStatus(option.value)}
-                      >
-                        <span
-                          className={`mr-2 size-2 rounded-full ${galleryStatusMeta(option.value).dot}`}
-                        />
-                        {option.label}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="h-7 text-xs"
-                  disabled={isMutating}
-                  onClick={() =>
-                    setDeleteTargets(
-                      items.filter((item) => selectedIds.has(item.id)),
-                    )
-                  }
-                >
-                  <Trash2 className="mr-1.5 size-3.5" />
-                  Delete
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 text-xs"
-                  onClick={() => setSelectedIds(new Set())}
-                >
-                  Clear
-                </Button>
-              </div>
-            )}
           </div>
+
+          {selectedIds.size > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1">
+              <span className="px-1 text-xs font-medium">
+                {selectedIds.size} selected
+              </span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    disabled={isMutating}
+                  >
+                    Change status
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {GALLERY_STATUS_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      onClick={() => handleBulkStatus(option.value)}
+                    >
+                      <span
+                        className={`mr-2 size-2 rounded-full ${galleryStatusMeta(option.value).dot}`}
+                      />
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                size="sm"
+                variant="destructive"
+                className="h-7 text-xs"
+                disabled={isMutating}
+                onClick={() =>
+                  setDeleteTargets(
+                    items.filter((item) => selectedIds.has(item.id)),
+                  )
+                }
+              >
+                <Trash2 className="mr-1.5 size-3.5" />
+                Delete
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -167,8 +167,8 @@ The same tab has a three-block **demo playground**:
 - Each render is stored as its own asset linked to the project, so re-rendering
   never overwrites an earlier version.
 - Assets move through **Rendered → Ready to publish → Published**; the Gallery
-  supports status/project/title filters, multi-select status changes and
-  deletion of one or many rendered MP4s.
+  uses a compact single-row filter bar (status/project/title), multi-select
+  status changes and deletion of one or many rendered MP4s.
 - A project's detail header has **Project gallery**, a full-viewport modal that
   lists every rendering for that project (including its own delete actions).
   Clicking a tile opens the shared popup player, and both the player header and

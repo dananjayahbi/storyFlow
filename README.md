@@ -615,8 +615,9 @@ own gallery asset linked back to the project.
 - **Publishing workflow** — every asset starts as **Rendered** and can move to
   **Ready to publish** and **Published**. Use the status filter or select
   several tiles and change their status together.
-- **Filters** — search by video/project title, filter by status or project, and
-  switch between newest/oldest first.
+- **Filters** — a compact single-row bar keeps the video grid in view: search
+  by video/project title, filter by status or project, and switch between
+  newest/oldest first.
 - **Full titles** — long names scroll like a news headline when the tile is
   hovered, without changing the tile size.
 - **Bulk actions** — select multiple assets to change status or delete their
