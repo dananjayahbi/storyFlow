@@ -8,6 +8,7 @@ import {
   deleteGalleryItem,
   getDownloadUrl,
   getGalleryItems,
+  updateGalleryItemStatus,
 } from '@/lib/api';
 import { GalleryItem, RenderingStatus } from '@/lib/types';
 import {
@@ -15,6 +16,7 @@ import {
   galleryStatusMeta,
 } from '@/lib/gallery';
 import { GalleryAssetCard } from '@/components/GalleryAssetCard';
+import { GalleryVideoPlayerDialog } from '@/components/GalleryVideoPlayerDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -74,6 +76,7 @@ export function ProjectGalleryModal({
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deleteTargets, setDeleteTargets] = useState<GalleryItem[] | null>(null);
+  const [playerItem, setPlayerItem] = useState<GalleryItem | null>(null);
   const [isMutating, setIsMutating] = useState(false);
 
   const fetchItems = useCallback(async () => {
@@ -135,6 +138,17 @@ export function ProjectGalleryModal({
           ),
         );
         setSelectedIds(new Set());
+        setPlayerItem((previous) =>
+          previous && ids.includes(previous.id)
+            ? {
+                ...previous,
+                status,
+                status_label: galleryStatusMeta(status).label,
+                published_at:
+                  status === 'published' ? new Date().toISOString() : null,
+              }
+            : previous,
+        );
         toast.success(
           `${ids.length} rendering${ids.length === 1 ? '' : 's'} updated`,
         );
@@ -148,6 +162,38 @@ export function ProjectGalleryModal({
     [selectedIds, onChanged],
   );
 
+  const handleStatusChange = useCallback(
+    async (item: GalleryItem, status: RenderingStatus) => {
+      if (status === item.status) return;
+      setIsMutating(true);
+      try {
+        await updateGalleryItemStatus(item.id, status);
+        const updated: GalleryItem = {
+          ...item,
+          status,
+          status_label: galleryStatusMeta(status).label,
+          published_at:
+            status === 'published' ? new Date().toISOString() : null,
+        };
+        setItems((previous) =>
+          previous.map((entry) => (entry.id === item.id ? updated : entry)),
+        );
+        setPlayerItem((previous) =>
+          previous && previous.id === item.id ? updated : previous,
+        );
+        toast.success(
+          `Marked "${item.title}" ${galleryStatusMeta(status).label.toLowerCase()}`,
+        );
+        onChanged?.();
+      } catch {
+        toast.error('Could not update this rendering\u2019s status.');
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [onChanged],
+  );
+
   const confirmDelete = useCallback(async () => {
     if (!deleteTargets?.length) return;
     const ids = deleteTargets.map((item) => item.id);
@@ -156,6 +202,9 @@ export function ProjectGalleryModal({
       if (ids.length === 1) await deleteGalleryItem(ids[0]);
       else await bulkDeleteGalleryItems(ids);
       setItems((previous) => previous.filter((item) => !ids.includes(item.id)));
+      setPlayerItem((previous) =>
+        previous && ids.includes(previous.id) ? null : previous,
+      );
       setSelectedIds((previous) => {
         const next = new Set(previous);
         ids.forEach((id) => next.delete(id));
@@ -195,9 +244,16 @@ export function ProjectGalleryModal({
   }, [items]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setPlayerItem(null);
+        onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent
         showCloseButton={false}
+        aria-describedby={undefined}
         className="m-0 grid h-screen max-h-screen w-screen max-w-none grid-rows-[auto_auto_minmax(0,1fr)] gap-0 overflow-hidden rounded-none border-0 p-0 sm:max-w-none"
       >
         {/* Header */}
@@ -373,13 +429,31 @@ export function ProjectGalleryModal({
                   onSelectedChange={(selected) =>
                     toggleSelection(item.id, selected)
                   }
+                  onOpen={() => setPlayerItem(item)}
                   onDownload={(event) => handleDownload(item, event)}
                   onDelete={() => setDeleteTargets([item])}
+                  onStatusChange={(status) =>
+                    void handleStatusChange(item, status)
+                  }
                 />
               ))}
             </div>
           )}
         </div>
+
+        {/* Player popup — opens on top of the gallery */}
+        <GalleryVideoPlayerDialog
+          item={playerItem}
+          onClose={() => setPlayerItem(null)}
+          onItemUpdated={(updated) => {
+            setItems((previous) =>
+              previous.map((entry) =>
+                entry.id === updated.id ? updated : entry,
+              ),
+            );
+            setPlayerItem(updated);
+          }}
+        />
 
         {/* Delete confirmation */}
         <AlertDialog

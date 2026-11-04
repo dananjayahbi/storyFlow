@@ -624,7 +624,9 @@ own gallery asset linked back to the project.
   file; the project, script and segments stay intact and can be rendered again.
 - **Project gallery** — the project detail header has a **Project gallery**
   button that opens a full-viewport view of every rendering for that project,
-  with the same preview, status, download and delete actions.
+  with the same preview, status, download and delete actions. Click any tile
+  to open the player popup; its header dropdown (and the status badge on each
+  tile) changes that single rendering's publishing status.
 
 Tiles use a responsive masonry layout: 2 columns on phones, scaling up to 6
 columns on wide screens. Hover a tile for a muted preview, click it for the full

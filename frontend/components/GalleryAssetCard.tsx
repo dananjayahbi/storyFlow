@@ -11,13 +11,20 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { GalleryItem } from '@/lib/types';
+import { GalleryItem, RenderingStatus } from '@/lib/types';
 import {
+  GALLERY_STATUS_OPTIONS,
   formatGalleryFileSize,
   formatGalleryRelativeTime,
   galleryStatusMeta,
 } from '@/lib/gallery';
 import { getStreamUrl } from '@/lib/api';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 
 /**
@@ -78,6 +85,8 @@ interface GalleryAssetCardProps {
   onOpen?: () => void;
   onDownload?: (event: React.MouseEvent) => void;
   onDelete?: (event: React.MouseEvent) => void;
+  /** When provided, the status badge becomes a quick status changer. */
+  onStatusChange?: (status: RenderingStatus) => void;
   /** Show which project produced this asset (main Gallery only). */
   showProject?: boolean;
 }
@@ -89,6 +98,7 @@ export function GalleryAssetCard({
   onOpen,
   onDownload,
   onDelete,
+  onStatusChange,
   showProject = true,
 }: GalleryAssetCardProps) {
   const status = galleryStatusMeta(item.status);
@@ -154,13 +164,57 @@ export function GalleryAssetCard({
 
         {/* Status */}
         <div className="absolute bottom-2 left-2">
-          <Badge
-            variant="outline"
-            className={cn('gap-1 text-[10px] backdrop-blur', status.badge)}
-          >
-            <span className={cn('size-1.5 rounded-full', status.dot)} />
-            {status.label}
-          </Badge>
+          {onStatusChange ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="Change publishing status"
+                  className="cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      'gap-1 text-[10px] backdrop-blur',
+                      status.badge,
+                    )}
+                  >
+                    <span className={cn('size-1.5 rounded-full', status.dot)} />
+                    {status.label}
+                  </Badge>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                onClick={(event) => event.stopPropagation()}
+              >
+                {GALLERY_STATUS_OPTIONS.map((option) => (
+                  <DropdownMenuItem
+                    key={option.value}
+                    disabled={option.value === item.status}
+                    onClick={() => onStatusChange(option.value)}
+                  >
+                    <span
+                      className={cn(
+                        'mr-2 size-2 rounded-full',
+                        galleryStatusMeta(option.value).dot,
+                      )}
+                    />
+                    {option.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Badge
+              variant="outline"
+              className={cn('gap-1 text-[10px] backdrop-blur', status.badge)}
+            >
+              <span className={cn('size-1.5 rounded-full', status.dot)} />
+              {status.label}
+            </Badge>
+          )}
         </div>
 
         {/* Resolution */}
