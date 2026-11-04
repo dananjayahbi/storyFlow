@@ -2,10 +2,10 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   LayoutDashboard,
   Settings,
-  Film,
   FolderOpen,
   Layers,
   MonitorPlay,
@@ -237,7 +237,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (isSectionLanding) {
     return (
       <div className="flex min-h-screen flex-col bg-background">
-        <div className="flex h-14 shrink-0 items-center justify-end px-4">
+        <div className="flex h-14 shrink-0 items-center justify-between px-4">
+          <Link
+            href="/select"
+            className="flex items-center gap-2.5 rounded-md px-1 py-1 transition-opacity hover:opacity-90"
+          >
+            <Image
+              src="/logo-mark.png"
+              alt="StoryFlow"
+              width={32}
+              height={32}
+              className="h-8 w-8 object-contain"
+              priority
+            />
+            <span className="text-sm font-semibold tracking-tight">
+              StoryFlow
+            </span>
+          </Link>
           <LogoutButton />
         </div>
         <main className="flex-1 overflow-auto p-4 md:p-6">{children}</main>
@@ -256,8 +272,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           href="/select"
           className="flex items-center gap-2.5 shrink-0 rounded-md px-1 py-1 transition-opacity hover:opacity-90"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Film className="h-4 w-4" />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+            <Image
+              src="/logo-mark.png"
+              alt="StoryFlow"
+              width={32}
+              height={32}
+              className="h-8 w-8 object-contain"
+              priority
+            />
           </div>
           <span className="hidden text-sm font-semibold tracking-tight sm:inline">
             StoryFlow

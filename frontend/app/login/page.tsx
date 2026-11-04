@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,7 +49,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
       <Card className="w-full max-w-sm">
-        <CardHeader>
+        <CardHeader className="flex flex-col items-center gap-3">
+          <Image
+            src="/logo.png"
+            alt="StoryFlow"
+            width={96}
+            height={96}
+            className="h-24 w-24 object-contain"
+            priority
+          />
           <CardTitle className="text-center">StoryFlow Login</CardTitle>
         </CardHeader>
         <CardContent>

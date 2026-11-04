@@ -31,6 +31,7 @@ describe('AppShell header', () => {
     expect(container.querySelector('header')).toBeNull();
     expect(screen.getByText('account picker')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument();
+    expect(screen.getByAltText('StoryFlow')).toBeInTheDocument();
     expect(screen.queryByText('Dashboard')).toBeNull();
     expect(screen.queryByText('Settings')).toBeNull();
   });
@@ -46,6 +47,19 @@ describe('AppShell header', () => {
     const nav = container.querySelector('header nav');
     expect(nav).not.toBeNull();
     expect(nav?.className).toContain('overflow-y-hidden');
+  });
+
+  it('uses the StoryFlow logo in the header brand', async () => {
+    render(
+      <AppShell>
+        <div>page</div>
+      </AppShell>
+    );
+    await act(async () => {});
+
+    const logo = screen.getByAltText('StoryFlow');
+    expect(logo).toBeInTheDocument();
+    expect(logo.getAttribute('src')).toContain('logo-mark');
   });
 
   it('keeps the active underline inside the nav item', async () => {

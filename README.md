@@ -86,6 +86,25 @@ start-all.bat
 
 ---
 
+### Branding
+
+The app icon is the green StoryFlow play mark. Generated assets live in:
+
+- `frontend/public/logo.png` — large in-app mark (login screen).
+- `frontend/public/logo-mark.png` — compact header/landing mark.
+- `frontend/app/icon.png` + `frontend/app/apple-icon.png` — Next.js metadata
+  icons used for the browser tab and install/touch icon.
+- `frontend/app/favicon.ico` — multi-resolution favicon.
+
+To regenerate them from a new source image (transparent PNG works best):
+
+```bash
+backend\venv\Scripts\python.exe scripts\generate_brand_assets.py path\to\logo.png
+```
+
+The script crops to the visible mark, centres it on a transparent square and
+writes every size the shell, login page and favicon need.
+
 ## Workspaces & Accounts
 
 StoryFlow has two independent workspaces: **Facebook Reels** and **YouTube
