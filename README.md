@@ -141,10 +141,12 @@ Settings are account-specific. TTS voice/engine, subtitles, render resolution,
 Ken Burns/transitions, logo/outro selection and upscaling are stored in an
 `AccountSettings` row per account, so one page or channel can use a completely
 different setup from another. New accounts are seeded once from the workspace
-defaults and then diverge. New projects snapshot the selected account's values
-at creation time. The shared asset libraries (logos, outros, voice references,
-fonts) remain available to every account, while each account chooses which one
-to use.
+defaults and then diverge. Each render resolution can override those values in
+a **Default Project Settings** profile; new projects snapshot the matching
+profile at creation time (or when their resolution changes). Projects then keep
+their own profile, so editing one never changes another project. The shared
+asset libraries (logos, outros, voice references, fonts) remain available to
+every account, while each account chooses which one to use.
 
 Storage mirrors this hierarchy:
 `backend/Storage/<Section>/<account-id>/<project-id>/`. Migration
@@ -581,10 +583,12 @@ account-wide controls on **Settings → Audio Mix**:
 - **TTS voice volume** (`tts_gain_db`) — raises or lowers the narration against
   the music.
 
-Saving these values writes them to the account's `AccountSettings` row and
-propagates them to every existing project, so the next render uses the new
-tuning. New projects inherit the values at creation time. The project editor
-keeps only the track picker, the MusicGen button and the enable checkbox.
+Saving these values writes them to the account's `AccountSettings` row and is
+used for new projects (and resolutions without a custom
+**Default Project Settings** profile). Existing projects keep their own
+settings snapshot; use **Reset** in a project's settings panel to re-apply its
+resolution defaults. The project editor keeps only the track picker, the
+MusicGen button and the enable checkbox.
 
 The same tab contains a three-block demo playground. The demo is split into two
 stages so tuning the background music does not re-run TTS or the video
@@ -871,9 +875,10 @@ Tuned for a GTX 1660 Ti (6 GB):
    **MP3**; MP3 conversion uses FFmpeg.
 7. Use **Settings → TTS Engines → Unload VRAM** when you are done with Qwen.
 
-Engine choice is stored per project. The account default is set from the
-Settings page and copied onto existing and new projects, so a project can still
-mix a fast Kokoro draft pass with a final Qwen pass at any time.
+Engine choice is stored per project. The account default and each resolution's
+**Default Project Settings** profile seed new projects, so a project can still
+mix a fast Kokoro draft pass with a final Qwen pass at any time without
+affecting other projects.
 
 ---
 

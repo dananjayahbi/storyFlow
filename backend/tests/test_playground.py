@@ -86,7 +86,7 @@ class AudioMixSettingsTests(APITestCase):
         )
         self.assertEqual(bad_voice.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_saving_mix_updates_existing_projects_only_in_the_account(self):
+    def test_saving_mix_does_not_rewrite_existing_projects(self):
         other_project = Project.objects.create(
             title='Other project', section='facebook', account=self.other
         )
@@ -101,18 +101,20 @@ class AudioMixSettingsTests(APITestCase):
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['bgm_gain_db'], -24)
 
+        # Existing projects own their settings snapshot.
         self.project.refresh_from_db()
-        self.assertEqual(self.project.bgm_gain_db, -24)
-        self.assertEqual(self.project.bgm_ducking_db, -8)
-        self.assertEqual(self.project.bgm_echo_percent, 35)
-        self.assertEqual(self.project.tts_gain_db, 4)
+        self.assertEqual(self.project.bgm_gain_db, -18)
+        self.assertEqual(self.project.bgm_ducking_db, -12)
+        self.assertEqual(self.project.bgm_echo_percent, 0)
+        self.assertEqual(self.project.tts_gain_db, 0)
 
         other_project.refresh_from_db()
         self.assertEqual(other_project.bgm_gain_db, -18)
         self.assertEqual(other_project.tts_gain_db, 0)
 
-    def test_saving_tts_engine_updates_existing_projects(self):
+    def test_saving_tts_engine_does_not_rewrite_existing_projects(self):
         other_project = Project.objects.create(
             title='Other project', section='facebook', account=self.other
         )
@@ -125,7 +127,7 @@ class AudioMixSettingsTests(APITestCase):
         self.assertEqual(response.data['tts_engine'], 'qwen')
 
         self.project.refresh_from_db()
-        self.assertEqual(self.project.tts_engine, 'qwen')
+        self.assertEqual(self.project.tts_engine, 'kokoro')
 
         other_project.refresh_from_db()
         self.assertEqual(other_project.tts_engine, 'kokoro')

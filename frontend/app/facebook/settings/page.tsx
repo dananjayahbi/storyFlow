@@ -18,9 +18,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Volume2, Loader2, Play, Square, Type, Save, Image as ImageIcon,
   Trash2, Upload, Film, Cpu, Mic, AlertTriangle, CheckCircle2, Wand2,
-  SlidersHorizontal, BookOpen,
-} from 'lucide-react';
-import {
+  SlidersHorizontal, BookOpen, Layers,
+} from 'lucide-react';import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -36,6 +35,7 @@ import { cn } from '@/lib/utils';
 import { SettingsSkeleton } from '@/components/skeletons';
 import { SettingsMixPanel } from '@/components/SettingsMixPanel';
 import { StoryTemplateModal } from '@/components/StoryTemplateModal';
+import { DefaultProjectSettingsPanel } from '@/components/DefaultProjectSettingsPanel';
 import { mediaUrl } from '@/lib/apiConfig';
 
 type SettingsTab =
@@ -43,6 +43,7 @@ type SettingsTab =
   | 'engines'
   | 'voices'
   | 'subtitles'
+  | 'project-defaults'
   | 'logos'
   | 'outros'
   | 'mix'
@@ -78,6 +79,12 @@ const SETTINGS_TABS: Array<{
     label: 'Subtitles',
     description: 'Font, size and position',
     icon: Type,
+  },
+  {
+    id: 'project-defaults',
+    label: 'Default Project Settings',
+    description: 'Per-resolution project presets',
+    icon: Layers,
   },
   {
     id: 'logos',
@@ -754,7 +761,7 @@ export default function SettingsPage() {
               variant="outline"
               onClick={() => void handleSaveTtsEngine()}
               disabled={isSavingTtsEngine}
-              title="Use this engine for new audio on every project in this account"
+              title="Default engine for new projects on this account"
             >
               {isSavingTtsEngine ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -858,8 +865,9 @@ export default function SettingsPage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Saving updates every existing project on this account. Generate
-              the audio again to use the newly selected engine.
+              Applies to new projects and to resolutions without a custom
+              default profile. Existing projects keep their own settings until
+              you reset them.
             </p>
           </div>
 
@@ -1171,6 +1179,9 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
       )}
+
+      {/* ── Resolution-specific project defaults ── */}
+      {activeTab === 'project-defaults' && <DefaultProjectSettingsPanel />}
 
       {/* ── Logo Management Card ── */}
       {activeTab === 'logos' && (

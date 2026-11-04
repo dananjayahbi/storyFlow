@@ -615,7 +615,8 @@ All project, segment and gallery endpoints additionally accept
 | `GET` | `/api/projects/` | List all projects (paginated, summary serializer) |
 | `POST` | `/api/projects/` | Create a new project |
 | `GET` | `/api/projects/<id>/` | Get project detail with all settings and nested segments |
-| `PATCH` | `/api/projects/<id>/` | Update project settings |
+| `PATCH` | `/api/projects/<id>/` | Update project settings (resolution change re-applies that resolution's defaults) |
+| `POST` | `/api/projects/<id>/reset-settings/` | Re-apply the project's resolution defaults to this project |
 | `DELETE` | `/api/projects/<id>/` | Delete project and all associated media files |
 | `POST` | `/api/projects/import/` | Import a story from JSON or text format |
 | `POST` | `/api/projects/<id>/import-segments/` | Append segments to an existing project |
@@ -643,7 +644,9 @@ All project, segment and gallery endpoints additionally accept
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET/PATCH` | `/api/settings/` | Read/update global settings |
+| `GET/PATCH` | `/api/settings/` | Read/update settings for the active account |
+| `GET` | `/api/settings/project-defaults/` | List per-resolution project default profiles |
+| `GET/PATCH/DELETE` | `/api/settings/project-defaults/<w>x<h>/` | Read, save or reset one resolution's defaults |
 | `GET` | `/api/settings/voices/` | List available TTS voices (26 voices) |
 | `POST` | `/api/settings/font/upload/` | Upload custom subtitle font |
 | `POST` | `/api/settings/tts-test/` | Generate and play test TTS audio |
@@ -1686,8 +1689,12 @@ POST   /api/segments/{id}/generate-audio/      → {task_id: string}
 ### Settings API
 
 ```
-GET    /api/settings/                          → GlobalSettings
-PATCH  /api/settings/                          → GlobalSettings
+GET    /api/settings/                          → GlobalSettings / AccountSettings
+PATCH  /api/settings/                          → GlobalSettings / AccountSettings
+GET    /api/settings/project-defaults/         → {results: ProjectSettingsProfile[]}
+GET    /api/settings/project-defaults/{w}x{h}/ → ProjectSettingsProfile
+PATCH  /api/settings/project-defaults/{w}x{h}/ → ProjectSettingsProfile
+DELETE /api/settings/project-defaults/{w}x{h}/ → ProjectSettingsProfile (fallback)
 GET    /api/settings/voices/                   → Voice[]
 GET    /api/settings/tts-engines/              → {default_engine, engines[]}
 POST   /api/settings/tts-engines/qwen/unload/  → {ok, message}

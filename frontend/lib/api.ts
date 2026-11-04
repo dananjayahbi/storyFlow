@@ -14,6 +14,7 @@ import {
   GenerateAllAudioOptions,
   TaskStatusResponse,
   GlobalSettings,
+  ProjectSettingsProfile,
   GalleryItem,
   RenderingStatus,
   Logo,
@@ -357,6 +358,45 @@ export async function updateSettings(
 ): Promise<GlobalSettings> {
   const response = await api.patch<GlobalSettings>('/api/settings/', data);
   return response.data;
+}
+
+// ── Resolution-specific project defaults ──
+
+export async function getProjectSettingsDefaults(): Promise<ProjectSettingsProfile[]> {
+  const { data } = await api.get<{ results: ProjectSettingsProfile[] }>(
+    '/api/settings/project-defaults/'
+  );
+  return data.results;
+}
+
+export async function updateProjectSettingsDefault(
+  width: number,
+  height: number,
+  payload: Partial<ProjectSettingsProfile>,
+): Promise<ProjectSettingsProfile> {
+  const { data } = await api.patch<ProjectSettingsProfile>(
+    `/api/settings/project-defaults/${width}x${height}/`,
+    payload,
+  );
+  return data;
+}
+
+export async function resetProjectSettingsDefault(
+  width: number,
+  height: number,
+): Promise<ProjectSettingsProfile> {
+  const { data } = await api.delete<ProjectSettingsProfile>(
+    `/api/settings/project-defaults/${width}x${height}/`,
+  );
+  return data;
+}
+
+/** Re-apply this project's resolution defaults without touching others. */
+export async function resetProjectSettings(id: string): Promise<ProjectDetail> {
+  const { data } = await api.post<ProjectDetail>(
+    `/api/projects/${id}/reset-settings/`,
+  );
+  return data;
 }
 
 // ── Available Voices (Task 05.03.02) ──

@@ -30,6 +30,7 @@ import {
   Music,
   Loader2,
   Wand2,
+  RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -52,7 +53,7 @@ export function GlobalSettingsPanel() {
     updateProjectSettings,
   } = useProjectStore();
   const {
-    outroVideos, fetchOutroVideos, logos, fetchLogos,
+    outroVideos, fetchOutroVideos, fetchLogos,
     ttsEngines, fetchTtsEngines, voiceReferences, fetchVoiceReferences,
   } = useSettingsStore();
   const {
@@ -157,10 +158,24 @@ export function GlobalSettingsPanel() {
       if (data.render_width !== undefined) mapped.resolution_width = data.render_width;
       if (data.render_height !== undefined) mapped.resolution_height = data.render_height;
       if (data.render_fps !== undefined) mapped.framerate = data.render_fps;
+      // Switching resolution pulls that resolution's defaults into this
+      // project only. Other projects keep their own snapshots.
+      if (
+        (data.render_width !== undefined &&
+          data.render_width !== project?.resolution_width) ||
+        (data.render_height !== undefined &&
+          data.render_height !== project?.resolution_height)
+      ) {
+        mapped.reset_settings = true;
+      }
       await handleSettingChange(mapped);
     },
-    [handleSettingChange]
+    [handleSettingChange, project?.resolution_width, project?.resolution_height]
   );
+
+  const handleResetProjectSettings = useCallback(async () => {
+    await handleSettingChange({ reset_settings: true });
+  }, [handleSettingChange]);
 
   // ── TTS Speed slider with debounce ──
   const handleSpeedChange = useCallback(
@@ -313,6 +328,26 @@ export function GlobalSettingsPanel() {
       {/* ── Expanded Panel Body ── */}
       {!isCollapsed && (
         <div className="space-y-6">
+          <div className="flex items-start justify-between gap-2 rounded-lg border border-dashed bg-muted/20 p-2.5">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium">Project settings profile</p>
+              <p className="text-[10px] text-muted-foreground">
+                {project.resolution_width}×{project.resolution_height} · saved
+                for this project only
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 px-2 text-[11px]"
+              onClick={handleResetProjectSettings}
+              title="Re-apply this resolution's defaults to this project"
+            >
+              <RotateCcw className="mr-1 h-3 w-3" />
+              Reset
+            </Button>
+          </div>
+
           {/* ── Voice / TTS Engine Section ── */}
           <section>
             {/* Engine selector: Kokoro draft vs Qwen final */}

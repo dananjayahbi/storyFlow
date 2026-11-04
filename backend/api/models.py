@@ -984,6 +984,153 @@ class AccountSettings(models.Model):
         )
 
 
+class DefaultProjectSettings(models.Model):
+    """Per-account project defaults for one render resolution.
+
+    Every project keeps its own editable settings snapshot.  When a project is
+    created (or its resolution is changed) the renderer first looks for the
+    row here that matches ``account`` + resolution.  If none exists, the
+    account's ``AccountSettings`` are used as the fallback so existing
+    installations keep working without configuring anything.
+
+    A row is only created when the operator explicitly saves defaults for a
+    resolution, which keeps the table small and lets the UI show which
+    resolutions are customised.
+    """
+
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='project_defaults',
+    )
+    resolution_width = models.PositiveIntegerField()
+    resolution_height = models.PositiveIntegerField()
+
+    # ── TTS defaults ──
+    default_voice_id = models.CharField(max_length=100, default='af_bella')
+    tts_speed = models.FloatField(default=1.0)
+    tts_engine = models.CharField(
+        max_length=20, choices=ENGINE_CHOICES, default=ENGINE_KOKORO,
+    )
+    qwen_mode = models.CharField(
+        max_length=20, choices=QWEN_MODE_CHOICES, default=QWEN_MODE_CUSTOM,
+    )
+    qwen_speaker = models.CharField(max_length=40, default=QWEN_DEFAULT_SPEAKER)
+    qwen_language = models.CharField(max_length=40, default=QWEN_DEFAULT_LANGUAGE)
+    qwen_instruct = models.TextField(blank=True, default='')
+    qwen_max_new_tokens = models.PositiveIntegerField(
+        default=QWEN_MAX_TOKENS_DEFAULT,
+    )
+    qwen_clone_x_vector_only = models.BooleanField(default=True)
+    active_voice_reference = models.ForeignKey(
+        'VoiceReference', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='default_project_settings_using',
+    )
+
+    # ── Subtitle styling ──
+    subtitle_font_family = models.CharField(max_length=200, default='Arial')
+    subtitle_font_size = models.PositiveIntegerField(default=48)
+    subtitle_font_color = models.CharField(max_length=7, default='#FFFFFF')
+    subtitle_position = models.CharField(
+        max_length=10, choices=SUBTITLE_POSITION_CHOICES, default='bottom',
+    )
+    subtitle_y_position = models.PositiveIntegerField(
+        null=True, blank=True, default=None,
+    )
+    subtitle_font = models.CharField(max_length=255, blank=True, default='')
+    subtitle_color = models.CharField(max_length=7, default='#FFFFFF')
+    subtitles_enabled = models.BooleanField(default=True)
+    custom_font_file = models.FileField(
+        upload_to='fonts/', null=True, blank=True,
+    )
+
+    # ── Render / Ken Burns ──
+    framerate = models.PositiveIntegerField(default=30)
+    ken_burns_zoom = models.FloatField(default=1.2)
+    transition_duration = models.FloatField(default=0.5)
+    zoom_intensity = models.FloatField(default=1.3)
+    inter_segment_silence = models.FloatField(default=0.3)
+
+    # ── Logo watermark ──
+    logo_enabled = models.BooleanField(default=False)
+    active_logo = models.ForeignKey(
+        'Logo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='default_project_settings_using',
+    )
+    logo_scale = models.FloatField(default=0.15)
+    logo_position = models.CharField(
+        max_length=20,
+        choices=LOGO_POSITION_CHOICES,
+        default='bottom-right',
+    )
+    logo_opacity = models.FloatField(default=1.0)
+    logo_margin = models.IntegerField(default=20)
+
+    # ── Outro video ──
+    outro_enabled = models.BooleanField(default=False)
+    active_outro = models.ForeignKey(
+        'OutroVideo', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='default_project_settings_using',
+    )
+
+    # ── Image upscaling (GAN) ──
+    upscale_enabled = models.BooleanField(default=False)
+    upscale_model = models.CharField(
+        max_length=40,
+        choices=Project.UPSCALE_MODEL_CHOICES,
+        default='RealESRGAN_x4plus',
+    )
+    upscale_denoise_strength = models.FloatField(default=0.5)
+
+    # ── Audio mix ──
+    bgm_gain_db = models.FloatField(default=-18.0)
+    bgm_ducking_db = models.FloatField(default=-12.0)
+    bgm_echo_percent = models.FloatField(default=0.0)
+    tts_gain_db = models.FloatField(default=0.0)
+
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Default Project Settings'
+        verbose_name_plural = 'Default Project Settings'
+        ordering = ['resolution_width', 'resolution_height']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['account', 'resolution_width', 'resolution_height'],
+                name='unique_project_defaults_per_resolution',
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f'{self.account} defaults '
+            f'({self.resolution_width}×{self.resolution_height})'
+        )
+
+    @classmethod
+    def seed_from_account(cls, account, width, height):
+        """Build (but do not save) defaults for *account* at a resolution."""
+        account_settings = AccountSettings.load(account)
+        values = {
+            field: getattr(account_settings, field)
+            for field in PROJECT_PROFILE_FIELDS
+            if field not in ('framerate', 'custom_font_file')
+            and hasattr(account_settings, field)
+        }
+        values['framerate'] = account_settings.render_fps
+        values['custom_font_file'] = (
+            account_settings.custom_font_file.name
+            if account_settings.custom_font_file else None
+        )
+        return cls(
+            account=account,
+            resolution_width=width,
+            resolution_height=height,
+            **values,
+        )
+
+
 # Settings fields copied from GlobalSettings/AccountSettings onto a new
 # Project.  Project uses slightly different names for the render dimensions.
 PROJECT_SETTINGS_FIELD_MAP = {
@@ -1041,3 +1188,102 @@ def apply_settings_to_project(project, source):
             value = value.name if value else None
         setattr(project, target_field, value)
     return project
+
+
+#: Fields that make up a project's independently editable settings profile.
+#: They are copied from a resolution-specific default when a project is
+#: created (or its resolution changes) and can then be edited per project
+#: without touching any other project.
+PROJECT_PROFILE_FIELDS = [
+    'default_voice_id',
+    'tts_speed',
+    'tts_engine',
+    'qwen_mode',
+    'qwen_speaker',
+    'qwen_language',
+    'qwen_instruct',
+    'qwen_max_new_tokens',
+    'qwen_clone_x_vector_only',
+    'active_voice_reference',
+    'subtitle_font_family',
+    'subtitle_font_size',
+    'subtitle_font_color',
+    'subtitle_position',
+    'subtitle_y_position',
+    'subtitle_font',
+    'subtitle_color',
+    'subtitles_enabled',
+    'custom_font_file',
+    'framerate',
+    'ken_burns_zoom',
+    'transition_duration',
+    'zoom_intensity',
+    'inter_segment_silence',
+    'logo_enabled',
+    'active_logo',
+    'logo_scale',
+    'logo_position',
+    'logo_opacity',
+    'logo_margin',
+    'outro_enabled',
+    'active_outro',
+    'upscale_enabled',
+    'upscale_model',
+    'upscale_denoise_strength',
+    'bgm_gain_db',
+    'bgm_ducking_db',
+    'bgm_echo_percent',
+    'tts_gain_db',
+]
+
+
+def resolve_project_defaults(account, width, height):
+    """Return the best default settings profile for a project resolution.
+
+    Resolution-specific defaults win.  When the operator has not customised a
+    resolution yet, the account settings are used as the fallback (the same
+    behaviour the app had before per-resolution profiles existed).
+    """
+    if account is None:
+        return GlobalSettings.load()
+    profile = DefaultProjectSettings.objects.filter(
+        account=account,
+        resolution_width=width,
+        resolution_height=height,
+    ).first()
+    if profile is not None:
+        return profile
+    return AccountSettings.load(account)
+
+
+def apply_project_profile(project, source):
+    """Copy a settings profile onto *project* without touching its resolution.
+
+    ``DefaultProjectSettings`` stores the framerate as ``framerate``;
+    ``AccountSettings`` / ``GlobalSettings`` still call it ``render_fps``.
+    """
+    for field in PROJECT_PROFILE_FIELDS:
+        source_field = field
+        if field == 'framerate' and not hasattr(source, 'framerate'):
+            source_field = 'render_fps'
+        value = getattr(source, source_field)
+        if field == 'custom_font_file':
+            value = value.name if value else None
+        setattr(project, field, value)
+    return project
+
+
+def project_settings_payload(source):
+    """Serialise a fallback settings object into project-profile field names."""
+    payload = {}
+    for field in PROJECT_PROFILE_FIELDS:
+        source_field = field
+        if field == 'framerate' and not hasattr(source, 'framerate'):
+            source_field = 'render_fps'
+        value = getattr(source, source_field)
+        if field == 'custom_font_file':
+            value = value.name if value else None
+        elif field in ('active_voice_reference', 'active_logo', 'active_outro'):
+            value = getattr(value, 'pk', None) if value else None
+        payload[field] = value
+    return payload

@@ -46,11 +46,16 @@ by `section` + `account`, and parity is enforced by
 `frontend/__tests__/domainParity.test.ts`. Domain-specific tools can be added
 later without affecting the shared routes.
 
-Account-specific settings are stored in an `AccountSettings` row. New projects
-snapshot those values when they are created. The frontend resolves the Django
-origin through `NEXT_PUBLIC_API_URL` or, when unset, by probing
-`/api/health/` for the `storyflow-backend` service marker. Account pages show
-the origin they tried and support retrying after a backend restart.
+Account-specific settings are stored in an `AccountSettings` row. Each render
+resolution can also have its own `DefaultProjectSettings` profile (managed on
+**Settings → Default Project Settings**). New projects snapshot the matching
+resolution profile when they are created, or when their resolution changes;
+after that the project owns its settings and edits never leak to other
+projects. When a resolution has no custom profile, the account settings are the
+fallback. The frontend resolves the Django origin through `NEXT_PUBLIC_API_URL`
+or, when unset, by probing `/api/health/` for the `storyflow-backend` service
+marker. Account pages show the origin they tried and support retrying after a
+backend restart.
 
 ---
 
@@ -84,7 +89,9 @@ the origin they tried and support retrying after a backend restart.
   the Story Template JSON reference now lives on the Settings page.
 - Per-project settings include voice/engine, speed, subtitles, Ken Burns zoom,
   transitions, silence, logo watermark, outro, background-music track and image
-  upscaling.
+  upscaling. Each project keeps its own snapshot; changing one project never
+  changes another. The settings sidebar shows the active resolution profile and
+  offers **Reset** to re-apply that resolution's defaults.
 
 ### 3.2 Text-to-speech
 
@@ -226,6 +233,10 @@ The Settings page is scoped to the active account and includes:
 - TTS engine status, account default model selection and VRAM unload.
 - Voice reference clips for cloning.
 - Subtitle defaults.
+- **Default Project Settings** — a per-resolution profile (TTS, subtitles,
+  render/motion, logo, outro, upscaling and audio mix) applied to new projects
+  and to projects whose resolution changes. Profiles are customisable per
+  resolution and fall back to the account settings until saved.
 - Logo and outro libraries.
 - **Audio Mix** and the demo playground.
 - **Story Template** JSON reference.

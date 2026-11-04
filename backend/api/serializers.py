@@ -6,7 +6,8 @@ from rest_framework import serializers
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
     OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
-    SECTION_CHOICES, apply_settings_to_project,
+    DefaultProjectSettings, SECTION_CHOICES,
+    apply_project_profile, resolve_project_defaults,
 )
 from .parsers import JSONParser, TextParser, ParseError
 from .storage_paths import media_url
@@ -716,6 +717,59 @@ class AccountSettingsSerializer(GlobalSettingsSerializer):
         fields = GlobalSettingsSerializer.Meta.fields + ['projects_view_mode']
 
 
+class DefaultProjectSettingsSerializer(GlobalSettingsSerializer):
+    """Resolution-specific defaults for new projects on one account."""
+
+    class Meta(GlobalSettingsSerializer.Meta):
+        model = DefaultProjectSettings
+        fields = [
+            'id', 'resolution_width', 'resolution_height',
+            'default_voice_id', 'tts_speed',
+            'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
+            'qwen_instruct', 'qwen_max_new_tokens',
+            'qwen_clone_x_vector_only', 'active_voice_reference',
+            'subtitle_font_family', 'subtitle_font_size',
+            'subtitle_font_color', 'subtitle_position',
+            'subtitle_y_position',
+            'subtitle_font', 'subtitle_color', 'subtitles_enabled',
+            'custom_font_file',
+            'framerate', 'ken_burns_zoom', 'transition_duration',
+            'zoom_intensity', 'inter_segment_silence',
+            'logo_enabled', 'active_logo', 'logo_scale',
+            'logo_position', 'logo_opacity', 'logo_margin',
+            'outro_enabled', 'active_outro',
+            'upscale_enabled', 'upscale_model', 'upscale_denoise_strength',
+            'bgm_gain_db', 'bgm_ducking_db', 'bgm_echo_percent', 'tts_gain_db',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'custom_font_file', 'created_at', 'updated_at',
+        ]
+
+    def validate(self, attrs):
+        """Validate that the profile's resolution is an allowed preset."""
+        width = attrs.get(
+            'resolution_width',
+            self.instance.resolution_width if self.instance else None,
+        )
+        height = attrs.get(
+            'resolution_height',
+            self.instance.resolution_height if self.instance else None,
+        )
+        if width is not None and height is not None:
+            if (width, height) not in ALLOWED_RESOLUTIONS:
+                labels = ', '.join(
+                    f'{w}×{h}' for w, h in sorted(ALLOWED_RESOLUTIONS)
+                )
+                raise serializers.ValidationError({
+                    'resolution': (
+                        f'Resolution {width}×{height} is not allowed. '
+                        f'Allowed presets: {labels}.'
+                    )
+                })
+        return attrs
+
+
 class ProjectDetailSerializer(
     ProjectThumbnailMixin,
     TtsEngineValidationMixin,
@@ -728,6 +782,9 @@ class ProjectDetailSerializer(
     manual_thumbnail_url = serializers.SerializerMethodField()
     has_manual_thumbnail = serializers.SerializerMethodField()
     thumbnail_source = serializers.SerializerMethodField()
+    # Write-only switch used by the UI to re-apply the matching default
+    # profile after the user explicitly asks for it.
+    reset_settings = serializers.BooleanField(write_only=True, required=False)
 
     class Meta:
         model = Project
@@ -738,6 +795,7 @@ class ProjectDetailSerializer(
             'rendering_count',
             'thumbnail', 'thumbnail_url', 'manual_thumbnail_url',
             'has_manual_thumbnail', 'thumbnail_source',
+            'reset_settings',
             # ── Per-project settings ──
             'default_voice_id', 'tts_speed',
             'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
@@ -771,8 +829,19 @@ class ProjectDetailSerializer(
         return obj.account.name if obj.account_id else None
 
     def update(self, instance, validated_data):
-        """Replace/clear the manual cover and remove the stale file."""
+        """Replace/clear the manual cover and remove the stale file.
+
+        Selecting a new resolution pulls that resolution's default profile
+        into this project.  The project then owns that snapshot: editing it
+        afterwards never changes another project or the saved defaults.
+        ``reset_settings`` re-applies the profile without changing resolution.
+        """
+        reset_settings = validated_data.pop('reset_settings', False)
         old_thumbnail = instance.thumbnail.name if instance.thumbnail else ''
+        resolution_changed = (
+            'resolution_width' in validated_data
+            or 'resolution_height' in validated_data
+        )
         instance = super().update(instance, validated_data)
         if 'thumbnail' in validated_data and old_thumbnail:
             new_thumbnail = instance.thumbnail.name if instance.thumbnail else ''
@@ -781,6 +850,24 @@ class ProjectDetailSerializer(
                     instance.thumbnail.storage.delete(old_thumbnail)
                 except Exception:  # pragma: no cover - file may already be gone
                     pass
+
+        if reset_settings or resolution_changed:
+            defaults = resolve_project_defaults(
+                instance.account,
+                instance.resolution_width,
+                instance.resolution_height,
+            )
+            apply_project_profile(instance, defaults)
+            # The selected resolution is the profile key; never let the
+            # fallback account settings change the project's dimensions.
+            if resolution_changed:
+                instance.resolution_width = validated_data.get(
+                    'resolution_width', instance.resolution_width,
+                )
+                instance.resolution_height = validated_data.get(
+                    'resolution_height', instance.resolution_height,
+                )
+            instance.save()
         return instance
 
     # ── Field-level validators (mirror GlobalSettingsSerializer) ──
@@ -1012,18 +1099,26 @@ class ProjectImportSerializer(serializers.Serializer):
     def create(self, validated_data):
         parsed = validated_data['_parsed_data']
 
-        # 1. Create Project with settings copied from the account's settings.
+        # 1. Create Project with the resolution-specific defaults for its
+        # account.  Projects own this snapshot; later edits stay local.
         account = validated_data.get('account')
-        defaults = (
+        fallback = (
             AccountSettings.load(account) if account else GlobalSettings.load()
         )
+        width = fallback.render_width
+        height = fallback.render_height
         project = Project.objects.create(
             title=parsed['title'],
             section=validated_data.get('section', 'facebook'),
             account=account,
             status='DRAFT',
+            resolution_width=width,
+            resolution_height=height,
         )
-        apply_settings_to_project(project, defaults)
+        defaults = resolve_project_defaults(account, width, height)
+        apply_project_profile(project, defaults)
+        project.resolution_width = width
+        project.resolution_height = height
         project.save()
 
         # 2. Bulk create Segments

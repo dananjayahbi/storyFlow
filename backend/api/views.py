@@ -23,16 +23,19 @@ from rest_framework.response import Response
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
     OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
+    DefaultProjectSettings,
     STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
     RENDERING_STATUSES, RENDERING_STATUS_PUBLISHED,
-    SECTION_CHOICES, apply_settings_to_project,
+    SECTION_CHOICES, apply_project_profile, resolve_project_defaults,
+    project_settings_payload,
 )
 from .serializers import (
     AccountSerializer, ProjectSerializer, ProjectDetailSerializer,
     ProjectImportSerializer, SegmentSerializer, GlobalSettingsSerializer,
-    AccountSettingsSerializer, LogoSerializer, OutroVideoSerializer,
+    AccountSettingsSerializer, DefaultProjectSettingsSerializer,
+    LogoSerializer, OutroVideoSerializer,
     VoiceReferenceSerializer, ScriptSerializer, ChatSessionSerializer,
-    BGMClipSerializer,
+    BGMClipSerializer, ALLOWED_RESOLUTIONS,
 )
 from .parsers import ParseError
 from .renderings import delete_rendering, resolve_rendering_video
@@ -308,9 +311,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
             section=effective_section,
             account=account,
         )
-        # New projects inherit the selected account's settings, not the
-        # workspace-wide defaults.
-        apply_settings_to_project(project, AccountSettings.load(account))
+        # New projects inherit the resolution-specific default profile for
+        # their account.  Projects then own that snapshot; editing one project
+        # (or another project) never changes it behind the scenes.
+        requested_width = serializer.validated_data.get('resolution_width')
+        requested_height = serializer.validated_data.get('resolution_height')
+        account_settings = AccountSettings.load(account)
+        width = requested_width or account_settings.render_width
+        height = requested_height or account_settings.render_height
+        apply_project_profile(
+            project,
+            resolve_project_defaults(account, width, height),
+        )
+        project.resolution_width = width
+        project.resolution_height = height
         project.save()
 
     def perform_destroy(self, instance):
@@ -368,6 +382,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 }
             )
         return Response({'results': items})
+
+    @action(detail=True, methods=['post'], url_path='reset-settings')
+    def reset_settings(self, request, pk=None):
+        """Re-apply the resolution-specific defaults to this project only."""
+        project = self.get_object()
+        defaults = resolve_project_defaults(
+            project.account,
+            project.resolution_width,
+            project.resolution_height,
+        )
+        apply_project_profile(project, defaults)
+        # The profile key is the project's own resolution; preserve it even
+        # when the fallback account settings use another size.
+        project.save()
+        return Response(self.get_serializer(project).data)
 
     @action(detail=True, methods=['post'], url_path='generate-all-audio')
     def generate_all_audio(self, request, pk=None):
@@ -1732,29 +1761,120 @@ def global_settings_view(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
 
-    # Account-level controls are also copied onto each Project row because the
-    # render pipeline reads them from there.  Keep every existing project in
-    # sync so a change takes effect on the next render/audio generation without
-    # re-creating projects.
-    if account:
-        synced_fields = (
-            # Audio Mix
-            'bgm_gain_db', 'bgm_ducking_db',
-            'bgm_echo_percent', 'tts_gain_db',
-            # TTS engine / model selection
-            'tts_engine', 'tts_speed', 'default_voice_id',
-            'qwen_mode', 'qwen_speaker', 'qwen_language', 'qwen_instruct',
-            'qwen_max_new_tokens', 'qwen_clone_x_vector_only',
-        )
-        updates = {
-            field: getattr(settings_obj, field)
-            for field in synced_fields
-            if field in request.data
-        }
-        if updates:
-            Project.objects.filter(account=account).update(**updates)
-
+    # Account settings are defaults for *future* projects only.  Existing
+    # projects own their settings snapshot, so a change here must not rewrite
+    # another project behind the operator's back.
     return Response(serializer.data)
+
+
+# ===================================================================
+# Resolution-specific project defaults
+# ===================================================================
+
+def _serialize_default_profile(account, width, height, profile):
+    """Return a profile payload, synthesising account fallback values."""
+    if profile is not None:
+        data = dict(DefaultProjectSettingsSerializer(profile).data)
+        data['is_customized'] = True
+    else:
+        data = project_settings_payload(AccountSettings.load(account))
+        data.update({
+            'id': None,
+            'resolution_width': width,
+            'resolution_height': height,
+            'created_at': None,
+            'updated_at': None,
+            'is_customized': False,
+        })
+    data['resolution_width'] = width
+    data['resolution_height'] = height
+    return data
+
+
+def _get_project_defaults_account(request):
+    account = get_requested_account(request)
+    if account is None:
+        return None, Response(
+            {'error': 'Select an account before editing project defaults.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return account, None
+
+
+@api_view(['GET'])
+def project_defaults_view(request):
+    """List every allowed resolution with its effective default profile.
+
+    Resolutions without a stored row report the account settings as their
+    effective values with ``is_customized: false``.  This lets the settings UI
+    show all presets immediately without creating empty rows.
+    """
+    account, error = _get_project_defaults_account(request)
+    if error:
+        return error
+
+    stored = {
+        (profile.resolution_width, profile.resolution_height): profile
+        for profile in DefaultProjectSettings.objects.filter(account=account)
+    }
+    results = [
+        _serialize_default_profile(
+            account, width, height, stored.get((width, height))
+        )
+        for width, height in sorted(ALLOWED_RESOLUTIONS)
+    ]
+    return Response({'results': results})
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+def project_defaults_detail_view(request, width, height):
+    """Read, update or reset the defaults for one resolution.
+
+    ``DELETE`` removes the custom row so the resolution falls back to the
+    account settings again.
+    """
+    account, error = _get_project_defaults_account(request)
+    if error:
+        return error
+    if (width, height) not in ALLOWED_RESOLUTIONS:
+        return Response(
+            {'error': f'Resolution {width}×{height} is not allowed.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    profile = DefaultProjectSettings.objects.filter(
+        account=account,
+        resolution_width=width,
+        resolution_height=height,
+    ).first()
+
+    if request.method == 'GET':
+        return Response(
+            _serialize_default_profile(account, width, height, profile)
+        )
+
+    if request.method == 'DELETE':
+        if profile is not None:
+            profile.delete()
+        return Response(
+            _serialize_default_profile(account, width, height, None)
+        )
+
+    instance = profile or DefaultProjectSettings.seed_from_account(
+        account, width, height
+    )
+    serializer = DefaultProjectSettingsSerializer(
+        instance, data=request.data, partial=True
+    )
+    serializer.is_valid(raise_exception=True)
+    profile = serializer.save(
+        account=account,
+        resolution_width=width,
+        resolution_height=height,
+    )
+    return Response(
+        _serialize_default_profile(account, width, height, profile)
+    )
 
 
 # ===================================================================

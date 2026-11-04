@@ -97,6 +97,8 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   upscale_enabled: boolean;
   upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
   upscale_denoise_strength: number;
+  /** Write-only: re-apply the resolution defaults to this project. */
+  reset_settings?: boolean;
 }
 
 /** Normalised rectangle inside the rendered image frame (0..1). */
@@ -141,6 +143,11 @@ export interface GlobalSettings {
   qwen_clone_x_vector_only: boolean;
   active_voice_reference: string | null;
   zoom_intensity: number;
+  ken_burns_zoom?: number;
+  transition_duration?: number;
+  subtitle_font_family?: string;
+  subtitle_font_color?: string;
+  custom_font_file?: string | null;
   subtitle_font: string;
   subtitle_color: string;
   subtitle_font_size: number;
@@ -168,6 +175,36 @@ export interface GlobalSettings {
   upscale_denoise_strength: number;
   /** Projects page layout, persisted per account in the database. */
   projects_view_mode: 'table' | 'tiles';
+}
+
+/**
+ * Resolution-specific defaults used to seed a new project's settings.
+ * A profile without a stored row reports the account settings as its
+ * effective values with ``is_customized: false``.
+ */
+export interface ProjectSettingsProfile
+  extends Omit<
+    GlobalSettings,
+    | 'render_width'
+    | 'render_height'
+    | 'render_fps'
+    | 'projects_view_mode'
+    | 'ken_burns_zoom'
+    | 'transition_duration'
+    | 'subtitle_font_family'
+    | 'subtitle_font_color'
+  > {
+  id: string | null;
+  resolution_width: number;
+  resolution_height: number;
+  framerate: number;
+  ken_burns_zoom: number;
+  transition_duration: number;
+  subtitle_font_family: string;
+  subtitle_font_color: string;
+  is_customized: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface Logo {
@@ -228,6 +265,9 @@ export interface CreateProjectPayload {
   title: string;
   section?: 'facebook' | 'youtube';
   account?: string;
+  /** Chosen in the create dialog; pulls that resolution's default profile. */
+  resolution_width?: number;
+  resolution_height?: number;
 }
 
 export interface ImportProjectRequest {

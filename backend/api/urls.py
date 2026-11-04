@@ -47,6 +47,16 @@ urlpatterns = [
         name='settings-playground-cancel',
     ),
     path('settings/ai/', views.ai_settings_view, name='ai-settings'),
+    path(
+        'settings/project-defaults/',
+        views.project_defaults_view,
+        name='project-defaults',
+    ),
+    path(
+        'settings/project-defaults/<int:width>x<int:height>/',
+        views.project_defaults_detail_view,
+        name='project-defaults-detail',
+    ),
     path('script-craft/generate/', views.script_generate_view, name='script-generate'),
     path('chat/sessions/', views.chat_sessions_view, name='chat-sessions'),
     path(
