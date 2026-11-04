@@ -562,14 +562,37 @@ propagates them to every existing project, so the next render uses the new
 tuning. New projects inherit the values at creation time. The project editor
 keeps only the track picker, the MusicGen button and the enable checkbox.
 
-The same tab contains a three-block demo playground. Upload an image and paste
-the script text for each block, choose a BGM track, then press **Generate Demo
-Video**. StoryFlow narrates the blocks with the current account voice settings,
-mixes them with the current Audio Mix values and renders a preview in place.
-Every run replaces the previous demo video, so the controls can be tuned
-repeatedly without creating projects. The playground is stored as a hidden
-`Project` (`is_playground=True`) and never appears in the project list, gallery
-or account counts.
+The same tab contains a three-block demo playground. The demo is split into two
+stages so tuning the background music does not re-run TTS or the video
+compositor:
+
+1. **Generate TTS + Video** narrates the three blocks, then renders a base
+   video with no subtitles and no background music. The narration WAV is kept
+   next to the base video.
+2. **Apply Background Music** composes a soundtrack for the three blocks with
+   **MusicGen** — the same engine used by the BGM Library — and mixes it with
+   the current Audio Mix values into that existing base video (only the audio
+   track is re-encoded). The video stays unchanged until a new base is
+   generated, so the sliders can be applied repeatedly to compare results.
+
+   Each composed soundtrack is saved to the account's BGM Library as a
+   generated clip. It is tied to the block text and measured narration
+   durations. Later applies re-use the matching track so slider tuning stays
+   fast; tick **Compose a new soundtrack now** for a fresh one. Selecting
+   **Use a track from the BGM Library** applies an uploaded/shared track
+   instead, and **No background music** previews the narration alone. If
+   MusicGen is unavailable the Apply button explains why instead of silently
+   producing a video without music.
+
+Both stages run in the background and survive a page reload. The settings page
+remembers the last selected tab, so reloading returns directly to the Audio Mix
+progress panel and keeps polling until the job finishes. While a job is running
+the tab shows live progress and a **Stop** button. Regenerating the TTS/video
+replaces the base; changing block text or images clears the generated narration
+so the demo asks for a fresh base before re-mixing. The playground is
+stored as a hidden `Project` (`is_playground=True`) and never appears in the
+project list, gallery or account counts. Real projects keep their normal
+single-pass render workflow; they only share the account-wide Audio Mix values.
 
 Run the checks:
 
@@ -715,7 +738,11 @@ Tuned for a GTX 1660 Ti (6 GB):
 
 ### Workflow: draft with Kokoro → finalize with Qwen
 
-1. Open **Settings → TTS Engines** and confirm both engines are available.
+1. Open **Settings → TTS Engines**, choose the **Default TTS model** for the
+   account (Kokoro or Qwen3-TTS), and press **Save model**. Saving updates every
+   existing project on that account; generate the audio again to use it.
+   The Audio Tester also has a **Save as default** button next to its engine
+   selector.
 2. Open **Settings → Voice References** and upload one or more clean 3–10 s
    clips (WAV/MP3/M4A/FLAC). Add the transcript for better cloning accuracy.
 3. Build the project, then **Generate All Audio** (Kokoro draft).
@@ -727,8 +754,9 @@ Tuned for a GTX 1660 Ti (6 GB):
    **MP3**; MP3 conversion uses FFmpeg.
 7. Use **Settings → TTS Engines → Unload VRAM** when you are done with Qwen.
 
-Engine choice is stored per project (default inherited from global settings),
-so a project can mix a fast draft pass with a final Qwen pass at any time.
+Engine choice is stored per project. The account default is set from the
+Settings page and copied onto existing and new projects, so a project can still
+mix a fast Kokoro draft pass with a final Qwen pass at any time.
 
 ---
 

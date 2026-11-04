@@ -283,6 +283,67 @@ def get_output_path(project_id: str) -> str:
     return str(output_path)
 
 
+def mux_audio_into_video(
+    video_path: str,
+    audio_path: str,
+    output_path: str,
+    *,
+    audio_bitrate: str = "192k",
+) -> str:
+    """Replace a video's audio track with *audio_path* without re-encoding.
+
+    The playground base video is rendered once and then repeatedly re-mixed
+    with different background-music settings.  Copying the video stream keeps
+    those re-mixes fast and lossless while the freshly mixed WAV is encoded to
+    AAC in the output file.
+    """
+    if not check_ffmpeg():
+        raise RuntimeError(get_ffmpeg_error_message())
+
+    destination = os.path.abspath(str(output_path))
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+
+    command = [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(video_path),
+        "-i",
+        str(audio_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        audio_bitrate,
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        destination,
+    ]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=1800,
+    )
+    if result.returncode != 0:
+        logger.error("FFmpeg audio mux failed: %s", result.stderr[-2000:])
+        raise RuntimeError(
+            "Could not apply the mixed audio to the demo video."
+        )
+
+    logger.info(
+        "Muxed audio into video: %s -> %s", audio_path, destination
+    )
+    return destination
+
+
 # ---------------------------------------------------------------------------
 # Temporary file cleanup
 # ---------------------------------------------------------------------------

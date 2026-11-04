@@ -110,11 +110,18 @@ def generate_soundtrack_task(
     name: str = '',
     plan_options: dict | None = None,
     attach_to_project: bool = True,
+    progress_start: int = 0,
+    progress_end: int = 100,
 ) -> dict:
     """Background entry point: synthesise, encode and persist a soundtrack.
 
     Runs inside the TaskManager worker (max_workers=1) and additionally takes
     ``_GENERATION_LOCK`` so no other caller can start a second GPU session.
+
+    ``progress_start`` / ``progress_end`` let a caller that embeds music
+    generation inside a larger job (the Settings playground generates music and
+    then mixes it into an existing video) reserve only a slice of the progress
+    bar for this task.
     """
     from api.models import Account, BGMClip, Project
     from api.tasks import get_task_manager
@@ -123,13 +130,23 @@ def generate_soundtrack_task(
     manager = get_task_manager()
     project = Project.objects.filter(pk=project_id).first() if project_id else None
     account = Account.objects.get(pk=account_id)
-
     total = len(segments)
+
+    range_start = max(0, min(100, int(progress_start)))
+    range_end = max(range_start, min(100, int(progress_end)))
+    span = range_end - range_start
+
+    def scaled(percent: float) -> int:
+        """Map a 0–100 MusicGen percentage onto the reserved slice."""
+        bounded = max(0.0, min(100.0, float(percent)))
+        return range_start + int(round(span * bounded / 100.0))
+
     manager.update_task_progress(
         task_id,
         current=0,
         total=total,
         description='Preparing MusicGen soundtrack…',
+        percentage_override=scaled(0),
     )
 
     def on_progress(current, total_segments, description):
@@ -144,7 +161,9 @@ def generate_soundtrack_task(
             current=current,
             total=total_segments,
             description=description,
-            percentage_override=music_progress_percent(current, total_segments),
+            percentage_override=scaled(
+                music_progress_percent(current, total_segments)
+            ),
         )
 
     with _GENERATION_LOCK:
@@ -158,7 +177,7 @@ def generate_soundtrack_task(
                 current=0,
                 total=total,
                 description='Unloading TTS models to free VRAM…',
-                percentage_override=2,
+                percentage_override=scaled(2),
             )
             released = music_generator.release_tts_resources()
             logger.info(
@@ -185,7 +204,7 @@ def generate_soundtrack_task(
                 current=total,
                 total=total,
                 description='Encoding soundtrack to MP3…',
-                percentage_override=95,
+                percentage_override=scaled(95),
             )
             audio_convert.convert_to_mp3(wav_path, mp3_path)
 
@@ -233,7 +252,7 @@ def generate_soundtrack_task(
                 current=total,
                 total=total,
                 description='Soundtrack ready',
-                percentage_override=100,
+                percentage_override=scaled(100),
                 generated_clip_id=str(clip.id),
                 output_url=clip.file.url,
                 duration=result['duration'],

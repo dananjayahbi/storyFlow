@@ -3,6 +3,7 @@
 import axios from 'axios';
 import type { GlobalSettings, Voice } from '../types/settings';
 import { getApiBaseUrl } from '../lib/apiConfig';
+import { getCurrentAccountId } from '../lib/account';
 
 /**
  * Axios instance pointing at the StoryFlow backend.
@@ -13,6 +14,12 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+/** Account query for the settings endpoints (values are stored per account). */
+function accountParams(): { account?: string } {
+  const account = getCurrentAccountId();
+  return account ? { account } : {};
+}
+
 // ── Settings CRUD ──
 
 /**
@@ -21,7 +28,9 @@ const api = axios.create({
  * GET /api/settings/
  */
 export async function getSettings(): Promise<GlobalSettings> {
-  const { data } = await api.get<GlobalSettings>('/api/settings/');
+  const { data } = await api.get<GlobalSettings>('/api/settings/', {
+    params: accountParams(),
+  });
   return data;
 }
 
@@ -34,7 +43,9 @@ export async function getSettings(): Promise<GlobalSettings> {
 export async function updateSettings(
   data: Partial<GlobalSettings>,
 ): Promise<GlobalSettings> {
-  const response = await api.patch<GlobalSettings>('/api/settings/', data);
+  const response = await api.patch<GlobalSettings>('/api/settings/', data, {
+    params: accountParams(),
+  });
   return response.data;
 }
 
@@ -65,7 +76,10 @@ export async function uploadFont(file: File): Promise<GlobalSettings> {
   const { data } = await api.post<GlobalSettings>(
     '/api/settings/font/upload/',
     formData,
-    { headers: { 'Content-Type': 'multipart/form-data' } },
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: accountParams(),
+    },
   );
   return data;
 }

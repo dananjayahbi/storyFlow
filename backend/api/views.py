@@ -1694,17 +1694,23 @@ def global_settings_view(request):
     serializer.is_valid(raise_exception=True)
     serializer.save()
 
-    # Audio Mix values are account-level controls, but the render pipeline
-    # reads them from the Project row.  Keep every existing project in sync
-    # so a change takes effect on the next render without re-creating jobs.
+    # Account-level controls are also copied onto each Project row because the
+    # render pipeline reads them from there.  Keep every existing project in
+    # sync so a change takes effect on the next render/audio generation without
+    # re-creating projects.
     if account:
-        mix_fields = (
+        synced_fields = (
+            # Audio Mix
             'bgm_gain_db', 'bgm_ducking_db',
             'bgm_echo_percent', 'tts_gain_db',
+            # TTS engine / model selection
+            'tts_engine', 'tts_speed', 'default_voice_id',
+            'qwen_mode', 'qwen_speaker', 'qwen_language', 'qwen_instruct',
+            'qwen_max_new_tokens', 'qwen_clone_x_vector_only',
         )
         updates = {
             field: getattr(settings_obj, field)
-            for field in mix_fields
+            for field in synced_fields
             if field in request.data
         }
         if updates:

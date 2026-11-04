@@ -27,6 +27,7 @@ from typing import Tuple
 
 import cv2
 import numpy as np
+from PIL import Image
 
 # ---------------------------------------------------------------------------
 # MoviePy version-safe imports
@@ -114,11 +115,18 @@ def load_and_prepare_image(
     # Step 2: Load the image and convert to RGB
     # ------------------------------------------------------------------
     try:
-        img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        # OpenCV on Windows cannot open paths containing non-ASCII characters,
+        # so use Pillow directly for those (and as a fallback for any other
+        # file OpenCV fails to decode).
+        img = None
+        if str(image_path).isascii():
+            img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
         if img is None:
-            raise ValueError(f"cv2.imread returned None for: {image_path}")
-        # OpenCV loads as BGR — convert to RGB for MoviePy
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            with Image.open(image_path) as pil_img:
+                img = np.array(pil_img.convert("RGB"), dtype=np.uint8)
+        else:
+            # OpenCV loads as BGR — convert to RGB for MoviePy
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     except Exception as exc:
         raise ValueError(
             f"Cannot open or read image file: {image_path}"

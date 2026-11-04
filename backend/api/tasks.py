@@ -163,7 +163,12 @@ class TaskManager:
                 logger.exception("Task %s failed: %s", task_id, exc)
                 with self._tasks_lock:
                     if task_id in self._tasks:
-                        self._tasks[task_id]["status"] = TASK_FAILED
+                        cancelled = self._tasks[task_id].get(
+                            "cancel_requested", False
+                        )
+                        self._tasks[task_id]["status"] = (
+                            TASK_CANCELLED if cancelled else TASK_FAILED
+                        )
                         self._tasks[task_id]["completed_at"] = time.time()
             finally:
                 # Critical: close the DB connection held by this worker thread

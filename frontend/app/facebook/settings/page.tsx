@@ -1,7 +1,13 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { testTTS, getVoices, getAIConfig, updateAIConfig } from '@/lib/api';
+import {
+  testTTS,
+  getVoices,
+  getAIConfig,
+  updateAIConfig,
+  updateSettings as updateAccountSettings,
+} from '@/lib/api';
 import type { AIConfig } from '@/lib/types';
 import { AVAILABLE_VOICES, type Voice } from '@/lib/constants';
 import { useSettingsStore as useLogoStore } from '@/lib/stores';
@@ -105,8 +111,33 @@ const SETTINGS_TABS: Array<{
   },
 ];
 
+const SETTINGS_TAB_STORAGE_KEY = 'storyflow.settings.tab';
+
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('tester');
+
+  // Keep the selected tab across reloads. This matters for the Audio Mix
+  // playground: a background job keeps running, and reloading should return
+  // the operator to the progress panel instead of the default Audio Tester.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SETTINGS_TAB_STORAGE_KEY);
+      if (saved && SETTINGS_TABS.some((tab) => tab.id === saved)) {
+        setActiveTab(saved as SettingsTab);
+      }
+    } catch {
+      // localStorage may be unavailable in private/restricted contexts.
+    }
+  }, []);
+
+  const selectTab = (tab: SettingsTab) => {
+    setActiveTab(tab);
+    try {
+      window.localStorage.setItem(SETTINGS_TAB_STORAGE_KEY, tab);
+    } catch {
+      // Ignore storage failures; tab switching still works for this session.
+    }
+  };
   // TTS Tester state
   const [ttsText, setTtsText] = useState('Hello! This is a test of the StoryFlow text to speech engine.');
   const [ttsVoice, setTtsVoice] = useState('af_bella');
@@ -127,6 +158,7 @@ export default function SettingsPage() {
   const [qwenMaxTokens, setQwenMaxTokens] = useState(1024);
   const [voiceReferenceId, setVoiceReferenceId] = useState<string>('');
   const [xVectorOnly, setXVectorOnly] = useState(true);
+  const [isSavingTtsEngine, setIsSavingTtsEngine] = useState(false);
   const voiceRefInputRef = useRef<HTMLInputElement>(null);
 
   // Subtitle settings state
@@ -362,6 +394,21 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveTtsEngine = async () => {
+    setIsSavingTtsEngine(true);
+    try {
+      await updateAccountSettings({ tts_engine: ttsEngine });
+      await fetchSettings();
+      toast.success(
+        `Default TTS model saved: ${ttsEngine === 'qwen' ? 'Qwen3-TTS' : 'Kokoro'}`,
+      );
+    } catch {
+      toast.error('Failed to save the default TTS model');
+    } finally {
+      setIsSavingTtsEngine(false);
+    }
+  };
+
   const handlePlayAudio = () => {
     if (!audioUrl) return;
 
@@ -420,7 +467,7 @@ export default function SettingsPage() {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectTab(tab.id)}
                   className={cn(
                     'group flex shrink-0 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors lg:w-full',
                     active
@@ -703,6 +750,20 @@ export default function SettingsPage() {
               )}
             </Button>
 
+            <Button
+              variant="outline"
+              onClick={() => void handleSaveTtsEngine()}
+              disabled={isSavingTtsEngine}
+              title="Use this engine for new audio on every project in this account"
+            >
+              {isSavingTtsEngine ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4 mr-2" />
+              )}
+              Save as default
+            </Button>
+
             {audioUrl && (
               <Button
                 variant="outline"
@@ -757,6 +818,51 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+            <label htmlFor="default-tts-engine" className="text-sm font-medium">
+              Default TTS model for this account
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                id="default-tts-engine"
+                value={ttsEngine}
+                onChange={(e) =>
+                  setTtsEngine(e.target.value as 'kokoro' | 'qwen')
+                }
+                className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option
+                  value="kokoro"
+                  disabled={kokoroEngine ? !kokoroEngine.available : false}
+                >
+                  Kokoro — fast draft (default)
+                </option>
+                <option
+                  value="qwen"
+                  disabled={qwenEngine ? !qwenEngine.available : false}
+                >
+                  Qwen3-TTS — GPU
+                  {qwenEngine && !qwenEngine.available ? ' (unavailable)' : ''}
+                </option>
+              </select>
+              <Button
+                onClick={() => void handleSaveTtsEngine()}
+                disabled={isSavingTtsEngine}
+              >
+                {isSavingTtsEngine ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Save model
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Saving updates every existing project on this account. Generate
+              the audio again to use the newly selected engine.
+            </p>
+          </div>
+
           {isTtsEnginesLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Checking engines…

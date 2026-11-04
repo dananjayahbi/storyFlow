@@ -79,6 +79,9 @@ Two engines are supported:
 | Qwen3-TTS 0.6B | CUDA GPU | slower | yes | Final narration / cloned voice |
 
 - Generate one block or all blocks.
+- Choose the account's default TTS model from **Settings → TTS Engines** (or
+  **Save as default** in the Audio Tester); saving copies the engine onto every
+  existing project.
 - Switch a project from Kokoro draft audio to a Qwen final pass; existing
   Kokoro blocks are regenerated while Qwen blocks can be kept.
 - Each block shows which engine produced its current audio.
@@ -120,9 +123,20 @@ MusicGen button and the enable checkbox.
 The same tab has a three-block **demo playground**:
 
 - upload an image and paste script text for each of three blocks;
-- choose any BGM track;
-- generate narration and render a demo video in place;
-- every run replaces the previous demo, so settings can be tuned repeatedly.
+- **Generate TTS + Video** narrates the blocks and renders a base video with no
+  subtitles and no background music;
+- **Apply Background Music** composes a soundtrack for the blocks with
+  MusicGen and mixes it with the Audio Mix values into the existing base video,
+  without regenerating TTS or the video;
+- a matching generated soundtrack is re-used on later applies so sliders can be
+  tuned quickly; **Compose a new soundtrack now** forces a fresh MusicGen run;
+- a BGM Library track can be applied instead, or background music can be
+  disabled entirely;
+- jobs run in the background, survive page reloads and can be stopped;
+- the last Settings tab is remembered, so a reload returns to the live progress
+  panel instead of the default Audio Tester tab;
+- the base video only changes when it is explicitly regenerated, so BG settings
+  can be tuned and applied repeatedly.
 
 ### 3.6 Subtitles
 
@@ -179,7 +193,7 @@ The same tab has a three-block **demo playground**:
 The Settings page is scoped to the active account and includes:
 
 - Audio tester.
-- TTS engine status and VRAM unload.
+- TTS engine status, account default model selection and VRAM unload.
 - Voice reference clips for cloning.
 - Subtitle defaults.
 - Logo and outro libraries.

@@ -2026,6 +2026,42 @@ def apply_music_echo(
     return echoed
 
 
+def apply_narration_gain(
+    narration_path: str,
+    output_path: str,
+    gain_db: float = 0.0,
+    *,
+    sample_rate: int = 44_100,
+) -> dict:
+    """Scale a narration-only track by *gain_db*.
+
+    Used by the Settings playground when no background track is selected but
+    the TTS voice volume still needs to be previewed.  Writes a 16-bit WAV so
+    the result can be muxed into the existing base video.
+    """
+    narration = _decode_audio(narration_path, sample_rate)
+    if narration.size == 0:
+        raise MusicGenerationError("The narration track is empty.")
+
+    gain = 10.0 ** (float(gain_db) / 20.0)
+    scaled = narration * gain
+    np.clip(scaled, -1.0, 1.0, out=scaled)
+
+    destination = os.path.abspath(str(output_path))
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    import soundfile as sf
+
+    sf.write(destination, scaled, sample_rate, subtype="PCM_16")
+    logger.info(
+        "Narration gain applied: %s (%.1f dB)", destination, gain_db
+    )
+    return {
+        "output_path": destination,
+        "duration": round(narration.shape[0] / float(sample_rate), 3),
+        "narration_gain_db": gain_db,
+    }
+
+
 def mix_background_music(
     narration_path: str,
     music_path: str,

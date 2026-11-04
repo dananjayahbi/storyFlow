@@ -218,6 +218,20 @@ class Project(models.Model):
     # project list, gallery or account counts; it exists only to preview the
     # Audio Mix settings with a three-block demo render.
     is_playground = models.BooleanField(default=False, db_index=True)
+    # Playground-only assets.  The base video is rendered once (TTS + images,
+    # no subtitles and no background music) and can then be re-mixed with new
+    # Audio Mix values without re-running TTS or the video compositor.
+    playground_base_video = models.CharField(
+        max_length=500, blank=True, null=True,
+    )
+    playground_narration_audio = models.CharField(
+        max_length=500, blank=True, null=True,
+    )
+    # Current playground background job: "BASE" (TTS + video) or "MIX"
+    # (apply the selected music track to the existing base video).
+    playground_job = models.CharField(
+        max_length=10, blank=True, default='',
+    )
 
     # Image upscaling (GAN)
     UPSCALE_MODEL_CHOICES = [

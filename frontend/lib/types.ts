@@ -483,9 +483,31 @@ export interface PlaygroundState {
   project_id: string;
   title: string;
   status: 'DRAFT' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  /** Background job currently running: BASE (TTS + video) or MIX. */
+  job: 'BASE' | 'MIX' | '';
   output_url: string | null;
+  /** Cache-busting mtime for the rendered demo video. */
+  output_version: number | null;
+  /** Cached video rendered once with TTS, no subtitles and no music. */
+  base_video_url: string | null;
+  base_video_version: number | null;
+  has_base_video: boolean;
+  /** True when the base video can be re-mixed without regenerating it. */
+  can_remix: boolean;
   bgm_clip: string | null;
+  /** What the last apply/generate used: MusicGen, a library clip, or none. */
+  music_source: 'generated' | 'library' | 'none';
+  music_clip_name: string | null;
+  /** A MusicGen soundtrack exists and matches the current script. */
+  generated_music_ready: boolean;
+  /** A soundtrack exists but the script/durations changed since it was made. */
+  generated_music_stale: boolean;
+  music_fingerprint: string;
   blocks: PlaygroundBlock[];
+  task_status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | null;
+  progress: number | null;
+  progress_description: string | null;
+  cancel_requested: boolean;
 }
 
 /** Metadata stored on a MusicGen-generated BGM clip. */

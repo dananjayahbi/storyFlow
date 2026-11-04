@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  applyPlaygroundBgm,
+  cancelPlayground,
   getBgmClips,
+  getMusicEngineStatus,
   getPlayground,
   getSettings,
   savePlayground,
@@ -11,7 +14,7 @@ import {
   uploadPlaygroundImage,
   removePlaygroundImage,
 } from '@/lib/api';
-import type { BgmClip, PlaygroundState } from '@/lib/types';
+import type { BgmClip, MusicEngineStatus, PlaygroundState } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Slider } from '@/components/ui/slider';
@@ -20,11 +23,29 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import {
   Loader2, Music, Save, Sparkles, Upload, Trash2, Volume2,
-  Waves, Mic2, RefreshCw, Film,
+  Waves, Mic2, RefreshCw, Film, Square, Wand2,
 } from 'lucide-react';
 import { mediaUrl } from '@/lib/apiConfig';
 
 const POLL_INTERVAL_MS = 2000;
+const MUSIC_SOURCE_KEY = 'storyflow.playground.music-source';
+
+type MusicSource = 'generated' | 'library' | 'none';
+
+function storedMusicSource(): MusicSource {
+  if (typeof window === 'undefined') return 'generated';
+  const raw = localStorage.getItem(MUSIC_SOURCE_KEY);
+  return raw === 'library' || raw === 'none' || raw === 'generated'
+    ? raw
+    : 'generated';
+}
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  const detail = (
+    error as { response?: { data?: { error?: string } } }
+  )?.response?.data?.error;
+  return detail || fallback;
+}
 
 function formatDb(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(0)} dB`;
@@ -44,12 +65,16 @@ export function SettingsMixPanel() {
   const [drafts, setDrafts] = useState<string[]>(['', '', '']);
   const [clips, setClips] = useState<BgmClip[]>([]);
   const [selectedClip, setSelectedClip] = useState('');
+  const [musicSource, setMusicSource] = useState<MusicSource>('generated');
+  const [regenerateMusic, setRegenerateMusic] = useState(false);
+  const [musicEngine, setMusicEngine] = useState<MusicEngineStatus | null>(null);
   const [isLoadingPlayground, setIsLoadingPlayground] = useState(true);
   const [isSavingPlayground, setIsSavingPlayground] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [isUploadingIndex, setIsUploadingIndex] = useState<number | null>(null);
   const fileInputs = useRef<Array<HTMLInputElement | null>>([]);
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadPlayground = useCallback(async () => {
     try {
@@ -58,6 +83,7 @@ export function SettingsMixPanel() {
       setDrafts(state.blocks.map((block) => block.text_content));
       setSelectedClip(state.bgm_clip ?? '');
       setIsGenerating(state.status === 'PROCESSING');
+      if (state.status !== 'PROCESSING') setIsStopping(false);
       setIsLoadingPlayground(false);
       return state;
     } catch {
@@ -65,6 +91,10 @@ export function SettingsMixPanel() {
       toast.error('Failed to load the demo playground');
       return null;
     }
+  }, []);
+
+  useEffect(() => {
+    setMusicSource(storedMusicSource());
   }, []);
 
   useEffect(() => {
@@ -82,31 +112,34 @@ export function SettingsMixPanel() {
     getBgmClips()
       .then(setClips)
       .catch(() => setClips([]));
+    getMusicEngineStatus()
+      .then(setMusicEngine)
+      .catch(() => setMusicEngine(null));
 
-    return () => {
-      if (pollTimer.current) clearTimeout(pollTimer.current);
-    };
   }, [loadPlayground]);
 
-  // Poll while a demo render is running so the preview appears as soon as it
-  // finishes. The backend replaces the previous output in place.
+  // Poll while a demo job is running. The state lives in the database, so
+  // reloading this page re-attaches to the job instead of interrupting it.
+  // Use an interval (not a single timeout) so polling keeps going until the
+  // backend reports a terminal status.
   useEffect(() => {
     if (!isGenerating) return;
-    pollTimer.current = setTimeout(async () => {
+    const interval = setInterval(async () => {
       const state = await loadPlayground();
       if (state && state.status !== 'PROCESSING') {
         setIsGenerating(false);
-        if (state.status === 'COMPLETED') {
+        setIsStopping(false);
+        if (isStopping) {
+          toast.success('Demo generation stopped');
+        } else if (state.status === 'COMPLETED') {
           toast.success('Demo video ready');
         } else if (state.status === 'FAILED') {
           toast.error('Demo generation failed. Check the backend log.');
         }
       }
     }, POLL_INTERVAL_MS);
-    return () => {
-      if (pollTimer.current) clearTimeout(pollTimer.current);
-    };
-  }, [isGenerating, loadPlayground, playground?.status]);
+    return () => clearInterval(interval);
+  }, [isGenerating, isStopping, loadPlayground]);
 
   const saveMixSettings = useCallback(async () => {
     setIsSavingSettings(true);
@@ -126,16 +159,15 @@ export function SettingsMixPanel() {
     }
   }, [bgmGain, bgmDucking, bgmEcho, ttsGain]);
 
-  const saveBlocks = useCallback(async () => {
+  const saveBlocks = useCallback(async (silent = false) => {
     setIsSavingPlayground(true);
     try {
       const state = await savePlayground({
         blocks: drafts.map((text_content) => ({ text_content })),
-        bgm_clip: selectedClip || null,
       });
       setPlayground(state);
       setDrafts(state.blocks.map((block) => block.text_content));
-      toast.success('Demo blocks saved');
+      if (!silent) toast.success('Demo blocks saved');
       return state;
     } catch {
       toast.error('Failed to save demo blocks');
@@ -143,7 +175,7 @@ export function SettingsMixPanel() {
     } finally {
       setIsSavingPlayground(false);
     }
-  }, [drafts, selectedClip]);
+  }, [drafts]);
 
   const handleUpload = async (index: number, file: File) => {
     setIsUploadingIndex(index);
@@ -176,20 +208,77 @@ export function SettingsMixPanel() {
     }
   };
 
+  const handleMusicSourceChange = (value: MusicSource) => {
+    setMusicSource(value);
+    try {
+      localStorage.setItem(MUSIC_SOURCE_KEY, value);
+    } catch {
+      // Ignore storage failures (private mode); the current session still works.
+    }
+  };
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     try {
       // Persist the current tuning and block text first so the demo always
-      // reflects exactly what the sliders show.
+      // reflects exactly what the sliders show. The base video is rendered
+      // without subtitles or music; press Apply Background Music afterwards
+      // to compose the soundtrack.
       await saveMixSettings();
-      await saveBlocks();
-      await generatePlayground({
-        bgm_clip: selectedClip || null,
-      });
-      toast.success('Demo generation started');
+      await saveBlocks(true);
+      await generatePlayground({ music_source: 'none' });
+      toast.success('Rendering the demo video without background music…');
       await loadPlayground();
-    } catch {
+    } catch (error) {
       setIsGenerating(false);
+      toast.error(apiErrorMessage(error, 'Could not start the demo render'));
+    }
+  };
+
+  const handleApplyBgm = async () => {
+    setIsApplying(true);
+    try {
+      // Only the audio track is re-mixed; the generated video stays untouched.
+      await saveMixSettings();
+      await saveBlocks(true);
+      await applyPlaygroundBgm({
+        music_source: musicSource,
+        bgm_clip: musicSource === 'library' ? selectedClip || null : undefined,
+        regenerate_music:
+          musicSource === 'generated' ? regenerateMusic : false,
+      });
+      const composeNew = musicSource === 'generated' && regenerateMusic;
+      setRegenerateMusic(false);
+      toast.success(
+        musicSource === 'generated'
+          ? composeNew
+            ? 'Composing a new MusicGen soundtrack and applying it to the demo…'
+            : 'Applying the generated soundtrack to the demo video…'
+          : 'Applying background music to the existing demo video',
+      );
+      setIsGenerating(true);
+      await loadPlayground();
+      // A freshly generated soundtrack is added to the BGM Library.
+      getBgmClips().then(setClips).catch(() => {});
+    } catch (error) {
+      toast.error(
+        apiErrorMessage(error, 'Could not apply the background music'),
+      );
+    } finally {
+      // The job continues in the background; status polling takes over.
+      setIsApplying(false);
+    }
+  };
+
+  const handleStop = async () => {
+    setIsStopping(true);
+    try {
+      const state = await cancelPlayground();
+      setPlayground(state);
+      toast.success(state.message ?? 'Stopping the demo job…');
+    } catch {
+      setIsStopping(false);
+      toast.error('Could not stop the demo job');
     }
   };
 
@@ -204,8 +293,29 @@ export function SettingsMixPanel() {
     );
   }
 
-  const shownOutput = mediaUrl(playground?.output_url ?? null);
-  const isBusy = isGenerating || playground?.status === 'PROCESSING';
+  const rawOutput = mediaUrl(playground?.output_url ?? null);
+  const shownOutput = rawOutput
+    ? `${rawOutput}${rawOutput.includes('?') ? '&' : '?'}v=${
+        playground?.output_version ?? 0
+      }`
+    : null;
+  const hasRunningJob = playground?.status === 'PROCESSING';
+  const isBusy = isGenerating || isApplying || hasRunningJob;
+  const canRemix = Boolean(playground?.can_remix) && !isBusy;
+  const musicUnavailable = musicEngine !== null && !musicEngine.available;
+  const canApplyMusic =
+    canRemix &&
+    !(
+      musicSource === 'generated' &&
+      musicUnavailable &&
+      (!playground?.generated_music_ready || regenerateMusic)
+    );
+  const jobLabel =
+    playground?.job === 'BASE'
+      ? 'Narrating blocks and rendering the base video'
+      : playground?.job === 'MIX'
+        ? 'Preparing and applying background music'
+        : 'Working';
 
   return (
     <div className="space-y-6">
@@ -334,29 +444,80 @@ export function SettingsMixPanel() {
             Demo Playground
           </CardTitle>
           <CardDescription>
-            Three blocks with an uploaded image and a script. Generate the demo
-            as often as you like; each run replaces the previous video.
+            Three blocks with an uploaded image and a script. Generate the TTS
+            and base video once, then press <strong>Apply Background Music</strong>
+            {' '}— MusicGen composes a soundtrack for this script and mixes it
+            into the existing video without re-rendering it. Jobs keep running
+            if you reload this page.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Background track</label>
+            <label className="text-sm font-medium">Background music</label>
             <select
-              value={selectedClip}
-              onChange={(event) => setSelectedClip(event.target.value)}
+              value={musicSource}
+              onChange={(event) =>
+                handleMusicSourceChange(event.target.value as MusicSource)
+              }
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
             >
-              <option value="">No background music</option>
-              {clips.map((clip) => (
-                <option key={clip.id} value={clip.id}>
-                  {clip.name}
-                  {clip.source === 'generated' ? ' · generated' : ''}
-                </option>
-              ))}
+              <option value="generated">
+                Generate with MusicGen (default)
+              </option>
+              <option value="library">Use a track from the BGM Library</option>
+              <option value="none">No background music</option>
             </select>
-            <p className="text-xs text-muted-foreground">
-              Pick any track from the account BGM Library or a shared track.
-            </p>
+
+            {musicSource === 'generated' && (
+              <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                <p className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <Wand2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                  <span>
+                    {musicUnavailable && !playground?.generated_music_ready
+                      ? `MusicGen is unavailable: ${
+                          musicEngine?.reason ?? 'check the backend setup'
+                        }`
+                      : playground?.generated_music_ready
+                        ? 'A generated soundtrack is ready for this demo. Applying re-uses it so slider changes stay fast.'
+                        : playground?.generated_music_stale
+                          ? 'The script changed since the last soundtrack. Applying composes a new one.'
+                          : 'Applying will compose a soundtrack for this script with MusicGen, then mix it into the existing video.'}
+                  </span>
+                </p>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={regenerateMusic}
+                    onChange={(event) =>
+                      setRegenerateMusic(event.target.checked)
+                    }
+                    className="h-3.5 w-3.5 rounded border-input"
+                  />
+                  Compose a new soundtrack now (slower)
+                </label>
+              </div>
+            )}
+
+            {musicSource === 'library' && (
+              <>
+                <select
+                  value={selectedClip}
+                  onChange={(event) => setSelectedClip(event.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                >
+                  <option value="">No background music</option>
+                  {clips.map((clip) => (
+                    <option key={clip.id} value={clip.id}>
+                      {clip.name}
+                      {clip.source === 'generated' ? ' · generated' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Pick any track from the account BGM Library or a shared track.
+                </p>
+              </>
+            )}
           </div>
 
           <Separator />
@@ -452,33 +613,77 @@ export function SettingsMixPanel() {
               Save Blocks
             </Button>
             <Button onClick={() => void handleGenerate()} disabled={isBusy}>
-              {isBusy ? (
+              {isBusy && playground?.job === 'BASE' ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Film className="mr-2 h-4 w-4" />
               )}
-              {isBusy ? 'Generating demo…' : 'Generate Demo Video'}
+              Generate TTS + Video
             </Button>
             <Button
-              variant="ghost"
-              onClick={() => void loadPlayground()}
-              disabled={isBusy}
+              variant="outline"
+              onClick={() => void handleApplyBgm()}
+              disabled={!canApplyMusic}
+              title={
+                !canRemix
+                  ? 'Generate the demo video first'
+                  : musicSource === 'generated' && musicUnavailable
+                    ? musicEngine?.reason ?? 'MusicGen is unavailable'
+                    : musicSource === 'generated'
+                      ? 'Compose a MusicGen soundtrack for this script and mix it into the existing video'
+                      : 'Apply the selected track and Audio Mix values to the existing video'
+              }
             >
+              {isBusy && playground?.job === 'MIX' ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : musicSource === 'generated' ? (
+                <Wand2 className="mr-2 h-4 w-4" />
+              ) : (
+                <Music className="mr-2 h-4 w-4" />
+              )}
+              Apply Background Music
+            </Button>
+            {hasRunningJob && (
+              <Button
+                variant="destructive"
+                onClick={() => void handleStop()}
+                disabled={isStopping || playground?.cancel_requested}
+              >
+                {isStopping || playground?.cancel_requested ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="mr-2 h-4 w-4" />
+                )}
+                {isStopping || playground?.cancel_requested
+                  ? 'Stopping…'
+                  : 'Stop'}
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => void loadPlayground()}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Refresh
             </Button>
             <span className="text-xs text-muted-foreground">
-              Each run replaces the previous demo video.
+              Regenerating TTS + Video replaces the base without music; applying
+              background music composes/re-uses a soundtrack and only re-mixes
+              the existing base.
             </span>
           </div>
 
-          {isBusy && (
+          {hasRunningJob && (
             <div className="space-y-2 rounded-md border bg-muted/20 p-3">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Generating narration and rendering the demo…
+                {jobLabel}
+                {playground?.progress_description
+                  ? ` — ${playground.progress_description}`
+                  : '…'}
               </div>
-              <Progress value={undefined} className="h-1.5" />
+              <Progress value={playground?.progress ?? undefined} className="h-1.5" />
+              <p className="text-[11px] text-muted-foreground">
+                This runs in the background. You can reload the page and the
+                job will continue.
+              </p>
             </div>
           )}
 

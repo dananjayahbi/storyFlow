@@ -632,6 +632,8 @@ export async function removePlaygroundImage(
 
 export async function generatePlayground(payload: {
   bgm_clip?: string | null;
+  music_source?: 'generated' | 'library' | 'none';
+  regenerate_music?: boolean;
 } = {}): Promise<{
   task_id: string;
   project_id: string;
@@ -639,6 +641,29 @@ export async function generatePlayground(payload: {
   message: string;
 }> {
   const { data } = await api.post('/api/settings/playground/generate/', payload);
+  return data;
+}
+
+export async function applyPlaygroundBgm(payload: {
+  bgm_clip?: string | null;
+  music_source?: 'generated' | 'library' | 'none';
+  regenerate_music?: boolean;
+} = {}): Promise<{
+  task_id: string;
+  project_id: string;
+  status: string;
+  music_source?: 'generated' | 'library' | 'none';
+  generate_music?: boolean;
+  message: string;
+}> {
+  const { data } = await api.post('/api/settings/playground/apply/', payload);
+  return data;
+}
+
+export async function cancelPlayground(): Promise<PlaygroundState & { message: string }> {
+  const { data } = await api.post<PlaygroundState & { message: string }>(
+    '/api/settings/playground/cancel/'
+  );
   return data;
 }
 

@@ -20,6 +20,7 @@ in SubPhase 04.03.
 
 import logging
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -579,6 +580,12 @@ def calculate_total_duration_with_transitions(
 def render_project(
     project_id: str,
     on_progress: ProgressCallback = None,
+    *,
+    output_path: Optional[str] = None,
+    include_bgm: Optional[bool] = None,
+    include_outro: Optional[bool] = None,
+    subtitles_override: Optional[bool] = None,
+    narration_output_path: Optional[str] = None,
 ) -> dict:
     """
     Render a project's segments into a single MP4 video file.
@@ -592,6 +599,18 @@ def render_project(
         project_id: UUID string of the project to render.
         on_progress: Optional callback ``(current, total, description)``
             invoked after each segment and before export.
+        output_path: Optional explicit destination.  When omitted the normal
+            ``<project>/output/final.mp4`` path is used.
+        include_bgm: ``False`` forces a narration-only render even when the
+            project has a music track selected.  ``None`` keeps project
+            behaviour.
+        include_outro: ``False`` skips the outro clip for this render only.
+            ``None`` keeps project behaviour.
+        subtitles_override: ``False`` disables subtitle burning for this
+            render only.  ``None`` keeps project behaviour.
+        narration_output_path: Optional path where the mixed narration WAV
+            should also be written (used by the Settings playground to remix
+            background audio later without re-rendering the video).
 
     Returns:
         dict: ``{"output_path": str, "duration": float, "file_size": int}``
@@ -678,8 +697,11 @@ def render_project(
     raw_y_pos = getattr(project, "subtitle_y_position", None)
     if raw_y_pos is not None:
         subtitle_y_position = int(raw_y_pos)
-    # Subtitles toggle
+    # Subtitles toggle (the Settings playground forces this off for its base
+    # render so applying background music never re-burns subtitles).
     subtitles_enabled = getattr(project, "subtitles_enabled", True)
+    if subtitles_override is not None:
+        subtitles_enabled = bool(subtitles_override)
     # Inter-segment silence
     iss_val = getattr(project, "inter_segment_silence", None)
     if iss_val is not None and iss_val >= 0:
@@ -742,6 +764,8 @@ def render_project(
     # C6. Read background-music settings (uploaded or MusicGen generated)
     # ------------------------------------------------------------------
     bgm_enabled = bool(getattr(project, "bgm_enabled", False))
+    if include_bgm is not None:
+        bgm_enabled = bool(include_bgm)
     bgm_gain_db = float(getattr(project, "bgm_gain_db", -18.0))
     bgm_ducking_db = float(getattr(project, "bgm_ducking_db", -12.0))
     bgm_echo_percent = float(getattr(project, "bgm_echo_percent", 0.0))
@@ -812,7 +836,11 @@ def render_project(
     # ------------------------------------------------------------------
     # F. Determine output path
     # ------------------------------------------------------------------
-    output_path = render_utils.get_output_path(str(project_id))
+    if output_path:
+        output_path = os.path.abspath(str(output_path))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    else:
+        output_path = render_utils.get_output_path(str(project_id))
     logger.info("Output path: %s", output_path)
 
     # ------------------------------------------------------------------
@@ -1031,6 +1059,14 @@ def render_project(
             temp_audio_path, mixed_audio.duration,
         )
 
+        # Keep a copy of the un-mixed narration when a caller wants to apply
+        # background music later without rendering the video again.
+        if narration_output_path:
+            narration_path = os.path.abspath(str(narration_output_path))
+            os.makedirs(os.path.dirname(narration_path), exist_ok=True)
+            shutil.copyfile(temp_audio_path, narration_path)
+            logger.info("Narration track saved to: %s", narration_path)
+
         # --------------------------------------------------------------
         # G2.5. Multiplex background music with voice-activated ducking
         # --------------------------------------------------------------
@@ -1141,6 +1177,8 @@ def render_project(
         outro_appended = False
         try:
             outro_enabled = getattr(project, "outro_enabled", False)
+            if include_outro is not None:
+                outro_enabled = bool(include_outro)
             logger.info(
                 "Outro check: outro_enabled=%s, active_outro=%s",
                 outro_enabled,
