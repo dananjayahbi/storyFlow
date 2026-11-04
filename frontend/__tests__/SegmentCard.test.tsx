@@ -140,4 +140,60 @@ describe('SegmentCard', () => {
       ).toBeInTheDocument();
     });
   });
+
+  it('shows an existing TTS script expanded by default', () => {
+    const segmentWithScript: Segment = {
+      ...mockSegment,
+      tts_text: 'The hero enters the castle.',
+    };
+
+    renderWithTooltip(
+      <SegmentCard
+        segment={segmentWithScript}
+        onUpdate={mockUpdate}
+        onDelete={mockDelete}
+        onUploadImage={mockUploadImage}
+        onRemoveImage={mockRemoveImage}
+      />
+    );
+
+    const textarea = screen.getByPlaceholderText(/Generate this block to produce/);
+    expect(textarea).toHaveValue('The hero enters the castle.');
+    expect(textarea.parentElement).toHaveClass('max-h-[22rem]');
+  });
+
+  it('expands the TTS editor when a script arrives after mount', async () => {
+    const { rerender } = renderWithTooltip(
+      <SegmentCard
+        segment={mockSegment}
+        onUpdate={mockUpdate}
+        onDelete={mockDelete}
+        onUploadImage={mockUploadImage}
+        onRemoveImage={mockRemoveImage}
+      />
+    );
+
+    expect(
+      screen.getByPlaceholderText(/Generate this block to produce/)
+        .parentElement
+    ).toHaveClass('max-h-0');
+
+    rerender(
+      <TooltipProvider>
+        <SegmentCard
+          segment={{ ...mockSegment, tts_text: 'Freshly generated script.' }}
+          onUpdate={mockUpdate}
+          onDelete={mockDelete}
+          onUploadImage={mockUploadImage}
+          onRemoveImage={mockRemoveImage}
+        />
+      </TooltipProvider>
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByDisplayValue('Freshly generated script.').parentElement
+      ).toHaveClass('max-h-[22rem]');
+    });
+  });
 });

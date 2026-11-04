@@ -24,7 +24,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { generateAllTtsScripts, pollTaskStatus } from '@/lib/api';
+import { generateSegmentTtsScript } from '@/lib/api';
 import { toast } from 'sonner';
 
 // ── Sidebar collapsed state persistence ──
@@ -88,6 +88,7 @@ export default function TimelineEditorPage() {
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
   const [isGeneratingTtsScripts, setIsGeneratingTtsScripts] = useState(false);
+  const [ttsScriptProgress, setTtsScriptProgress] = useState({ current: 0, total: 0 });
 
   const startRenaming = () => {
     if (!project) return;
@@ -110,36 +111,61 @@ export default function TimelineEditorPage() {
   };
 
   const handleGenerateAllTtsScripts = async () => {
+    // Run the same per-block endpoint the card's Generate button uses, one
+    // block at a time. This keeps the work out of the shared TTS background
+    // queue (so it cannot sit behind a long audio batch) and lets every block
+    // appear as soon as its script is ready.
+    const targets = segments.filter(
+      (segment) =>
+        segment.text_content.trim() &&
+        !segment.is_locked &&
+        !(segment.tts_text ?? '').trim()
+    );
+
+    if (targets.length === 0) {
+      toast.info('Every block already has a TTS script.');
+      return;
+    }
+
     setIsGeneratingTtsScripts(true);
+    setTtsScriptProgress({ current: 0, total: targets.length });
+    let completed = 0;
+    const failures: { index: number; message: string }[] = [];
+
     try {
-      const result = await generateAllTtsScripts(id);
-      if (!result.task_id) {
-        toast.info(result.message || 'No blocks need a TTS script.');
-        return;
-      }
-      toast.info(`Rewriting ${result.segments_to_process} TTS scripts…`);
-      const final = await pollTaskStatus(result.task_id, () => {});
-      if (final.status === 'COMPLETED') {
-        const failed = final.errors?.length ?? 0;
-        if (failed > 0) {
-          toast.warning(
-            `TTS scripts updated with ${failed} block${failed === 1 ? '' : 's'} failing.`
-          );
-        } else {
-          toast.success('TTS scripts generated for every block.');
+      for (const [index, segment] of targets.entries()) {
+        setTtsScriptProgress({ current: index + 1, total: targets.length });
+        try {
+          const result = await generateSegmentTtsScript(segment.id);
+          await updateSegment(segment.id, { tts_text: result.tts_text });
+          completed += 1;
+        } catch (error) {
+          const message = (error as { response?: { data?: { error?: string } } })
+            ?.response?.data?.error;
+          failures.push({
+            index: segment.sequence_index + 1,
+            message: message || 'Unknown error',
+          });
         }
-        await fetchProject(id);
-      } else if (final.status === 'CANCELLED') {
-        toast.info('TTS script generation cancelled.');
-      } else {
-        toast.error('TTS script generation failed.');
       }
-    } catch (error) {
-      const message = (error as { response?: { data?: { error?: string } } })
-        ?.response?.data?.error;
-      toast.error(message || 'Could not generate the TTS scripts.');
+
+      if (failures.length === 0) {
+        toast.success(
+          `TTS scripts generated for ${completed} block${completed === 1 ? '' : 's'}.`
+        );
+      } else if (completed === 0) {
+        toast.error(
+          `Could not generate a TTS script. Block #${failures[0].index}: ${failures[0].message}`
+        );
+      } else {
+        toast.warning(
+          `TTS scripts updated for ${completed} block${completed === 1 ? '' : 's'}; ` +
+            `${failures.length} failed (first: block #${failures[0].index}).`
+        );
+      }
     } finally {
       setIsGeneratingTtsScripts(false);
+      setTtsScriptProgress({ current: 0, total: 0 });
     }
   };
 
@@ -677,11 +703,16 @@ export default function TimelineEditorPage() {
                   title="Rewrite every block into a TTS-ready spoken script using the configured AI model"
                 >
                   {isGeneratingTtsScripts ? (
-                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      {`Writing TTS… ${ttsScriptProgress.current}/${ttsScriptProgress.total}`}
+                    </>
                   ) : (
-                    <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                    <>
+                      <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                      Generate TTS Scripts
+                    </>
                   )}
-                  {isGeneratingTtsScripts ? 'Writing TTS…' : 'Generate TTS Scripts'}
                 </Button>
                 {project?.bgm_enabled && (
                   <>

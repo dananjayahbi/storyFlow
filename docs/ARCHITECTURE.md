@@ -1072,7 +1072,8 @@ override the interpreter path.
 | `core_engine/tts_script.py` | Prompt rules, deterministic normaliser, LLM rewrite |
 | `api/models.py` | `Segment.tts_text` stores the optional spoken version |
 | `api/views.py` | `generate-tts-script` (one block) and `generate-all-tts-scripts` (background batch) |
-| `frontend/components/SegmentCard.tsx` | Per-block generate/edit UI |
+| `frontend/components/SegmentCard.tsx` | Per-block generate/edit UI, auto-expanded when a script exists |
+| `frontend/app/facebook/projects/[id]/page.tsx` | Footer button loops the per-block endpoint with live progress (Issue #35) |
 
 A project still starts with a single script. After import, each block can be
 rewritten on demand into `tts_text` using the same Script Craft model configured
@@ -1091,6 +1092,17 @@ years, ordinals, currency, percentages, fractions and common units.
 Both single and batch generation are non-destructive: locked blocks are
 skipped, and TTS synthesis automatically uses `tts_text` when present, falling
 back to the cleaned subtitle text otherwise.
+
+The footer **Generate TTS Scripts** action loops over every block that still
+needs a script and calls the same per-block endpoint as the card button. It
+shows `Writing TTS… n/m` while it runs, updates each card as soon as its script
+arrives, and skips blocks that already have one. Running the loop on the client
+keeps this lightweight LLM work out of the shared TTS background queue, so it
+cannot wait behind a long audio batch (Issue #35). Each card's **Regenerate**
+button rewrites a single existing script. The TTS editor starts expanded for
+blocks that already have a script, so generated scripts remain visible after a
+page reload. Returns from the per-block generation are persisted by the API and
+mirrored into the store through the normal segment update path.
 
 ---
 

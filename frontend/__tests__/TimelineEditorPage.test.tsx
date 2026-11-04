@@ -1,8 +1,25 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import TimelineEditorPage from '@/app/facebook/projects/[id]/page';
 import { useProjectStore } from '@/lib/stores';
+import { generateSegmentTtsScript } from '@/lib/api';
 import type { ProjectDetail, Segment } from '@/lib/types';
+
+jest.mock('sonner', () => ({
+  toast: {
+    success: jest.fn(),
+    info: jest.fn(),
+    warning: jest.fn(),
+    error: jest.fn(),
+  },
+}));
+
+jest.mock('@/lib/api', () => ({
+  ...jest.requireActual('@/lib/api'),
+  generateSegmentTtsScript: jest.fn(),
+}));
+
+const mockGenerateSegmentTtsScript = generateSegmentTtsScript as jest.Mock;
 
 // Mock next/navigation
 jest.mock('next/navigation', () => ({
@@ -103,6 +120,7 @@ describe('TimelineEditorPage', () => {
     useProjectStore.setState({ fetchProject: jest.fn() });
     localStorage.clear();
     jest.clearAllMocks();
+    mockGenerateSegmentTtsScript.mockReset();
   });
 
   it('fetches project on mount', () => {
@@ -181,5 +199,62 @@ describe('TimelineEditorPage', () => {
     const exportButton = screen.getByText('Export').closest('button');
     expect(generateButton).toBeEnabled();
     expect(exportButton).toBeDisabled();
+  });
+
+  it('generates TTS scripts block by block and skips ready blocks', async () => {
+    const updateSpy = jest.fn().mockResolvedValue(undefined);
+    const readySegment: Segment = {
+      ...mockSegment,
+      id: 'seg-2',
+      sequence_index: 1,
+      text_content: 'The second block',
+      tts_text: 'Already spoken.',
+    };
+    useProjectStore.setState({
+      project: mockProject,
+      segments: [
+        { ...mockSegment, text_content: 'The first block' },
+        readySegment,
+      ],
+      isLoading: false,
+      error: null,
+      updateSegment: updateSpy,
+    });
+    mockGenerateSegmentTtsScript.mockResolvedValue({
+      id: 'seg-1',
+      tts_text: 'The spoken first block.',
+      model: 'test-model',
+    });
+
+    renderPage();
+
+    fireEvent.click(screen.getByText('Generate TTS Scripts'));
+
+    await waitFor(() => {
+      expect(mockGenerateSegmentTtsScript).toHaveBeenCalledTimes(1);
+    });
+    expect(mockGenerateSegmentTtsScript).toHaveBeenCalledWith('seg-1');
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith('seg-1', {
+        tts_text: 'The spoken first block.',
+      });
+    });
+  });
+
+  it('reports when every block already has a TTS script', async () => {
+    useProjectStore.setState({
+      project: mockProject,
+      segments: [{ ...mockSegment, tts_text: 'Already spoken.' }],
+      isLoading: false,
+      error: null,
+    });
+
+    renderPage();
+
+    fireEvent.click(screen.getByText('Generate TTS Scripts'));
+
+    await waitFor(() => {
+      expect(mockGenerateSegmentTtsScript).not.toHaveBeenCalled();
+    });
   });
 });

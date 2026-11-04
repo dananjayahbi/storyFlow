@@ -64,13 +64,21 @@ function SegmentCardComponent({
   // Local UI state
   const [isTextExpanded, setIsTextExpanded] = useState(false);
   const [isSubtitlePreviewOpen, setIsSubtitlePreviewOpen] = useState(false);
-  const [isTtsOpen, setIsTtsOpen] = useState(false);
+  const [isTtsOpen, setIsTtsOpen] = useState(Boolean(segment.tts_text?.trim()));
   const [ttsDraft, setTtsDraft] = useState(segment.tts_text ?? '');
   const [isGeneratingTts, setIsGeneratingTts] = useState(false);
   const [ttsError, setTtsError] = useState<string | null>(null);
 
   React.useEffect(() => {
     setTtsDraft(segment.tts_text ?? '');
+  }, [segment.tts_text]);
+
+  // A freshly generated script (single block or batch) should be visible
+  // immediately instead of staying behind a collapsed editor.
+  React.useEffect(() => {
+    if ((segment.tts_text ?? '').trim()) {
+      setIsTtsOpen(true);
+    }
   }, [segment.tts_text]);
 
   const handleGenerateTts = useCallback(async () => {
