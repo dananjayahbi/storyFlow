@@ -24,6 +24,13 @@ export interface Project {
   segment_count: number;
   /** Number of rendered gallery assets linked to this project. */
   rendering_count?: number;
+  /** Ready-to-use cover URL: manual thumbnail, else first segment image. */
+  thumbnail_url?: string | null;
+  /** URL of the manually uploaded cover, when one exists. */
+  manual_thumbnail_url?: string | null;
+  has_manual_thumbnail?: boolean;
+  /** Where `thumbnail_url` came from. */
+  thumbnail_source?: 'manual' | 'segment' | null;
 }
 
 /** Extended project data returned by the detail endpoint. */
@@ -143,6 +150,8 @@ export interface GlobalSettings {
   upscale_enabled: boolean;
   upscale_model: 'RealESRGAN_x4plus' | 'RealESRGAN_x2plus' | 'RealESRGAN_x4plus_anime_6B';
   upscale_denoise_strength: number;
+  /** Projects page layout, persisted per account in the database. */
+  projects_view_mode: 'table' | 'tiles';
 }
 
 export interface Logo {

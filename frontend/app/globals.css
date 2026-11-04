@@ -186,3 +186,66 @@
     animation: none;
   }
 }
+
+/* Project tiles: animated cover placeholder when no image is configured. */
+@keyframes project-thumb-drift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes project-thumb-float {
+  0%,
+  100% {
+    transform: translateY(-2px) rotate(-4deg);
+  }
+  50% {
+    transform: translateY(2px) rotate(4deg);
+  }
+}
+
+@keyframes project-thumb-glow {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}
+
+.project-thumb-placeholder {
+  background-image: linear-gradient(
+    120deg,
+    oklch(0.24 0.03 155),
+    oklch(0.32 0.06 195),
+    oklch(0.27 0.05 280),
+    oklch(0.22 0.03 155)
+  );
+  background-size: 300% 300%;
+  animation: project-thumb-drift 14s ease-in-out infinite;
+}
+
+.project-thumb-placeholder-icon {
+  animation: project-thumb-float 6s ease-in-out infinite;
+}
+
+.project-thumb-placeholder-glow {
+  animation: project-thumb-glow 5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-thumb-placeholder,
+  .project-thumb-placeholder-icon,
+  .project-thumb-placeholder-glow {
+    animation: none;
+  }
+}

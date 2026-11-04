@@ -2,11 +2,21 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { getProjects, deleteProject, updateProject } from '@/lib/api';
+import {
+  getProjects,
+  getSettings,
+  updateSettings,
+  deleteProject,
+  updateProject,
+  uploadProjectThumbnail,
+  removeProjectThumbnail,
+} from '@/lib/api';
 import { Project } from '@/lib/types';
 import { sectionFromPathname } from '@/lib/section';
 import { CreateProjectDialog } from '@/components/CreateProjectDialog';
 import ImportDialog from '@/components/ImportDialog';
+import { ProjectTile } from '@/components/ProjectTile';
+import { ProjectThumbnail } from '@/components/ProjectThumbnail';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +31,7 @@ import {
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
-  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+  AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
   Tooltip,
@@ -30,7 +40,16 @@ import {
 } from '@/components/ui/tooltip';
 import { EmptyState } from '@/components/EmptyState';
 import { StoryTemplateModal } from '@/components/StoryTemplateModal';
-import { FolderPlus, Search, X, ArrowUpDown, Trash2, Pencil } from 'lucide-react';
+import {
+  FolderPlus,
+  Search,
+  X,
+  ArrowUpDown,
+  Trash2,
+  Pencil,
+  LayoutGrid,
+  Rows3,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { ProjectsSkeleton } from '@/components/skeletons';
 import {
@@ -117,6 +136,13 @@ export default function ProjectsPage() {
   const [sortMode, setSortMode] = useState<SortMode>('date-desc');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Layout preference (persisted per account in AccountSettings).
+  const [viewMode, setViewMode] = useState<'table' | 'tiles'>('table');
+
+  // One shared delete confirmation for both layouts.
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [thumbnailBusyId, setThumbnailBusyId] = useState<string | null>(null);
+
   // Rename state
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [renamingProject, setRenamingProject] = useState<Project | null>(null);
@@ -140,6 +166,99 @@ export default function ProjectsPage() {
   useEffect(() => {
     fetchProjects();
   }, [activeSection]);
+
+  // Load the saved layout for this account. Failures keep the table default.
+  useEffect(() => {
+    let cancelled = false;
+    getSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        if (
+          settings.projects_view_mode === 'table' ||
+          settings.projects_view_mode === 'tiles'
+        ) {
+          setViewMode(settings.projects_view_mode);
+        }
+      })
+      .catch(() => {
+        /* not fatal — keep the table view */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection]);
+
+  const handleViewModeChange = async (mode: 'table' | 'tiles') => {
+    if (mode === viewMode) return;
+    const previous = viewMode;
+    setViewMode(mode);
+    try {
+      await updateSettings({ projects_view_mode: mode });
+    } catch {
+      setViewMode(previous);
+      toast.error('Could not save the projects layout.');
+    }
+  };
+
+  const applyThumbnailUpdate = (
+    projectId: string,
+    updated: Partial<Project>,
+  ) => {
+    setProjects((previous) =>
+      previous.map((project) =>
+        String(project.id) === projectId
+          ? {
+              ...project,
+              thumbnail_url: updated.thumbnail_url ?? null,
+              manual_thumbnail_url: updated.manual_thumbnail_url ?? null,
+              has_manual_thumbnail: updated.has_manual_thumbnail ?? false,
+              thumbnail_source: updated.thumbnail_source ?? null,
+            }
+          : project,
+      ),
+    );
+  };
+
+  const handleThumbnailUpload = async (project: Project, file: File) => {
+    const projectId = String(project.id);
+    setThumbnailBusyId(projectId);
+    try {
+      const updated = await uploadProjectThumbnail(projectId, file);
+      applyThumbnailUpdate(projectId, updated);
+      toast('Project thumbnail updated');
+    } catch {
+      toast.error('Could not upload that image. Try a JPG or PNG.');
+    } finally {
+      setThumbnailBusyId(null);
+    }
+  };
+
+  const handleThumbnailRemove = async (project: Project) => {
+    const projectId = String(project.id);
+    setThumbnailBusyId(projectId);
+    try {
+      const updated = await removeProjectThumbnail(projectId);
+      applyThumbnailUpdate(projectId, updated);
+      toast('Manual thumbnail removed');
+    } catch {
+      toast.error('Could not remove the manual thumbnail.');
+    } finally {
+      setThumbnailBusyId(null);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    const projectId = String(deleteTarget.id);
+    try {
+      await deleteProject(projectId);
+      handleProjectDelete(projectId);
+    } catch {
+      toast.error('Could not delete that project.');
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
 
   const handleProjectCreated = () => {
     fetchProjects();
@@ -291,6 +410,36 @@ export default function ProjectsPage() {
             <ArrowUpDown className="h-3.5 w-3.5" />
             {SORT_LABELS[sortMode]}
           </Button>
+
+          {/* Layout toggle — saved to the account settings */}
+          <div
+            className="inline-flex items-center gap-0.5 rounded-md border p-0.5"
+            role="group"
+            aria-label="Projects layout"
+          >
+            <Button
+              variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+              aria-pressed={viewMode === 'table'}
+              onClick={() => void handleViewModeChange('table')}
+              title="Table view"
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+              Table
+            </Button>
+            <Button
+              variant={viewMode === 'tiles' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 gap-1 px-2 text-xs"
+              aria-pressed={viewMode === 'tiles'}
+              onClick={() => void handleViewModeChange('tiles')}
+              title="Tile view"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Tiles
+            </Button>
+          </div>
         </div>
       )}
 
@@ -316,11 +465,41 @@ export default function ProjectsPage() {
           actionLabel="Clear search"
           onAction={() => setSearchQuery('')}
         />
+      ) : viewMode === 'tiles' ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {filteredProjects.map((project) => {
+            const badge = deriveBadge(project.status);
+            const updatedAt = project.updated_at || project.created_at;
+            const projectId = String(project.id);
+            return (
+              <ProjectTile
+                key={project.id}
+                project={project}
+                badge={badge}
+                updatedLabel={formatRelativeTime(updatedAt)}
+                updatedAbsolute={formatAbsoluteDate(updatedAt)}
+                thumbnailBusy={thumbnailBusyId === projectId}
+                onOpen={() =>
+                  router.push(`/${activeSection}/projects/${project.id}`)
+                }
+                onRename={() => openRenameDialog(project)}
+                onRequestDelete={() => setDeleteTarget(project)}
+                onThumbnailUpload={(file) =>
+                  void handleThumbnailUpload(project, file)
+                }
+                onThumbnailRemove={() =>
+                  void handleThumbnailRemove(project)
+                }
+              />
+            );
+          })}
+        </div>
       ) : (
         <div className="rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-24">Preview</TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Segments</TableHead>
@@ -331,13 +510,32 @@ export default function ProjectsPage() {
             <TableBody>
               {filteredProjects.map((project) => {
                 const badge = deriveBadge(project.status);
+                const projectId = String(project.id);
                 return (
                   <TableRow
                     key={project.id}
                     className="cursor-pointer"
-                    onClick={() => router.push(`/${activeSection}/projects/${project.id}`)}
+                    onClick={() =>
+                      router.push(`/${activeSection}/projects/${project.id}`)
+                    }
                   >
-                    <TableCell className="font-medium max-w-75 truncate">
+                    <TableCell className="py-2">
+                      <ProjectThumbnail
+                        project={project}
+                        className="h-12 w-20 rounded-md border"
+                        compact
+                        editable
+                        busy={thumbnailBusyId === projectId}
+                        onUpload={(file) =>
+                          void handleThumbnailUpload(project, file)
+                        }
+                        onRemove={() => void handleThumbnailRemove(project)}
+                      />
+                    </TableCell>
+                    <TableCell
+                      className="max-w-75 truncate font-medium"
+                      title={project.title}
+                    >
                       {project.title}
                     </TableCell>
                     <TableCell>
@@ -378,34 +576,19 @@ export default function ProjectsPage() {
                           </TooltipTrigger>
                           <TooltipContent side="bottom"><p className="text-xs">Rename</p></TooltipContent>
                         </Tooltip>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              onClick={() => setDeleteTarget(project)}
+                            >
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Project</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                Are you sure you want to delete &quot;{project.title}&quot;?
-                                All segments and associated media will be permanently removed.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={async () => {
-                                  await deleteProject(String(project.id));
-                                  handleProjectDelete(String(project.id));
-                                }}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom"><p className="text-xs">Delete</p></TooltipContent>
+                        </Tooltip>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -415,6 +598,33 @@ export default function ProjectsPage() {
           </Table>
         </div>
       )}
+
+      {/* Shared delete confirmation (table and tile views) */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete &quot;{deleteTarget?.title}&quot;?
+              All segments and associated media will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void handleConfirmDelete()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Rename Dialog */}
       <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>

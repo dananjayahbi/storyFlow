@@ -606,6 +606,22 @@ backend\venv\Scripts\python.exe backend\manage.py test tests.test_playground
 cd frontend && npm test
 ```
 
+### Projects page
+
+The Projects page can be shown as a **table** or a **grid of tiles**. The
+choice is stored in the account's `AccountSettings.projects_view_mode`
+(`table` or `tiles`) through `PATCH /api/settings/`, so it is restored on the
+next visit and can differ per Facebook page / YouTube channel.
+
+- **Thumbnails** — every table row and tile shows the project cover. A manually
+  uploaded thumbnail wins; otherwise the first segment image is used
+  automatically.
+- Hover a thumbnail and use the camera button to upload a JPG/PNG cover, or the
+  trash button to remove it and fall back to the first segment image.
+- Projects with neither show an animated placeholder instead of an empty box.
+- Uploads use multipart `PATCH /api/projects/<id>/` with the `thumbnail` file;
+  send `{"thumbnail": null}` to clear the manual cover.
+
 ### Gallery
 
 The Gallery is an asset manager for every rendering produced in the selected

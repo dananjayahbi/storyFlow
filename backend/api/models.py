@@ -51,6 +51,29 @@ SECTION_CHOICES = [
 
 DEFAULT_ACCOUNT_NAME = 'Default Account'
 
+# ── Project list presentation ──
+PROJECT_VIEW_MODE_TABLE = 'table'
+PROJECT_VIEW_MODE_TILES = 'tiles'
+PROJECT_VIEW_MODE_CHOICES = [
+    (PROJECT_VIEW_MODE_TABLE, 'Table'),
+    (PROJECT_VIEW_MODE_TILES, 'Tiles'),
+]
+
+
+def project_thumbnail_path(instance, filename):
+    """Store a project's manual cover in its own asset folder.
+
+    The file name is normalised to a single ``thumbnail`` asset so replacing
+    the cover never leaves orphaned variants in the project directory.
+    """
+    extension = os.path.splitext(filename)[1].lower() or '.jpg'
+    return project_relpath(
+        instance.section,
+        instance.id,
+        f'thumbnail{extension}',
+        account_id=instance.account_id,
+    )
+
 
 class Account(models.Model):
     """A Facebook page or YouTube account owned by one workspace section.
@@ -120,6 +143,13 @@ class Project(models.Model):
     resolution_height = models.IntegerField(default=1080)
     framerate = models.IntegerField(default=30)
     output_path = models.CharField(max_length=500, blank=True, null=True)
+    # Optional manual cover image.  When empty the first segment image is used.
+    thumbnail = models.ImageField(
+        upload_to=project_thumbnail_path,
+        blank=True,
+        null=True,
+        max_length=500,
+    )
 
     # ── Per-project settings (copied from GlobalSettings on creation) ──
 
@@ -877,6 +907,15 @@ class AccountSettings(models.Model):
     bgm_ducking_db = models.FloatField(default=-12.0)
     bgm_echo_percent = models.FloatField(default=0.0)
     tts_gain_db = models.FloatField(default=0.0)
+
+    # ── Project list presentation ──
+    # Chosen on the Projects page and read back on every load so the table or
+    # tile layout survives navigation and browser restarts.
+    projects_view_mode = models.CharField(
+        max_length=10,
+        choices=PROJECT_VIEW_MODE_CHOICES,
+        default=PROJECT_VIEW_MODE_TABLE,
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)

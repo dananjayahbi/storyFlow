@@ -124,6 +124,31 @@ export async function updateProject(
   return response.data;
 }
 
+/** Upload a manual cover image for a project (multipart PATCH). */
+export async function uploadProjectThumbnail(
+  id: string,
+  file: File,
+): Promise<ProjectDetail> {
+  const formData = new FormData();
+  formData.append('thumbnail', file);
+  const { data } = await api.patch<ProjectDetail>(
+    `/api/projects/${id}/`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return data;
+}
+
+/** Remove the manual cover; the first segment image becomes the thumbnail. */
+export async function removeProjectThumbnail(
+  id: string,
+): Promise<ProjectDetail> {
+  const { data } = await api.patch<ProjectDetail>(`/api/projects/${id}/`, {
+    thumbnail: null,
+  });
+  return data;
+}
+
 export async function importProject(payload: ImportProjectRequest): Promise<ProjectDetail> {
   const response = await api.post<ProjectDetail>('/api/projects/import/', payload);
   return response.data;

@@ -51,6 +51,10 @@ the origin they tried and support retrying after a backend restart.
 
 ### 3.1 Projects and the timeline editor
 
+- The Projects page switches between **table** and **tile** layouts; the choice
+  is saved per account in `AccountSettings.projects_view_mode`. Both layouts
+  lead with a cover thumbnail: a manual upload when present, otherwise the
+  first segment image, otherwise an animated placeholder.
 - Create an empty project or import a script as JSON/text.
 - Each project contains ordered **segments** (blocks).
 - Each block has narration text, an image prompt, an optional uploaded image,
