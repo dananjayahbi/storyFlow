@@ -87,6 +87,7 @@ export function ProjectThumbnail({
             accept="image/*"
             className="sr-only"
             aria-label={`Upload thumbnail for ${project.title}`}
+            onClick={(event) => event.stopPropagation()}
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) onUpload?.(file);

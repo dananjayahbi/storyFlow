@@ -696,7 +696,9 @@ next visit and can differ per Facebook page / YouTube channel.
   uploaded thumbnail wins; otherwise the first segment image is used
   automatically.
 - Hover a thumbnail and use the camera button to upload a JPG/PNG cover, or the
-  trash button to remove it and fall back to the first segment image.
+  trash button to remove it and fall back to the first segment image. The
+  thumbnail controls stop click propagation, so using them in either layout
+  never opens the project by accident.
 - Projects with neither show an animated placeholder instead of an empty box.
 - Uploads use multipart `PATCH /api/projects/<id>/` with the `thumbnail` file;
   send `{"thumbnail": null}` to clear the manual cover.
