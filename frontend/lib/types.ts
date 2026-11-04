@@ -114,6 +114,8 @@ export interface Segment {
   project: string;
   sequence_index: number;
   text_content: string;
+  /** Optional spoken version generated for the TTS engine. */
+  tts_text?: string;
   image_prompt: string;
   image_file: string | null;
   audio_file: string | null;
@@ -281,6 +283,7 @@ export interface ImportProjectRequest {
 
 export interface UpdateSegmentPayload {
   text_content?: string;
+  tts_text?: string;
   image_prompt?: string;
   is_locked?: boolean;
   image_focus_x?: number;
@@ -310,7 +313,7 @@ export type AudioGenerationState =
   | { status: 'completed' }
   | { status: 'failed'; error: string };
 
-export type TaskStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type TaskStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 export interface TaskResponse {
   task_id: string;

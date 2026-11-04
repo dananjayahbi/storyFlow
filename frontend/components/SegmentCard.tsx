@@ -16,8 +16,8 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions, VolumeX, Download } from 'lucide-react';
-import { getSegmentAudioDownloadUrl } from '@/lib/api';
+import { Lock, LockOpen, Trash2, MoreVertical, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Captions, VolumeX, Download, Sparkles } from 'lucide-react';
+import { getSegmentAudioDownloadUrl, generateSegmentTtsScript } from '@/lib/api';
 import { SegmentTextEditor } from './SegmentTextEditor';
 import { ImageUploader } from './ImageUploader';
 import { ImagePromptDisplay } from './ImagePromptDisplay';
@@ -64,6 +64,42 @@ function SegmentCardComponent({
   // Local UI state
   const [isTextExpanded, setIsTextExpanded] = useState(false);
   const [isSubtitlePreviewOpen, setIsSubtitlePreviewOpen] = useState(false);
+  const [isTtsOpen, setIsTtsOpen] = useState(false);
+  const [ttsDraft, setTtsDraft] = useState(segment.tts_text ?? '');
+  const [isGeneratingTts, setIsGeneratingTts] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    setTtsDraft(segment.tts_text ?? '');
+  }, [segment.tts_text]);
+
+  const handleGenerateTts = useCallback(async () => {
+    setIsGeneratingTts(true);
+    setTtsError(null);
+    try {
+      const result = await generateSegmentTtsScript(segment.id);
+      setTtsDraft(result.tts_text);
+      setIsTtsOpen(true);
+      await onUpdate(segment.id, { tts_text: result.tts_text });
+    } catch (error) {
+      const message = (error as { response?: { data?: { error?: string } } })
+        ?.response?.data?.error;
+      setTtsError(message || 'Could not generate the TTS script.');
+    } finally {
+      setIsGeneratingTts(false);
+    }
+  }, [segment.id, onUpdate]);
+
+  const handleSaveTts = useCallback(() => {
+    const next = ttsDraft.trim();
+    if (next === (segment.tts_text ?? '').trim()) return;
+    void onUpdate(segment.id, { tts_text: next });
+  }, [ttsDraft, segment.tts_text, segment.id, onUpdate]);
+
+  const handleClearTts = useCallback(() => {
+    setTtsDraft('');
+    void onUpdate(segment.id, { tts_text: '' });
+  }, [segment.id, onUpdate]);
 
   const isLongText = segment.text_content.length > TEXT_TRUNCATION_THRESHOLD;
 
@@ -235,6 +271,72 @@ function SegmentCardComponent({
             )}
           </button>
         )}
+      </div>
+
+      {/* TTS-ready spoken script */}
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors duration-200"
+            onClick={() => setIsTtsOpen(!isTtsOpen)}
+          >
+            <Sparkles className="h-3 w-3" />
+            <span>TTS script</span>
+            {segment.tts_text ? (
+              <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                ready
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                not generated
+              </Badge>
+            )}
+            {isTtsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={() => void handleGenerateTts()}
+            disabled={isGeneratingTts || segment.is_locked || isGenerating}
+          >
+            {isGeneratingTts ? (
+              <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1 h-3 w-3" />
+            )}
+            {segment.tts_text ? 'Regenerate' : 'Generate'}
+          </Button>
+          {segment.tts_text && (
+            <button
+              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+              onClick={handleClearTts}
+              disabled={segment.is_locked || isGenerating}
+            >
+              Use original
+            </button>
+          )}
+        </div>
+        {ttsError && (
+          <p className="mt-1 text-[11px] text-destructive">{ttsError}</p>
+        )}
+        <div
+          className={`overflow-hidden transition-all duration-200 ease-in-out ${
+            isTtsOpen ? 'max-h-[22rem] mt-2' : 'max-h-0'
+          }`}
+        >
+          <textarea
+            className="min-h-[96px] w-full resize-y rounded-md border bg-background px-2 py-1.5 text-xs font-mono leading-relaxed disabled:opacity-60"
+            value={ttsDraft}
+            onChange={(event) => setTtsDraft(event.target.value)}
+            onBlur={handleSaveTts}
+            placeholder="Generate this block to produce the spoken version used by the TTS engine. Subtitles keep using the original text."
+            disabled={segment.is_locked || isGenerating || isGeneratingTts}
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Spoken version only — subtitles continue to use the original script.
+          </p>
+        </div>
       </div>
 
       {/* Inline Error Display */}

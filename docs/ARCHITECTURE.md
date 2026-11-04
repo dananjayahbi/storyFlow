@@ -639,6 +639,8 @@ All project, segment and gallery endpoints additionally accept
 | `DELETE` | `/api/segments/<id>/remove-image/` | Remove segment image |
 | `DELETE` | `/api/segments/<id>/remove-audio/` | Remove segment audio |
 | `POST` | `/api/segments/<id>/generate-audio/` | Generate TTS audio for single segment |
+| `POST` | `/api/segments/<id>/generate-tts-script/` | Rewrite one block into a TTS-ready spoken script |
+| `POST` | `/api/projects/<id>/generate-all-tts-scripts/` | Rewrite every block into TTS-ready scripts (background task) |
 
 #### Settings Endpoints
 
@@ -1058,6 +1060,37 @@ audio*.
 **Setup:** `scripts/setup_qwen_tts.ps1` copies the existing TTS-test venv
 (~5 GB of torch/CUDA wheels) instead of re-downloading. `QWEN_TTS_PYTHON` can
 override the interpreter path.
+
+---
+
+### 7.4.2 TTS-ready spoken scripts (Issue #27)
+
+**Files:**
+
+| File | Responsibility |
+| ---- | -------------- |
+| `core_engine/tts_script.py` | Prompt rules, deterministic normaliser, LLM rewrite |
+| `api/models.py` | `Segment.tts_text` stores the optional spoken version |
+| `api/views.py` | `generate-tts-script` (one block) and `generate-all-tts-scripts` (background batch) |
+| `frontend/components/SegmentCard.tsx` | Per-block generate/edit UI |
+
+A project still starts with a single script. After import, each block can be
+rewritten on demand into `tts_text` using the same Script Craft model configured
+in **Settings → AI Model**. The original `text_content` is never modified, so
+subtitles keep their exact spelling and punctuation while the voice engine gets
+a normalised spoken version.
+
+The rewrite prompt enforces six groups of rules: strip non-verbal tags and
+emojis, normalise years/dates/quantities/decimals, expand acronyms and
+abbreviations, convert exotic punctuation into comma/period breath cues, add
+phonetic hints for ambiguous words, and preserve 1:1 semantic alignment.
+`normalize_tts_text()` is a deterministic safety net used for legacy blocks and
+as post-processing after every LLM reply; it is idempotent and also expands
+years, ordinals, currency, percentages, fractions and common units.
+
+Both single and batch generation are non-destructive: locked blocks are
+skipped, and TTS synthesis automatically uses `tts_text` when present, falling
+back to the cleaned subtitle text otherwise.
 
 ---
 

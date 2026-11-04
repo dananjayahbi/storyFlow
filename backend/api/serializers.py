@@ -230,7 +230,7 @@ class SegmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Segment
         fields = [
-            'id', 'project', 'sequence_index', 'text_content',
+            'id', 'project', 'sequence_index', 'text_content', 'tts_text',
             'image_prompt', 'image_file', 'audio_file',
             'audio_duration', 'audio_engine', 'is_locked',
             'image_focus_x', 'image_focus_y', 'image_focus_area',

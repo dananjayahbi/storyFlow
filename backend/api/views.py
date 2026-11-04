@@ -490,6 +490,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         # 7. Define batch task function
         def batch_task_fn():
             from core_engine.tts import synthesize
+            from core_engine.tts_script import prepare_tts_text
             from core_engine.tts_wrapper import (
                 construct_audio_path,
                 construct_audio_url,
@@ -513,8 +514,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     seg = SegmentModel.objects.get(pk=seg_id)
 
                     output_path = str(construct_audio_path(project_id, seg_id))
+                    spoken_text = prepare_tts_text(
+                        seg.tts_text or seg.text_content
+                    )
                     result = synthesize(
-                        seg.text_content,
+                        spoken_text,
                         output_path,
                         **tts_options,
                     )
@@ -558,6 +562,105 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     f'Audio generation started for {len(segment_ids)} segments. '
                     f'Skipped: {skipped_locked} locked, {skipped_existing} existing, '
                     f'{skipped_empty} empty.'
+                ),
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='generate-all-tts-scripts')
+    def generate_all_tts_scripts(self, request, pk=None):
+        """Rewrite every block into a TTS-ready script in one background job.
+
+        The configured Script Craft model is used block by block, so a long
+        project does not block the HTTP request.  Poll
+        ``/api/tasks/<task_id>/status/`` for progress and refetch the project
+        when the task completes.
+        """
+        project = self.get_object()
+
+        try:
+            config = _resolve_ai_client_config(project.account)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        only_missing = request.data.get('only_missing', True)
+        segments = project.segments.order_by('sequence_index')
+        segment_ids = []
+        skipped_empty = 0
+        skipped_existing = 0
+        for segment in segments:
+            if not segment.text_content or not segment.text_content.strip():
+                skipped_empty += 1
+                continue
+            if segment.is_locked:
+                skipped_empty += 1
+                continue
+            if only_missing and segment.tts_text.strip():
+                skipped_existing += 1
+                continue
+            segment_ids.append(str(segment.id))
+
+        if not segment_ids:
+            return Response({
+                'message': 'No blocks need a TTS script.',
+                'total_segments': project.segments.count(),
+                'segments_to_process': 0,
+                'skipped_empty': skipped_empty,
+                'skipped_existing': skipped_existing,
+            })
+
+        project_id = str(project.id)
+        task_id = f"tts_script_{project_id}_{uuid_mod.uuid4().hex[:8]}"
+        task_manager = get_task_manager()
+
+        def task_fn():
+            from core_engine import tts_script
+            from api.models import Segment as SegmentModel
+
+            for idx, seg_id in enumerate(segment_ids):
+                if task_manager.is_cancelled(task_id):
+                    break
+                task_manager.update_task_progress(
+                    task_id,
+                    current=idx + 1,
+                    total=len(segment_ids),
+                    current_segment_id=seg_id,
+                )
+                try:
+                    segment = SegmentModel.objects.get(pk=seg_id)
+                    rewritten = tts_script.rewrite_for_tts(
+                        segment.text_content,
+                        model=config['model'],
+                        base_url=config['base_url'],
+                        api_key=config['api_key'],
+                        temperature=0.2,
+                    )
+                    segment.tts_text = rewritten
+                    segment.save(update_fields=['tts_text'])
+                    task_manager.add_completed_segment(task_id, seg_id, {
+                        'tts_text': rewritten,
+                    })
+                except Exception as exc:  # noqa: BLE001 - continue other blocks
+                    logger.warning(
+                        'TTS script rewrite failed for segment %s: %s',
+                        seg_id, exc,
+                    )
+                    task_manager.add_error(task_id, seg_id, str(exc))
+
+        task_manager.submit_task(task_fn, task_id=task_id)
+
+        return Response(
+            {
+                'task_id': task_id,
+                'project_id': project_id,
+                'status': 'PENDING',
+                'model': config['model'],
+                'total_segments': project.segments.count(),
+                'segments_to_process': len(segment_ids),
+                'skipped_empty': skipped_empty,
+                'skipped_existing': skipped_existing,
+                'message': (
+                    f'TTS script generation started for {len(segment_ids)} blocks.'
                 ),
             },
             status=status.HTTP_202_ACCEPTED,
@@ -1099,7 +1202,9 @@ class SegmentViewSet(viewsets.ModelViewSet):
         # 5. Snapshot engine settings as plain values for the worker thread
         tts_options = build_tts_options(project, engine, voice_reference)
         section = project.section
-        text_content = segment.text_content
+        from core_engine.tts_script import prepare_tts_text
+
+        spoken_text = prepare_tts_text(segment.tts_text or segment.text_content)
 
         # 6. Define background task
         segment_id = str(segment.id)
@@ -1113,7 +1218,7 @@ class SegmentViewSet(viewsets.ModelViewSet):
             )
 
             output_path = str(construct_audio_path(project_id, segment_id))
-            result = synthesize(text_content, output_path, **tts_options)
+            result = synthesize(spoken_text, output_path, **tts_options)
 
             if result["success"]:
                 seg = Segment.objects.get(pk=segment_id)
@@ -1143,6 +1248,56 @@ class SegmentViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_202_ACCEPTED,
         )
+
+    @action(detail=True, methods=['post'], url_path='generate-tts-script')
+    def generate_tts_script(self, request, pk=None):
+        """Rewrite one block into a TTS-ready spoken script.
+
+        The original ``text_content`` is never changed; the model's output is
+        stored in ``tts_text`` and used by the next audio generation.
+        """
+        segment = self.get_object()
+
+        if segment.is_locked:
+            return Response(
+                {'error': 'Segment is locked. Unlock it before editing its script.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if not segment.text_content or not segment.text_content.strip():
+            return Response(
+                {'error': 'Segment has no narration to rewrite.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            config = _resolve_ai_client_config(segment.project.account)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        from core_engine import tts_script
+
+        try:
+            tts_text = tts_script.rewrite_for_tts(
+                segment.text_content,
+                model=config['model'],
+                base_url=config['base_url'],
+                api_key=config['api_key'],
+                temperature=0.2,
+            )
+        except Exception as exc:  # noqa: BLE001 - surface a useful 502
+            logger.warning('TTS script rewrite failed for %s: %s', segment.id, exc)
+            return Response(
+                {'error': str(exc) or 'The AI model could not rewrite this block.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        segment.tts_text = tts_text
+        segment.save(update_fields=['tts_text'])
+        return Response({
+            'id': str(segment.id),
+            'tts_text': tts_text,
+            'model': config['model'],
+        })
 
     def perform_destroy(self, instance):
         """Delete segment with media file cleanup.
@@ -1903,6 +2058,26 @@ def _ai_config_payload(account):
         'search_provider': gs.search_provider,
         'search_brave_api_key': gs.search_brave_api_key,
         'search_region': gs.search_region,
+    }
+
+
+def _resolve_ai_client_config(account):
+    """Return the effective chat-completion config for *account*.
+
+    Raises ``ValueError`` with a user-facing message when no model is set.
+    """
+    gs = GlobalSettings.load()
+    model = (account.ai_model if account is not None else '') or gs.ai_default_model
+    if not model:
+        raise ValueError(
+            'No AI model is configured. Open Settings → AI Model, choose a '
+            'model and save it for this account.'
+        )
+    return {
+        'model': model,
+        'base_url': gs.ai_base_url,
+        'api_key': gs.ai_api_key,
+        'temperature': gs.ai_temperature,
     }
 
 

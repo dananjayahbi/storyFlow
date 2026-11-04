@@ -439,6 +439,7 @@ def _update(manager, task_id: str, current: int, total: int, phase: str, percent
 def _render_base_video(project: Project, manager, task_id: str) -> dict:
     """Run TTS for every block, then render the un-mixed base video."""
     from core_engine.tts import synthesize
+    from core_engine.tts_script import prepare_tts_text
     from core_engine.tts_wrapper import construct_audio_path
     from core_engine.video_renderer import render_project
 
@@ -459,7 +460,7 @@ def _render_base_video(project: Project, manager, task_id: str) -> dict:
         )
         output_path = str(construct_audio_path(project.id, segment.id))
         result = synthesize(
-            segment.text_content,
+            prepare_tts_text(segment.tts_text or segment.text_content),
             output_path,
             **options,
         )

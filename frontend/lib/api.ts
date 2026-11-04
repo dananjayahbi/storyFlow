@@ -281,6 +281,38 @@ export async function generateAllAudio(
   return response.data;
 }
 
+// ── TTS-ready script generation ──
+
+export async function generateSegmentTtsScript(
+  segmentId: string
+): Promise<{ id: string; tts_text: string; model: string }> {
+  const response = await api.post<{ id: string; tts_text: string; model: string }>(
+    `/api/segments/${segmentId}/generate-tts-script/`
+  );
+  return response.data;
+}
+
+export async function generateAllTtsScripts(
+  projectId: string,
+  options: { only_missing?: boolean } = {}
+): Promise<{
+  task_id?: string;
+  project_id?: string;
+  status?: string;
+  model?: string;
+  total_segments: number;
+  segments_to_process: number;
+  skipped_empty?: number;
+  skipped_existing?: number;
+  message: string;
+}> {
+  const response = await api.post(
+    `/api/projects/${projectId}/generate-all-tts-scripts/`,
+    { only_missing: options.only_missing ?? true }
+  );
+  return response.data;
+}
+
 export async function getTaskStatus(
   taskId: string
 ): Promise<TaskStatusResponse> {

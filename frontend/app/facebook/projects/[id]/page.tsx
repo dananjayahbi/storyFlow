@@ -24,6 +24,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { generateAllTtsScripts, pollTaskStatus } from '@/lib/api';
+import { toast } from 'sonner';
 
 // ── Sidebar collapsed state persistence ──
 const EDITOR_SIDEBAR_KEY = 'storyflow-editor-sidebar-collapsed';
@@ -85,6 +87,7 @@ export default function TimelineEditorPage() {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const [isGeneratingTtsScripts, setIsGeneratingTtsScripts] = useState(false);
 
   const startRenaming = () => {
     if (!project) return;
@@ -103,6 +106,40 @@ export default function TimelineEditorPage() {
       setIsRenaming(false);
     } catch {
       setIsRenaming(false);
+    }
+  };
+
+  const handleGenerateAllTtsScripts = async () => {
+    setIsGeneratingTtsScripts(true);
+    try {
+      const result = await generateAllTtsScripts(id);
+      if (!result.task_id) {
+        toast.info(result.message || 'No blocks need a TTS script.');
+        return;
+      }
+      toast.info(`Rewriting ${result.segments_to_process} TTS scripts…`);
+      const final = await pollTaskStatus(result.task_id, () => {});
+      if (final.status === 'COMPLETED') {
+        const failed = final.errors?.length ?? 0;
+        if (failed > 0) {
+          toast.warning(
+            `TTS scripts updated with ${failed} block${failed === 1 ? '' : 's'} failing.`
+          );
+        } else {
+          toast.success('TTS scripts generated for every block.');
+        }
+        await fetchProject(id);
+      } else if (final.status === 'CANCELLED') {
+        toast.info('TTS script generation cancelled.');
+      } else {
+        toast.error('TTS script generation failed.');
+      }
+    } catch (error) {
+      const message = (error as { response?: { data?: { error?: string } } })
+        ?.response?.data?.error;
+      toast.error(message || 'Could not generate the TTS scripts.');
+    } finally {
+      setIsGeneratingTtsScripts(false);
     }
   };
 
@@ -631,6 +668,21 @@ export default function TimelineEditorPage() {
                     <X className="h-3.5 w-3.5" />
                   </Button>
                 )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  onClick={() => void handleGenerateAllTtsScripts()}
+                  disabled={isGeneratingTtsScripts || segments.length === 0}
+                  title="Rewrite every block into a TTS-ready spoken script using the configured AI model"
+                >
+                  {isGeneratingTtsScripts ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  {isGeneratingTtsScripts ? 'Writing TTS…' : 'Generate TTS Scripts'}
+                </Button>
                 {project?.bgm_enabled && (
                   <>
                     <div className="mx-1 hidden h-5 w-px bg-border sm:block" />

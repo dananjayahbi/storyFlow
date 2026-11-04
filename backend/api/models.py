@@ -380,6 +380,11 @@ class Segment(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='segments')
     sequence_index = models.IntegerField(default=0)
     text_content = models.TextField(blank=True, default='')
+    # Spoken version of ``text_content``.  Generated on demand by the
+    # configured Script Craft LLM and normalised by core_engine.tts_script.
+    # Subtitles keep using ``text_content`` so the on-screen reading version
+    # never loses spelling, punctuation or proper nouns.
+    tts_text = models.TextField(blank=True, default='')
     image_prompt = models.TextField(blank=True, default='')
     # 500 chars: account UUID + project UUID + section + filename can exceed
     # Django's 100-char default and would otherwise raise SuspiciousFileOperation.
