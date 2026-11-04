@@ -1134,7 +1134,7 @@ Generates timed subtitle overlays synchronized with narration audio.
 
 **Pipeline:**
 1. **Chunk text** → Split at sentence/clause boundaries (`.!?,;:—…`), max 6 words per chunk, min 4 words (orphan prevention)
-2. **Calculate timing** → Proportional to character count (better speech-duration proxy), enforced minimum 0.5s per chunk, normalized to exactly fill total duration
+2. **Calculate timing** → Prefer measured sentence spans from `Segment.audio_timings`; otherwise proportional to character count, with a 0.5s minimum per chunk, normalized to exactly fill the audio duration
 3. **Generate clips** → Create MoviePy `TextClip` objects with styling (font, color, stroke, position)
 
 **Styling Defaults:**
@@ -1143,6 +1143,33 @@ Generates timed subtitle overlays synchronized with narration audio.
 - Stroke: 2px black outline
 - Vertical margin: 8% of frame height
 - Max height: 40% of frame (downscaled if exceeded)
+
+---
+
+### 7.5.1 Audio-accurate subtitle alignment (Issue #29)
+
+**File:** `core_engine/subtitle_sync.py`
+
+Proportional word timing drifts when the voice pauses, slows down, or reads a
+normalised TTS script. Alignment is now measured per segment:
+
+1. `split_sentences()` splits the subtitle text and understands common
+   abbreviations (`Dr.`, `e.g.`, ...).
+2. `detect_silences()` runs a tiny RMS VAD over the generated WAV
+   (20 ms frames, 110 ms minimum pause). No ASR model or extra install.
+3. `build_audio_timings()` snaps each expected sentence boundary to the
+   nearest real pause and stores `{version, method, total, sentences[]}` in
+   `Segment.audio_timings`.
+4. `chunk_text_with_sentence_timings()` distributes each sentence's measured
+   span across its subtitle chunks by character weight.
+5. `chunk_and_time()` is used by both the fast compositor and MoviePy path;
+   it falls back to proportional timing when timings are missing or the
+   subtitle text changed after the audio was generated.
+
+Because the timings live on the segment, rendering never re-analyses audio.
+The expected boundaries are computed from the subtitle text (the version the
+viewer reads), while the pauses come from the audio, so a normalised TTS script
+with expanded numbers still aligns.
 
 ---
 

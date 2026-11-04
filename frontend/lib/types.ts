@@ -120,6 +120,18 @@ export interface Segment {
   image_file: string | null;
   audio_file: string | null;
   audio_duration: number | null;
+  /** Measured sentence spans used for audio-accurate subtitles. */
+  audio_timings?: {
+    version?: number;
+    method?: string;
+    total?: number;
+    sentences?: Array<{
+      text: string;
+      start: number;
+      duration: number;
+      end: number;
+    }>;
+  } | null;
   /** Which engine produced the current audio ('kokoro' | 'qwen' | ''). */
   audio_engine?: 'kokoro' | 'qwen' | '';
   is_locked: boolean;

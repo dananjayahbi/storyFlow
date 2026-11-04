@@ -232,13 +232,14 @@ class SegmentSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'project', 'sequence_index', 'text_content', 'tts_text',
             'image_prompt', 'image_file', 'audio_file',
-            'audio_duration', 'audio_engine', 'is_locked',
+            'audio_duration', 'audio_engine', 'audio_timings', 'is_locked',
             'image_focus_x', 'image_focus_y', 'image_focus_area',
             'image_focus_areas',
         ]
         read_only_fields = [
             'id', 'project', 'sequence_index',
             'image_file', 'audio_file', 'audio_duration', 'audio_engine',
+            'audio_timings',
         ]
 
     def validate_image_focus_x(self, value):

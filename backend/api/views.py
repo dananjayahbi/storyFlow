@@ -491,6 +491,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         def batch_task_fn():
             from core_engine.tts import synthesize
             from core_engine.tts_script import prepare_tts_text
+            from core_engine import subtitle_sync
             from core_engine.tts_wrapper import (
                 construct_audio_path,
                 construct_audio_url,
@@ -530,8 +531,12 @@ class ProjectViewSet(viewsets.ModelViewSet):
                         )
                         seg.audio_duration = result["duration"]
                         seg.audio_engine = result.get("engine", engine)
+                        seg.audio_timings = subtitle_sync.build_audio_timings(
+                            seg.text_content, output_path, result["duration"]
+                        )
                         seg.save(update_fields=[
                             "audio_file", "audio_duration", "audio_engine",
+                            "audio_timings",
                         ])
 
                         task_manager.add_completed_segment(task_id, seg_id, {
@@ -1141,7 +1146,8 @@ class SegmentViewSet(viewsets.ModelViewSet):
         # 4. Clear model fields
         segment.audio_file = None
         segment.audio_duration = None
-        segment.save(update_fields=['audio_file', 'audio_duration'])
+        segment.audio_timings = {}
+        segment.save(update_fields=['audio_file', 'audio_duration', 'audio_timings'])
 
         return Response({
             'id': str(segment.id),
@@ -1212,6 +1218,7 @@ class SegmentViewSet(viewsets.ModelViewSet):
 
         def task_fn():
             from core_engine.tts import synthesize
+            from core_engine import subtitle_sync
             from core_engine.tts_wrapper import (
                 construct_audio_path,
                 construct_audio_url,
@@ -1227,8 +1234,12 @@ class SegmentViewSet(viewsets.ModelViewSet):
                 )
                 seg.audio_duration = result["duration"]
                 seg.audio_engine = result.get("engine", engine)
+                seg.audio_timings = subtitle_sync.build_audio_timings(
+                    seg.text_content, output_path, result["duration"]
+                )
                 seg.save(update_fields=[
                     "audio_file", "audio_duration", "audio_engine",
+                    "audio_timings",
                 ])
             else:
                 raise Exception(result["error"])

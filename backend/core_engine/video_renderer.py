@@ -917,6 +917,7 @@ def render_project(
                 "image_path": image_path,
                 "audio_duration": audio_duration,
                 "text_content": text_content,
+                "audio_timings": getattr(segment, "audio_timings", None) or {},
                 "sequence_index": segment.sequence_index,
                 "focus_x": getattr(segment, "image_focus_x", 0.5),
                 "focus_y": getattr(segment, "image_focus_y", 0.5),

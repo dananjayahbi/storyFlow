@@ -217,6 +217,30 @@ def calculate_subtitle_timing(
     return timings
 
 
+def chunk_and_time(
+    text: str,
+    total_duration: float,
+    audio_timings: dict | None = None,
+) -> tuple[list[str], list[tuple[float, float]]]:
+    """Return subtitle chunks and timings, preferring measured audio spans.
+
+    ``audio_timings`` is the JSON stored on ``Segment.audio_timings`` by
+    :mod:`core_engine.subtitle_sync`.  When it is absent (legacy audio) or the
+    subtitle text no longer has the same sentence count, proportional timing is
+    used as a safe fallback.
+    """
+    from core_engine.subtitle_sync import chunk_text_with_sentence_timings
+
+    measured = chunk_text_with_sentence_timings(
+        text, total_duration, audio_timings
+    )
+    if measured is not None:
+        return measured
+
+    chunks = chunk_text(text)
+    return chunks, calculate_subtitle_timing(chunks, total_duration)
+
+
 def generate_subtitle_clips(
     chunks: list[str],
     timings: list[tuple[float, float]],
@@ -384,6 +408,7 @@ def create_subtitles_for_segment(
     font_size: int | None = None,
     position: str = "bottom",
     y_position: int | None = None,
+    audio_timings: dict | None = None,
 ) -> list[TextClip]:
     """Generate subtitle clips for a single video segment.
 
@@ -415,6 +440,10 @@ def create_subtitles_for_segment(
         Manual vertical position override — top edge of the subtitle
         block in pixels from the top of the frame.
         When not ``None``, overrides the *position* keyword.
+    audio_timings:
+        Optional measured sentence spans (``Segment.audio_timings``).
+        When supplied, subtitles follow the real pauses in the narration
+        instead of proportional word timing.
 
     Returns
     -------
@@ -426,11 +455,10 @@ def create_subtitles_for_segment(
         logger.debug("Empty text — returning no subtitles.")
         return []
 
-    # Step 1 — chunk
-    chunks = chunk_text(text_content)
-
-    # Step 2 — timing
-    timings = calculate_subtitle_timing(chunks, audio_duration)
+    # Steps 1–2 — chunk and time (measured spans when available)
+    chunks, timings = chunk_and_time(
+        text_content, audio_duration, audio_timings
+    )
 
     # Step 3 — clips
     clips = generate_subtitle_clips(

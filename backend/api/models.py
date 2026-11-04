@@ -395,6 +395,10 @@ class Segment(models.Model):
         upload_to=segment_audio_path, blank=True, null=True, max_length=500,
     )
     audio_duration = models.FloatField(null=True, blank=True)
+    # Measured sentence spans for the current audio file (Issue #29).  The
+    # renderer uses these instead of proportional word counting so subtitles
+    # follow real pauses in the narration.
+    audio_timings = models.JSONField(default=dict, blank=True)
     # Which engine produced the current audio ("kokoro" or "qwen"), so the UI
     # can show whether a segment is still on the fast draft voice.
     audio_engine = models.CharField(max_length=20, blank=True, default='')

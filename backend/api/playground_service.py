@@ -440,6 +440,7 @@ def _render_base_video(project: Project, manager, task_id: str) -> dict:
     """Run TTS for every block, then render the un-mixed base video."""
     from core_engine.tts import synthesize
     from core_engine.tts_script import prepare_tts_text
+    from core_engine import subtitle_sync
     from core_engine.tts_wrapper import construct_audio_path
     from core_engine.video_renderer import render_project
 
@@ -475,8 +476,13 @@ def _render_base_video(project: Project, manager, task_id: str) -> dict:
         )
         segment.audio_duration = result.get('duration')
         segment.audio_engine = result.get('engine', project.tts_engine)
+        segment.audio_timings = subtitle_sync.build_audio_timings(
+            segment.text_content,
+            output_path,
+            result.get('duration') or 0,
+        )
         segment.save(update_fields=[
-            'audio_file', 'audio_duration', 'audio_engine',
+            'audio_file', 'audio_duration', 'audio_engine', 'audio_timings',
         ])
 
     _check_cancelled(manager, task_id)

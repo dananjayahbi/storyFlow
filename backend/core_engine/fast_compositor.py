@@ -540,7 +540,7 @@ def fast_render_segments(
         interpolate_position,
         normalise_focus_areas,
     )
-    from core_engine.subtitle_engine import chunk_text, calculate_subtitle_timing
+    from core_engine.subtitle_engine import chunk_and_time
 
     width, height = resolution
     total_segments = len(segment_data)
@@ -576,8 +576,11 @@ def fast_render_segments(
         # Pre-render subtitles for this segment
         sub_overlays: List[OverlaySlice] = []
         if subtitle_settings.get("enabled") and text_content.strip():
-            chunks = chunk_text(text_content)
-            timings = calculate_subtitle_timing(chunks, audio_duration)
+            chunks, timings = chunk_and_time(
+                text_content,
+                audio_duration,
+                seg.get("audio_timings"),
+            )
             sub_overlays = pre_render_subtitles(
                 chunks=chunks,
                 timings=timings,
