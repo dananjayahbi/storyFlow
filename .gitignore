@@ -29,6 +29,7 @@ backend/media/projects/
 backend/media/outros/
 backend/media/logos/
 /models
+backend/Storage
 
 # ========================
 # Node.js
