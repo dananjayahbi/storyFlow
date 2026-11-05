@@ -79,11 +79,12 @@ backend restart.
   (`image_focus_x` / `image_focus_y`) is used by the renderer to cover-crop the
   source before Ken Burns pans and zooms inside that frame. All seven camera
   presets move, so the first block animates like every other block. A block
-  can also mark up to six subject rectangles (`image_focus_areas`); the camera
-  zooms out enough to fit the largest one and travels through each area's
-  centre over the clip, so every highlighted subject is centred dynamically in
-  turn. A single area gets a gentle pan around its centre. Blocks with no
-  marked area keep the default full-frame path.
+  can also mark **one** subject rectangle (`image_focus_areas`); the renderer
+  keeps it inside the frame for the whole animation, zooms out if needed, and
+  measures the free space around it to choose a comfortable pan, slow zoom or
+  combined move. Large subjects get a slower, shorter move (or a zoom) instead
+  of a rushed sweep. Blocks with no marked area keep the default full-frame
+  path; legacy rows with several rectangles are rendered using the first one.
 - The editor supports adding, deleting, reordering, renaming and locking blocks.
 - The left sidebar has one **Settings** panel. The old Details tab was removed;
   the Story Template JSON reference now lives on the Settings page.

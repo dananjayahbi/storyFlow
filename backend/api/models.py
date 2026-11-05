@@ -476,13 +476,13 @@ class Segment(models.Model):
     image_focus_x = models.FloatField(default=0.5)
     image_focus_y = models.FloatField(default=0.5)
     # Optional rectangle (normalised x/y/w/h inside the rendered frame) that
-    # marks the subject.  Ken Burns keeps this area in view and centres the
-    # camera path around it.  Retained for older clients; new edits write the
-    # list below and mirror its first entry here.
+    # marks the subject.  Ken Burns keeps this area in view and adapts the
+    # pan/zoom speed to the free space around it.  Retained for older clients;
+    # new edits write the list below and mirror its first entry here.
     image_focus_area = models.JSONField(null=True, blank=True, default=None)
-    # Optional ordered list of subject rectangles.  With more than one area
-    # the Ken Burns camera travels through their centres over the clip so the
-    # highlighted subjects are centred dynamically instead of blindly.
+    # List form kept for API/backwards compatibility.  Only one subject
+    # rectangle is supported per image; legacy rows with several entries are
+    # rendered using the first one without rewriting stored project data.
     image_focus_areas = models.JSONField(null=True, blank=True, default=None)
 
     def __str__(self):

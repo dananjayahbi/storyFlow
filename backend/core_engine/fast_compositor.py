@@ -508,7 +508,8 @@ def fast_render_segments(
         segment_data: List of dicts with keys: ``image_path``,
             ``audio_duration``, ``text_content``, ``sequence_index`` and
             optional ``focus_x``/``focus_y`` (0..1 frame position) plus
-            ``focus_area`` (normalised subject rectangle).
+            ``focus_area`` / ``focus_areas`` (one normalised subject
+            rectangle; legacy lists use their first entry).
         output_path: Path for the output MP4 file.
         resolution: ``(width, height)`` of the output video.
         fps: Frames per second.
@@ -528,17 +529,10 @@ def fast_render_segments(
         dict with ``frames_rendered``, ``render_time``, ``avg_ms_per_frame``.
     """
     from core_engine.ken_burns import (
-        apply_ken_burns,
         load_and_prepare_image,
-        calculate_crop_dimensions,
-        calculate_focus_crop_dimensions,
-        get_focus_camera_path,
-        get_focus_sweep_coords,
-        get_pan_direction,
-        get_start_end_coords,
-        interpolate_focus_path,
-        interpolate_position,
         normalise_focus_areas,
+        plan_ken_burns_motion,
+        sample_ken_burns_motion,
     )
     from core_engine.subtitle_engine import chunk_and_time
 
@@ -592,9 +586,11 @@ def fast_render_segments(
                 y_position=subtitle_settings.get("y_position"),
             )
 
-        # Prepare Ken Burns frame generator.  The source is cover-cropped
+        # Prepare the Ken Burns frame generator.  The source is cover-cropped
         # to the render aspect ratio at the user-selected focus first, so
-        # Ken Burns only pans inside the frame visible in the editor.
+        # Ken Burns only moves inside the frame visible in the editor.  The
+        # motion planner keeps the single highlighted rectangle visible and
+        # adapts its speed to the free space around it.
         source_image = load_and_prepare_image(
             seg["image_path"], resolution, zoom_intensity,
             seg.get("focus_x", 0.5), seg.get("focus_y", 0.5),
@@ -603,43 +599,20 @@ def fast_render_segments(
         focus_areas = normalise_focus_areas(
             seg.get("focus_areas")
         ) or normalise_focus_areas(seg.get("focus_area"))
-        if focus_areas:
-            crop_w, crop_h = calculate_focus_crop_dimensions(
-                width, height, zoom_intensity, focus_areas, src_w, src_h,
-            )
-        else:
-            crop_w, crop_h = calculate_crop_dimensions(
-                width, height, zoom_intensity,
-            )
-        camera_path = (
-            get_focus_camera_path(
-                focus_areas, src_w, src_h, crop_w, crop_h,
-            )
-            if len(focus_areas) >= 2
-            else []
+        motion_plan = plan_ken_burns_motion(
+            segment_index=seg["sequence_index"],
+            duration=visual_duration,
+            source_width=src_w,
+            source_height=src_h,
+            output_width=width,
+            output_height=height,
+            zoom_intensity=zoom_intensity,
+            focus_area=focus_areas[0] if focus_areas else None,
         )
-        if camera_path:
-            start_coords = camera_path[0]
-            end_coords = camera_path[-1]
-        elif focus_areas:
-            start_name, end_name = get_pan_direction(seg["sequence_index"])
-            start_coords, end_coords = get_focus_sweep_coords(
-                start_name, end_name, focus_areas[0],
-                src_w, src_h, crop_w, crop_h,
-            )
-        else:
-            start_name, end_name = get_pan_direction(seg["sequence_index"])
-            start_coords, end_coords = get_start_end_coords(
-                start_name, end_name, src_w, src_h, crop_w, crop_h,
-            )
 
         segments_info.append({
             "source_image": source_image,
-            "crop_w": crop_w,
-            "crop_h": crop_h,
-            "start_coords": start_coords,
-            "end_coords": end_coords,
-            "camera_path": camera_path,
+            "motion_plan": motion_plan,
             "visual_duration": visual_duration,
             "subtitle_overlays": sub_overlays,
         })
@@ -737,30 +710,16 @@ def fast_render_segments(
                     if frames_until_end < fade_frames:
                         weight = min(weight, frames_until_end / fade_frames)
 
-            # Generate Ken Burns frame (multi-area focus path or legacy pan)
-            if si.get("camera_path"):
-                interp_x, interp_y = interpolate_focus_path(
-                    si["camera_path"], t_local, seg_duration,
-                )
-            else:
-                interp_x, interp_y = interpolate_position(
-                    si["start_coords"], si["end_coords"], t_local,
-                    seg_duration,
-                )
-            x = int(round(interp_x))
-            y = int(round(interp_y))
-            src_h, src_w = si["source_image"].shape[:2]
-            x = max(0, min(x, src_w - si["crop_w"]))
-            y = max(0, min(y, src_h - si["crop_h"]))
-
+            # Generate Ken Burns frame from the subject-aware motion plan.
+            x, y, crop_w, crop_h = sample_ken_burns_motion(
+                si["motion_plan"], t_local, seg_duration,
+            )
             crop = si["source_image"][
-                y: y + si["crop_h"],
-                x: x + si["crop_w"],
+                y: y + crop_h,
+                x: x + crop_w,
             ]
 
-            is_downscale = (
-                si["crop_w"] > width or si["crop_h"] > height
-            )
+            is_downscale = crop_w > width or crop_h > height
             interp = cv2.INTER_AREA if is_downscale else cv2.INTER_LINEAR
             seg_frame = cv2.resize(
                 crop, (width, height), interpolation=interp,

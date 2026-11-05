@@ -175,9 +175,9 @@ export interface Segment {
   image_focus_x?: number;
   /** Normalised vertical frame position inside the image (0..1). */
   image_focus_y?: number;
-  /** Optional subject rectangle used to centre the Ken Burns camera. */
+  /** Optional subject rectangle kept inside the Ken Burns frame. */
   image_focus_area?: ImageFocusArea | null;
-  /** Ordered subject areas visited by the Ken Burns camera (2+ = dynamic). */
+  /** List form for compatibility; only the first (single) area is used. */
   image_focus_areas?: ImageFocusArea[] | null;
 }
 

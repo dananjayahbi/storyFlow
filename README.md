@@ -175,17 +175,19 @@ block is rendered as a static still. Changing the resolution in
 the editor always matches the next render.
 
 Each block also has a **focus-area** tool. After aligning the image, press the
-scan button and drag a rectangle around a subject. Repeat to mark up to six
-areas; the ordered list is stored as `image_focus_areas`
-(`[{x, y, w, h}, …]`, normalised to the frame) and the legacy single rectangle
-is mirrored in `image_focus_area` for older clients. The renderer zooms out
-just enough to fit the largest marked subject and then moves the camera
-through each area's centre over the clip, so every highlighted subject is
-centred dynamically in turn. With a single area the pan stays close to its
-centre instead of sweeping the whole frame. Remove individual chips or press
-the focus button to clear all areas; a block with no area keeps the default
-full-frame camera path. Because the setting is per segment, images that do not
-need highlighting are rendered exactly as before.
+scan button and drag **one** rectangle around a subject; drawing again replaces
+it. The rectangle is stored in `image_focus_areas` (a one-element
+`[{x, y, w, h}]` list, normalised to the frame) and mirrored in the legacy
+`image_focus_area` field for older clients. The renderer zooms out just enough
+to keep the subject visible, then picks a pan, a slow zoom, or a combined move.
+Its smart motion planner measures the free space left around the rectangle and
+uses that to choose a comfortable speed: a large subject gets a slower, shorter
+move (or a zoom) instead of a rushed sweep, and the rectangle is clamped inside
+the frame on every frame of the animation. Press the focus button to clear the
+area; a block with no area keeps the default full-frame camera path. Because
+the setting is per segment, images that do not need highlighting are rendered
+exactly as before. Legacy projects that stored several rectangles are rendered
+with the first one, without rewriting their saved data.
 
 ---
 

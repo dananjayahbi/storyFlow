@@ -21,7 +21,7 @@ interface ImageUploaderProps {
   focusY?: number;
   /** Optional marked subject area inside the frame. */
   focusArea?: ImageFocusArea | null;
-  /** Optional ordered list of marked subject areas (takes precedence). */
+  /** Legacy list form; only the first entry is used. */
   focusAreas?: ImageFocusArea[] | null;
   onFocusChange?: (segmentId: string, focus: { x: number; y: number }) => Promise<void>;
   /** Legacy single-area callback (used when no list callback is supplied). */
@@ -58,7 +58,6 @@ interface SelectionState {
 }
 
 const MIN_FOCUS_AREA = 0.03;
-const MAX_FOCUS_AREAS = 6;
 
 export function ImageUploader({
   segmentId, currentImage, isLocked,
@@ -73,8 +72,10 @@ export function ImageUploader({
   const [isMarking, setIsMarking] = useState(false);
   const [selection, setSelection] = useState<ImageFocusArea | null>(null);
   const [focus, setFocus] = useState({ x: focusX, y: focusY });
-  const initialAreas = focusAreas ?? (focusArea ? [focusArea] : []);
-  const [areas, setAreas] = useState<ImageFocusArea[]>(initialAreas);
+  // Only one highlighted rectangle is supported per image.  Legacy projects
+  // may still store a list; the first entry is shown and the rest are ignored.
+  const initialArea = focusAreas?.[0] ?? focusArea ?? null;
+  const [area, setArea] = useState<ImageFocusArea | null>(initialArea);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -97,7 +98,7 @@ export function ImageUploader({
   }, [focusX, focusY, segmentId, currentImage]);
 
   useEffect(() => {
-    setAreas(focusAreas ?? (focusArea ? [focusArea] : []));
+    setArea(focusAreas?.[0] ?? focusArea ?? null);
   }, [focusAreas, focusArea, segmentId, currentImage]);
 
   useEffect(() => {
@@ -194,14 +195,14 @@ export function ImageUploader({
     };
   };
 
-  const emitAreas = (next: ImageFocusArea[]) => {
-    setAreas(next);
+  const emitArea = (next: ImageFocusArea | null) => {
+    setArea(next);
     if (onFocusAreasChange) {
-      onFocusAreasChange(segmentId, next).catch(() => {
-        setError('Failed to save the focus areas.');
+      onFocusAreasChange(segmentId, next ? [next] : []).catch(() => {
+        setError('Failed to save the focus area.');
       });
     } else if (onFocusAreaChange) {
-      onFocusAreaChange(segmentId, next[0] ?? null).catch(() => {
+      onFocusAreaChange(segmentId, next).catch(() => {
         setError('Failed to save the focus area.');
       });
     }
@@ -287,10 +288,6 @@ export function ImageUploader({
       setSelection(null);
 
       if (w >= MIN_FOCUS_AREA && h >= MIN_FOCUS_AREA) {
-        if (areas.length >= MAX_FOCUS_AREAS) {
-          setError(`You can mark up to ${MAX_FOCUS_AREAS} focus areas.`);
-          return;
-        }
         const next = {
           x: Number(x.toFixed(4)),
           y: Number(y.toFixed(4)),
@@ -298,7 +295,8 @@ export function ImageUploader({
           h: Number(h.toFixed(4)),
         };
         setIsMarking(false);
-        emitAreas([...areas, next]);
+        // Drawing again replaces the existing rectangle.
+        emitArea(next);
       } else {
         setError('Draw a larger area to mark the focus.');
       }
@@ -333,16 +331,11 @@ export function ImageUploader({
     }
   };
 
-  const clearFocusAreas = () => {
+  const clearFocusArea = () => {
     if (isLocked) return;
     setIsMarking(false);
     setSelection(null);
-    emitAreas([]);
-  };
-
-  const removeFocusArea = (index: number) => {
-    if (isLocked) return;
-    emitAreas(areas.filter((_, position) => position !== index));
+    emitArea(null);
   };
 
   const toggleMarking = () => {
@@ -401,25 +394,22 @@ export function ImageUploader({
             {/* Frame crop guides */}
             <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/20" />
 
-            {/* Marked Ken Burns focus areas */}
-            {areas.map((marked, index) => (
+            {/* Marked Ken Burns focus area (one per image) */}
+            {area && (
               <div
-                key={`${marked.x}-${marked.y}-${index}`}
                 className="pointer-events-none absolute border-2 border-primary bg-primary/15"
                 style={{
-                  left: `${marked.x * 100}%`,
-                  top: `${marked.y * 100}%`,
-                  width: `${marked.w * 100}%`,
-                  height: `${marked.h * 100}%`,
+                  left: `${area.x * 100}%`,
+                  top: `${area.y * 100}%`,
+                  width: `${area.w * 100}%`,
+                  height: `${area.h * 100}%`,
                 }}
               >
                 <span className="absolute -top-5 left-0 rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground whitespace-nowrap">
-                  {areas.length > 1
-                    ? `Ken Burns focus ${index + 1}`
-                    : 'Ken Burns focus'}
+                  Ken Burns focus
                 </span>
               </div>
-            ))}
+            )}
 
             {/* Live selection while marking a new area */}
             {shownArea && shownArea.w > 0 && shownArea.h > 0 && (
@@ -455,15 +445,15 @@ export function ImageUploader({
                 >
                   <Scan className="h-3.5 w-3.5" />
                 </Button>
-                {areas.length > 0 && (
+                {area && (
                   <Button
                     type="button"
                     variant="secondary"
                     size="icon"
                     className="h-7 w-7"
-                    onClick={clearFocusAreas}
+                    onClick={clearFocusArea}
                     aria-label="Clear focus area"
-                    title="Clear all focus areas"
+                    title="Clear the focus area"
                   >
                     <Focus className="h-3.5 w-3.5" />
                   </Button>
@@ -503,31 +493,25 @@ export function ImageUploader({
             </Button>
           )}
         </div>
-        {!isLocked && areas.length > 0 && (
+        {!isLocked && area && (
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-1">
-              {areas.map((marked, index) => (
-                <span
-                  key={`${marked.x}-${marked.y}-${index}`}
-                  className="inline-flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+              <span className="inline-flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                Focus area
+                <button
+                  type="button"
+                  onClick={clearFocusArea}
+                  className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  aria-label="Remove focus area"
+                  title="Remove focus area"
                 >
-                  Focus {index + 1}
-                  <button
-                    type="button"
-                    onClick={() => removeFocusArea(index)}
-                    className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                    aria-label={`Remove focus area ${index + 1}`}
-                    title={`Remove focus area ${index + 1}`}
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              ))}
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              {areas.length > 1
-                ? 'Ken Burns centres each marked area in turn over the clip.'
-                : 'Ken Burns keeps this marked area centred and in view.'}
+              Ken Burns keeps this area in frame and adapts the pan or zoom
+              speed to the space around it.
             </p>
           </div>
         )}

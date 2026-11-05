@@ -856,7 +856,7 @@ Step 7: ──► Fast render (NumPy compositing + FFmpeg pipe)
              ├── Pre-render all subtitle overlays
              ├── Pre-render logo overlay
              ├── For each frame:
-             │   ├── Ken Burns: interpolate crop position
+             │   ├── Ken Burns: interpolate crop position + size
              │   ├── Extract & resize crop region
              │   ├── Alpha-blit subtitle overlays
              │   ├── Crossfade blend (if overlapping segments)
@@ -909,7 +909,7 @@ The performance-critical rendering engine that replaces MoviePy's `CompositeVide
 │  For each global frame index:                       │
 │  ├── Determine active segments (1 or 2)             │
 │  ├── Per active segment:                            │
-│  │   ├── Ken Burns: interpolate position            │
+│  │   ├── Ken Burns: sample motion plan (pos+size)   │
 │  │   ├── NumPy slice: extract crop region (O(1))    │
 │  │   ├── OpenCV resize to output resolution         │
 │  │   └── alpha_blit(): overlay subtitles            │
@@ -949,28 +949,51 @@ output = foreground × α + background × (1 − α)
 
 ### 7.3 Ken Burns Effect Engine
 
-**File:** `core_engine/ken_burns.py` (~694 lines)
+**File:** `core_engine/ken_burns.py`
 
 Converts static images into animated video clips with simulated camera motion (zoom + pan).
 
-**7 Direction Presets** (deterministic via `segment_index % 7`):
+**Smart motion planner.** `plan_ken_burns_motion()` measures the free space
+around an optional highlighted subject and selects one of four motions for the
+clip. Preset order is deterministic via `segment_index % 7`, then adapted to
+the room actually available:
 
-| Index | Motion |
-|-------|--------|
-| 0 | Center → Center (pure zoom) |
-| 1 | Top-Left → Bottom-Right |
-| 2 | Bottom-Right → Top-Left |
-| 3 | Top-Right → Bottom-Left |
-| 4 | Bottom-Left → Top-Right |
-| 5 | Center → Top-Left |
-| 6 | Center → Bottom-Right |
+| Index | Preferred motion |
+|-------|------------------|
+| 0 | Pan |
+| 1 | Slow zoom in |
+| 2 | Pan |
+| 3 | Slow zoom out |
+| 4 | Pan + zoom |
+| 5 | Pan |
+| 6 | Slow zoom in |
+
+* **Pan** — sweeps along the deterministic 7-direction cycle. The distance is
+  `PAN_SPEED_TARGET × duration × frame width`, then capped by the free space
+  left around the subject. A large subject therefore moves more slowly instead
+  of being rushed across the frame.
+* **Zoom in / out** — a subtle 12–15 % crop-scale change, centred on the
+  subject for a slow, cinematic move.
+* **Pan + zoom** — both motions at reduced strength for extra variety.
+
+When the preferred preset has too little room (`MIN_PAN_ROOM` /
+`MIN_ZOOM_ROOM`), the planner substitutes another motion. A subject that
+almost fills the frame gets a zoom or a very short pan rather than a nearly
+static shot.
+
+**Subject containment.** Only **one** highlighted rectangle is supported per
+image (`MAX_FOCUS_AREAS = 1`). The crop is never allowed to shrink below the
+rectangle's size, and every sampled frame is clamped to the bounds that keep
+the rectangle fully inside the crop. The highlighted area therefore cannot
+leave the rendered frame, even during a zoom. Legacy rows with several
+rectangles are rendered using the first one without mutating stored data.
 
 **Per-Frame Algorithm:**
-1. Compute interpolation parameter: $t_{norm} = clamp(t / duration, 0, 1)$
-2. Linear interpolation: $x(t) = x_{start} + (x_{end} - x_{start}) \cdot t_{norm}$
-3. Round to integer pixels, clamp to image bounds
-4. Extract crop via NumPy slice (O(1) view — no copy)
-5. Resize with OpenCV (`INTER_AREA` for downscale, `INTER_LINEAR` for upscale)
+1. Sample the motion plan with smoothstep easing.
+2. Interpolate crop centre **and** crop size (zoom).
+3. Clamp the position to the subject-safe bounds and the prepared frame.
+4. Extract crop via NumPy slice (O(1) view — no copy).
+5. Resize with OpenCV (`INTER_AREA` for downscale, `INTER_LINEAR` for upscale).
 
 **Performance:** ~2–4 ms/frame at 1080p resolution.
 
@@ -1800,7 +1823,7 @@ User Action                   Frontend                      Backend
 
 ### Video Rendering
 - [x] Full video rendering pipeline
-- [x] Ken Burns zoom-and-pan effects (7 deterministic directions)
+- [x] Ken Burns smart pan/zoom motion (deterministic presets adapted to subject space)
 - [x] Crossfade transitions between segments
 - [x] Timed subtitle overlays (character-proportional timing)
 - [x] Subtitle styling (font, size, color, position, stroke)

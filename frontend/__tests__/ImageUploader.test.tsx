@@ -84,37 +84,7 @@ describe('ImageUploader', () => {
     expect(onFocusAreaChange).toHaveBeenCalledWith('seg-1', null);
   });
 
-  it('shows each marked focus area and removes one', () => {
-    const onFocusAreasChange = jest.fn().mockResolvedValue(undefined);
-    const areas = [
-      { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
-      { x: 0.6, y: 0.5, w: 0.25, h: 0.3 },
-    ];
-    render(
-      <ImageUploader
-        segmentId="seg-1"
-        currentImage="/media/projects/test.jpg"
-        isLocked={false}
-        focusAreas={areas}
-        onFocusAreasChange={onFocusAreasChange}
-        onUpload={mockUpload}
-        onRemove={mockRemove}
-      />
-    );
-
-    expect(screen.getByText('Ken Burns focus 1')).toBeInTheDocument();
-    expect(screen.getByText('Ken Burns focus 2')).toBeInTheDocument();
-    expect(
-      screen.getByText(/centres each marked area in turn/i)
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: /Remove focus area 2/i })
-    );
-    expect(onFocusAreasChange).toHaveBeenCalledWith('seg-1', [areas[0]]);
-  });
-
-  it('clears every focus area through the list callback', () => {
+  it('shows only the first legacy focus area from a stored list', () => {
     const onFocusAreasChange = jest.fn().mockResolvedValue(undefined);
     render(
       <ImageUploader
@@ -123,8 +93,29 @@ describe('ImageUploader', () => {
         isLocked={false}
         focusAreas={[
           { x: 0.1, y: 0.1, w: 0.2, h: 0.2 },
-          { x: 0.6, y: 0.5, w: 0.2, h: 0.2 },
+          { x: 0.6, y: 0.5, w: 0.25, h: 0.3 },
         ]}
+        onFocusAreasChange={onFocusAreasChange}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    expect(screen.getByText('Ken Burns focus')).toBeInTheDocument();
+    expect(screen.queryByText('Ken Burns focus 2')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/keeps this area in frame/i)
+    ).toBeInTheDocument();
+  });
+
+  it('clears the focus area through the list callback', () => {
+    const onFocusAreasChange = jest.fn().mockResolvedValue(undefined);
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        focusAreas={[{ x: 0.1, y: 0.1, w: 0.2, h: 0.2 }]}
         onFocusAreasChange={onFocusAreasChange}
         onUpload={mockUpload}
         onRemove={mockRemove}
@@ -133,6 +124,55 @@ describe('ImageUploader', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Clear focus area/i }));
     expect(onFocusAreasChange).toHaveBeenCalledWith('seg-1', []);
+  });
+
+  it('replaces the focus area instead of adding a second rectangle', () => {
+    const onFocusAreasChange = jest.fn().mockResolvedValue(undefined);
+    render(
+      <ImageUploader
+        segmentId="seg-1"
+        currentImage="/media/projects/test.jpg"
+        isLocked={false}
+        onFocusAreasChange={onFocusAreasChange}
+        onUpload={mockUpload}
+        onRemove={mockRemove}
+      />
+    );
+
+    const frame = screen.getByLabelText(/Render frame/);
+    const rect = {
+      x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 225,
+      width: 400, height: 225, toJSON: () => ({}),
+    };
+    jest.spyOn(frame, 'getBoundingClientRect').mockReturnValue(rect);
+    (frame as HTMLElement).setPointerCapture = jest.fn();
+    (frame as HTMLElement).releasePointerCapture = jest.fn();
+    (frame as HTMLElement).hasPointerCapture = jest.fn(() => true);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Mark Ken Burns focus area/i })
+    );
+    const pointer = (type: string, clientX: number, clientY: number) => (
+      new MouseEvent(type, { bubbles: true, clientX, clientY })
+    );
+    fireEvent(frame, pointer('pointerdown', 80, 45));
+    fireEvent(frame, pointer('pointermove', 200, 135));
+    fireEvent(frame, pointer('pointerup', 200, 135));
+
+    expect(onFocusAreasChange).toHaveBeenLastCalledWith('seg-1', [
+      { x: 0.2, y: 0.2, w: 0.3, h: 0.4 },
+    ]);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Mark Ken Burns focus area/i })
+    );
+    fireEvent(frame, pointer('pointerdown', 40, 22.5));
+    fireEvent(frame, pointer('pointermove', 120, 112.5));
+    fireEvent(frame, pointer('pointerup', 120, 112.5));
+
+    expect(onFocusAreasChange).toHaveBeenLastCalledWith('seg-1', [
+      { x: 0.1, y: 0.1, w: 0.2, h: 0.4 },
+    ]);
   });
 
   it('exposes the focus-area marking tool', () => {

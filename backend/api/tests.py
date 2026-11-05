@@ -417,10 +417,7 @@ class TestSegmentUpdate(APITestCase):
             self.assertEqual(response.status_code, 400, area)
 
     def test_patch_image_focus_areas_keeps_legacy_field_in_sync(self):
-        areas = [
-            {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4},
-            {'x': 0.6, 'y': 0.1, 'w': 0.2, 'h': 0.2},
-        ]
+        areas = [{'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4}]
         response = self.client.patch(
             f'/api/segments/{self.segment.id}/',
             {'image_focus_areas': areas},
@@ -433,6 +430,20 @@ class TestSegmentUpdate(APITestCase):
         self.segment.refresh_from_db()
         self.assertEqual(self.segment.image_focus_areas, areas)
         self.assertEqual(self.segment.image_focus_area, areas[0])
+
+    def test_patch_image_focus_areas_rejects_multiple_rectangles(self):
+        """Only one highlighted rectangle is allowed per image."""
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {
+                'image_focus_areas': [
+                    {'x': 0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+                    {'x': 0.6, 'y': 0.6, 'w': 0.2, 'h': 0.2},
+                ],
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_patch_image_focus_areas_can_be_cleared(self):
         self.segment.image_focus_areas = [
@@ -1937,16 +1948,17 @@ class KenBurnsMathTests(TestCase):
         self.assertEqual((sx, sy), (250, 250))
         self.assertEqual((ex, ey), (350, 350))
 
-    def test_normalise_focus_areas_accepts_single_and_list(self):
+    def test_normalise_focus_areas_keeps_only_one_rectangle(self):
         from core_engine.ken_burns import MAX_FOCUS_AREAS, normalise_focus_areas
 
+        self.assertEqual(MAX_FOCUS_AREAS, 1)
         single = {'x': 0.1, 'y': 0.2, 'w': 0.3, 'h': 0.4}
         self.assertEqual(normalise_focus_areas(single), [single])
         self.assertEqual(
             normalise_focus_areas([
                 single, {'x': 0.6, 'y': 0.1, 'w': 0.2, 'h': 0.2},
             ]),
-            [single, {'x': 0.6, 'y': 0.1, 'w': 0.2, 'h': 0.2}],
+            [single],
         )
         self.assertEqual(normalise_focus_areas(None), [])
         self.assertEqual(normalise_focus_areas('invalid'), [])
@@ -1956,7 +1968,7 @@ class KenBurnsMathTests(TestCase):
             len(normalise_focus_areas(too_many)), MAX_FOCUS_AREAS
         )
 
-    def test_focus_camera_path_centres_each_area(self):
+    def test_focus_camera_path_uses_the_single_marked_area(self):
         from core_engine.ken_burns import get_focus_camera_path
 
         path = get_focus_camera_path(
@@ -1966,8 +1978,8 @@ class KenBurnsMathTests(TestCase):
             ],
             1000, 1000, 400, 400,
         )
-        # The crop centre lands on each rectangle centre.
-        self.assertEqual(path, [(0, 0), (600, 600)])
+        # Legacy lists are truncated to the first rectangle.
+        self.assertEqual(path, [(0, 0)])
 
     def test_focus_camera_path_clamps_to_frame_edges(self):
         from core_engine.ken_burns import get_focus_camera_path
@@ -2392,8 +2404,8 @@ class KenBurnsIntegrationTests(TestCase):
         finally:
             clip.close()
 
-    def test_apply_ken_burns_with_multiple_focus_areas(self):
-        """Multiple marked areas produce a camera path through each one."""
+    def test_apply_ken_burns_uses_only_the_first_legacy_focus_area(self):
+        """Legacy lists are rendered with one highlighted rectangle."""
         from core_engine.ken_burns import apply_ken_burns
 
         clip = apply_ken_burns(
@@ -2410,12 +2422,9 @@ class KenBurnsIntegrationTests(TestCase):
         )
         try:
             start = self._get_frame(clip, 0.0)
-            middle = self._get_frame(clip, 0.5)
             end = self._get_frame(clip, 1.0)
             self.assertEqual(start.shape, (360, 640, 3))
             self.assertFalse(np.array_equal(start, end))
-            self.assertFalse(np.array_equal(start, middle))
-            self.assertFalse(np.array_equal(middle, end))
         finally:
             clip.close()
 
@@ -2479,15 +2488,17 @@ class KenBurnsIntegrationTests(TestCase):
         self.assertGreater(result["file_size"], 0)
 
 
-    def test_render_with_multiple_focus_areas(self):
-        """The full render path honours the ordered multi-area camera path."""
+    def test_render_with_single_focus_area(self):
+        """The full render path honours the single smart-focus rectangle."""
         from core_engine.video_renderer import render_project
 
         self.segments[0].image_focus_areas = [
-            {'x': 0.05, 'y': 0.1, 'w': 0.2, 'h': 0.25},
-            {'x': 0.7, 'y': 0.6, 'w': 0.2, 'h': 0.25},
+            {'x': 0.25, 'y': 0.2, 'w': 0.3, 'h': 0.35},
         ]
-        self.segments[0].save(update_fields=['image_focus_areas'])
+        self.segments[0].image_focus_area = self.segments[0].image_focus_areas[0]
+        self.segments[0].save(
+            update_fields=['image_focus_areas', 'image_focus_area'],
+        )
 
         result = render_project(str(self.project.id))
 

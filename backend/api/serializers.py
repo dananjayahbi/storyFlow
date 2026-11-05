@@ -46,7 +46,7 @@ ALLOWED_RESOLUTIONS = {
 ALLOWED_FPS = {24, 30, 60}
 
 #: Upper bound on the number of marked Ken Burns subject areas per segment.
-MAX_IMAGE_FOCUS_AREAS = 6
+MAX_IMAGE_FOCUS_AREAS = 1
 
 
 class TtsEngineValidationMixin:
@@ -322,11 +322,12 @@ class SegmentSerializer(serializers.ModelSerializer):
         return self._validate_focus_rectangle(value)
 
     def validate_image_focus_areas(self, value):
-        """Validate the optional ordered list of focus rectangles.
+        """Validate the single optional Ken Burns focus rectangle.
 
         Each entry uses the same normalised ``x``/``y``/``w``/``h`` shape as
-        :attr:`image_focus_area`.  The list may be empty (or ``null``) to fall
-        back to the default blind Ken Burns animation.
+        :attr:`image_focus_area`.  Only one rectangle may be marked per image.
+        The list may be empty (or ``null``) to fall back to the default Ken
+        Burns animation.
         """
         if value is None:
             return None
@@ -336,7 +337,7 @@ class SegmentSerializer(serializers.ModelSerializer):
             )
         if len(value) > MAX_IMAGE_FOCUS_AREAS:
             raise serializers.ValidationError(
-                f'Mark at most {MAX_IMAGE_FOCUS_AREAS} focus areas per image.'
+                'Only one focus area can be marked per image.'
             )
         return [self._validate_focus_rectangle(item) for item in value]
 
