@@ -1225,6 +1225,26 @@ are YouTube-only like the thumbnail routes.
 
 ---
 
+### 7.4.7 Script Craft block density (Feature update #11)
+
+**Files:** `core_engine/ai_client.py`, `core_engine/chat_agent.py`
+
+Every Script Craft path shares the same block-density contract:
+
+- `DEFAULT_SYSTEM_PROMPT` asks for one coherent beat with its own image and
+  **45-85 words** of narration per segment.
+- `SCRIPT_FORMAT_INSTRUCTIONS` and `chat_agent.AGENT_INSTRUCTIONS` request
+  **20-30 segments** for an 8-10 minute video, roughly double the previous
+  10-15 block scripts.
+- The chat agent's `create_script` / `update_script` tool schemas describe the
+  same range so a tool-calling model sees it in the function definition too.
+
+The shorter blocks keep the total narration length stable while giving each
+block its own storyboard image, so the visual changes more often during the
+finished video. The user can still request a different length explicitly.
+
+---
+
 ### 7.5 Subtitle Engine
 
 **File:** `core_engine/subtitle_engine.py` (~360 lines)

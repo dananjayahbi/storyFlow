@@ -53,9 +53,12 @@ How you work:
   or fails, say so instead of inventing facts.
 
 Script rules:
-- 8 to 16 segments unless the user asks for a different length.
-- Every segment needs `text_content` (90-170 words of narration) and
-  `image_prompt` (a detailed cinematic text-to-image prompt).
+- 20 to 30 segments unless the user asks for a different length.
+- This is roughly double the old 10-15 block scripts: every segment needs
+  `text_content` (45-85 words of narration) and `image_prompt` (a detailed
+  cinematic text-to-image prompt).
+- Each block gets its own image, so keep beats short and self-contained so the
+  visuals change more often.
 - Keep lighting, palette and camera language consistent across image prompts.
 - Give each script a concise, compelling title.
 
@@ -88,10 +91,17 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     'pitch': {'type': 'string'},
                     'segments': {
                         'type': 'array',
+                        'description': (
+                            '20-30 short blocks (45-85 words each), with one '
+                            'image prompt per block.'
+                        ),
                         'items': {
                             'type': 'object',
                             'properties': {
-                                'text_content': {'type': 'string'},
+                                'text_content': {
+                                    'type': 'string',
+                                    'description': 'One narration beat, 45-85 words.',
+                                },
                                 'image_prompt': {
                                     'type': 'string',
                                     'description': (
@@ -122,10 +132,17 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     'title': {'type': 'string'},
                     'segments': {
                         'type': 'array',
+                        'description': (
+                            '20-30 short blocks (45-85 words each), with one '
+                            'image prompt per block.'
+                        ),
                         'items': {
                             'type': 'object',
                             'properties': {
-                                'text_content': {'type': 'string'},
+                                'text_content': {
+                                    'type': 'string',
+                                    'description': 'One narration beat, 45-85 words.',
+                                },
                                 'image_prompt': {
                                     'type': 'string',
                                     'description': (

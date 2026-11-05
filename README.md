@@ -203,6 +203,9 @@ maintaining JSON files outside the app.
    a page. Use the page tabs or the arrows to move between them. The agent can
    read every page in the session through its tools, so follow-up questions can
    refer to earlier scripts.
+   New scripts default to **20-30 short blocks (45-85 words each)** for an
+   8-10 minute video — roughly double the old 10-15 blocks — so each block keeps
+   its own image and the storyboard changes more often.
 4. Click **Save to Library** to keep the current page in **Script Library**,
    also in the top navigation and scoped to the same account.
 5. In **Script Library**, each saved script has a **Create** button. It opens a

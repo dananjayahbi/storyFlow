@@ -26,9 +26,10 @@ DEFAULT_SYSTEM_PROMPT = (
     "authoritative documentary voice: vivid, factual, and paced for narration. "
     "Never invent statistics or quote fake sources; if a number is uncertain, "
     "describe it qualitatively. Each segment should be one coherent beat of "
-    "the story, roughly 90-170 words, and must include a detailed cinematic "
-    "image prompt for a text-to-image model. Keep the same visual style across "
-    "the image prompts (lighting, palette, camera language)."
+    "the story with its own image, roughly 45-85 words of narration, and must "
+    "include a detailed cinematic image prompt for a text-to-image model. Keep "
+    "the same visual style across the image prompts (lighting, palette, camera "
+    "language)."
 )
 
 SCRIPT_FORMAT_INSTRUCTIONS = """Return ONLY a valid JSON object with this exact shape:
@@ -44,7 +45,11 @@ SCRIPT_FORMAT_INSTRUCTIONS = """Return ONLY a valid JSON object with this exact 
 }
 
 Rules:
-- 8 to 16 segments unless the user explicitly asks for a different length.
+- 20 to 30 segments unless the user explicitly asks for a different length.
+- This is roughly double the old 10-15 block scripts: each block should be
+  45-85 words so an 8-10 minute video gets 20-30 visual beats.
+- Each block must have its own image, so prefer shorter, self-contained beats
+  over long paragraphs.
 - Every segment must contain both `text_content` and `image_prompt`.
 - No markdown, no code fences, no commentary outside the JSON object.
 - image_prompt must contain no text/letter/caption/signage/typography request,
