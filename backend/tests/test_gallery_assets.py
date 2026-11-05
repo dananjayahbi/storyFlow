@@ -97,6 +97,50 @@ class GalleryAssetTests(APITestCase):
         self.assertEqual(latest['render_time_seconds'], 91.25)
         self.assertEqual(latest['status'], 'rendered')
 
+    def test_gallery_never_serves_another_renderings_video(self):
+        """A missing file must not silently resolve to the newest output."""
+        legacy = self._rendering(self.project, name='legacy.mp4')
+        newer = self._rendering(self.project, name='newer.mp4')
+        os.remove(os.path.join(settings.MEDIA_ROOT, legacy.file_path))
+
+        response = self.client.get(
+            f'/api/gallery/?section=facebook&project={self.project.id}'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {item['id'] for item in response.data}
+        self.assertEqual(ids, {str(newer.id)})
+
+        detail = self.client.get(
+            f'/api/gallery/{legacy.id}/stream/?section=facebook'
+        )
+        self.assertEqual(detail.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_registering_two_exports_creates_independent_files(self):
+        from api.renderings import register_rendering
+
+        sources = []
+        for name in ('first-export.mp4', 'second-export.mp4'):
+            relative = (
+                f'Facebook/{self.account.id}/{self.project.id}/output/{name}'
+            )
+            source = os.path.join(settings.MEDIA_ROOT, relative)
+            os.makedirs(os.path.dirname(source), exist_ok=True)
+            with open(source, 'wb') as handle:
+                handle.write(name.encode('utf-8'))
+            sources.append(source)
+
+        first = register_rendering(self.project, sources[0])
+        second = register_rendering(self.project, sources[1])
+
+        self.assertNotEqual(first.file_path, second.file_path)
+        first_path = os.path.join(settings.MEDIA_ROOT, first.file_path)
+        second_path = os.path.join(settings.MEDIA_ROOT, second.file_path)
+        with open(first_path, 'rb') as handle:
+            self.assertEqual(handle.read(), b'first-export.mp4')
+        with open(second_path, 'rb') as handle:
+            self.assertEqual(handle.read(), b'second-export.mp4')
+
     def test_filter_by_project_status_and_search(self):
         rendered = self._rendering(self.project, name='rendered.mp4')
         published = self._rendering(

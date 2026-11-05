@@ -439,9 +439,10 @@ def render_task_function(project_id: str, task_id: str) -> None:
         render_time_seconds = round(time.perf_counter() - render_started, 2)
 
         # Step 5 — success: keep every render as its own gallery asset.
-        # register_rendering moves the exported final.mp4 into a permanent
-        # renderings/<id>.mp4 file, creates the Rendering row and updates the
-        # project so its detail player points at the newest version.
+        # register_rendering moves the freshly exported unique MP4 into a
+        # permanent renderings/<id>.mp4 file, creates the Rendering row and
+        # updates the project so its detail player points at the newest
+        # version.
         project = Project.objects.get(id=project_id)
         if project.is_playground:
             project.status = STATUS_COMPLETED

@@ -21,12 +21,17 @@ the renderer can choose between the two engines with a single switch.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import shutil
 import subprocess
 import tempfile
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ProcessPoolExecutor,
+    wait,
+)
 from typing import Callable, List, Optional, Tuple
 
 import cv2
@@ -95,11 +100,17 @@ def _worker_count(total_frames: int, fps: int, use_nvenc: bool) -> int:
 # Per-process chunk renderer
 # ---------------------------------------------------------------------------
 
-def _render_chunk(job: dict) -> dict:
+def _render_chunk(job: dict, progress_callback=None) -> dict:
     """Render one contiguous frame range to an encoded MP4 chunk.
 
     The job dictionary only contains picklable primitives and file paths, so
     it can cross the process boundary on Windows/macOS (spawn start method).
+
+    Progress reporting has two modes: when ``progress_callback`` is supplied
+    (the single-chunk fast path) it is called with the number of frames this
+    chunk has finished; otherwise the worker atomically writes that number to
+    ``job["progress_path"]`` so the parent can aggregate live progress across
+    every parallel worker.
     """
     from core_engine.ken_burns import (
         load_and_prepare_image,
@@ -201,6 +212,30 @@ def _render_chunk(job: dict) -> dict:
     )
     writer.start()
 
+    # Report roughly four times per second of rendered video. Writes are
+    # atomic so the parent never reads a half-written JSON file.
+    progress_path = job.get("progress_path")
+    report_every = max(1, int(fps) // 4)
+    chunk_frames = end_frame - start_frame
+
+    def report(frames_done: int, force: bool = False) -> None:
+        if progress_callback is not None:
+            progress_callback(frames_done)
+            return
+        if not progress_path:
+            return
+        if not force and frames_done % report_every != 0:
+            return
+        temp_path = f"{progress_path}.tmp"
+        try:
+            with open(temp_path, "w", encoding="utf-8") as handle:
+                json.dump({"frames": frames_done}, handle)
+            os.replace(temp_path, progress_path)
+        except OSError:
+            # Progress is advisory; never fail a render because of it.
+            pass
+
+    report(0, force=True)
     fade_frames = int(crossfade_duration * fps)
     try:
         for frame_idx in range(start_frame, end_frame):
@@ -275,6 +310,7 @@ def _render_chunk(job: dict) -> dict:
                 alpha_blit(frame, logo_overlay)
 
             writer.write_frame(frame)
+            report(frame_idx - start_frame + 1)
     finally:
         returncode, stderr = writer.finish()
 
@@ -288,6 +324,7 @@ def _render_chunk(job: dict) -> dict:
             f"Last 500 chars of stderr: {stderr[-500:]}"
         )
 
+    report(chunk_frames, force=True)
     return {
         "path": job["output_path"],
         "frames": end_frame - start_frame,
@@ -324,7 +361,9 @@ def fast_render_segments_v2(
         logo_settings: Optional logo dict.
         audio_path: Pre-exported audio track.
         use_nvenc: Use NVIDIA NVENC for chunk encoding.
-        on_progress: ``(current, total, message)`` callback.
+        on_progress: ``(current, total, message)`` callback. During frame
+            rendering it reports generated frames out of the total, the live
+            frames-per-second rate and an ETA, matching the v1 label format.
         crossfade_duration: Crossfade seconds between segments.
         inter_segment_silence: Silence appended to each segment.
 
@@ -358,7 +397,7 @@ def fast_render_segments_v2(
     )
     if on_progress:
         on_progress(
-            5, 100,
+            0, total_frames,
             f"Pipeline v2: rendering {total_frames} frames "
             f"with {workers} worker(s)…",
         )
@@ -382,17 +421,58 @@ def fast_render_segments_v2(
             "start_frame": start,
             "end_frame": end,
             "output_path": os.path.join(temp_dir, f"chunk_{index:03d}.mp4"),
+            "progress_path": os.path.join(
+                temp_dir, f"progress_{index:03d}.json",
+            ),
             "use_nvenc": use_nvenc,
             "bitrate": "10M",
         })
 
     render_start = time.perf_counter()
     chunk_paths: List[Optional[str]] = [None] * len(jobs)
-    completed = 0
+    chunk_done = [0] * len(jobs)
+    last_emit = 0.0
+
+    def _emit_frame_progress(force: bool = False) -> None:
+        """Report generated frames, live fps and ETA at most 4×/second."""
+        nonlocal last_emit
+        now = time.perf_counter()
+        if not force and now - last_emit < 0.25:
+            return
+        last_emit = now
+        done = min(total_frames, sum(chunk_done))
+        elapsed = max(now - render_start, 1e-6)
+        rate = done / elapsed
+        remaining = max(0, total_frames - done)
+        eta_seconds = int(round(remaining / rate)) if rate > 0 else 0
+        if on_progress:
+            on_progress(
+                done,
+                total_frames,
+                f"Rendering frames… {done}/{total_frames} "
+                f"({rate:.1f} fps, ~{eta_seconds}s remaining) · v2",
+            )
+
+    def _read_chunk_progress(job: dict) -> int:
+        path = job.get("progress_path")
+        if not path:
+            return 0
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                return int(json.load(handle).get("frames", 0))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return 0
+
+    def _record_single_chunk(frames_done: int) -> None:
+        chunk_done[0] = frames_done
+        _emit_frame_progress()
 
     try:
         if len(jobs) == 1:
-            result = _render_chunk(jobs[0])
+            result = _render_chunk(
+                jobs[0], progress_callback=_record_single_chunk,
+            )
+            chunk_done[0] = result["frames"]
             chunk_paths[0] = result["path"]
         else:
             with ProcessPoolExecutor(max_workers=len(jobs)) as pool:
@@ -400,46 +480,61 @@ def fast_render_segments_v2(
                     pool.submit(_render_chunk, job): index
                     for index, job in enumerate(jobs)
                 }
+                pending = set(futures)
                 try:
-                    for future in as_completed(futures):
-                        index = futures[future]
-                        try:
-                            result = future.result()
-                        except Exception:
-                            if not use_nvenc:
-                                raise
-                            # Some consumer drivers allow fewer concurrent
-                            # NVENC sessions than advertised. Retry this chunk
-                            # sequentially with the CPU encoder instead of
-                            # failing the whole render.
-                            logger.warning(
-                                "v2 NVENC chunk %d failed; retrying with "
-                                "libx264", index, exc_info=True,
-                            )
-                            fallback_job = dict(jobs[index])
-                            fallback_job["use_nvenc"] = False
-                            result = _render_chunk(fallback_job)
-                        chunk_paths[index] = result["path"]
-                        completed += 1
-                        if on_progress:
-                            pct = 5 + int((completed / len(jobs)) * 85)
-                            on_progress(
-                                pct, 100,
-                                f"Pipeline v2: rendered chunk "
-                                f"{completed}/{len(jobs)}…",
-                            )
+                    while pending:
+                        done, pending = wait(
+                            pending,
+                            timeout=0.25,
+                            return_when=FIRST_COMPLETED,
+                        )
+                        # Aggregate per-chunk progress files from every
+                        # worker, so the label shows frames rendered so far,
+                        # the live generation rate and the remaining time.
+                        for index, job in enumerate(jobs):
+                            if chunk_paths[index] is None:
+                                chunk_done[index] = max(
+                                    chunk_done[index],
+                                    _read_chunk_progress(job),
+                                )
+                        _emit_frame_progress()
+
+                        for future in done:
+                            index = futures[future]
+                            try:
+                                result = future.result()
+                            except Exception:
+                                if not use_nvenc:
+                                    raise
+                                # Some consumer drivers allow fewer
+                                # concurrent NVENC sessions than advertised.
+                                # Retry this chunk sequentially with the CPU
+                                # encoder instead of failing the whole
+                                # render.
+                                logger.warning(
+                                    "v2 NVENC chunk %d failed; retrying with "
+                                    "libx264", index, exc_info=True,
+                                )
+                                fallback_job = dict(jobs[index])
+                                fallback_job["use_nvenc"] = False
+                                result = _render_chunk(fallback_job)
+                            chunk_done[index] = result["frames"]
+                            chunk_paths[index] = result["path"]
+                            _emit_frame_progress(force=True)
                 except BaseException:
-                    for pending in futures:
-                        pending.cancel()
+                    for pending_future in futures:
+                        pending_future.cancel()
                     pool.shutdown(wait=False, cancel_futures=True)
                     raise
+
+        _emit_frame_progress(force=True)
 
         missing = [path for path in chunk_paths if not path]
         if missing:
             raise RuntimeError("Pipeline v2 did not produce all chunks")
 
         if on_progress:
-            on_progress(92, 100, "Pipeline v2: combining chunks…")
+            on_progress(92, 100, "Finalizing video encoding…")
 
         if len(chunk_paths) == 1:
             concat_input = ["-i", str(chunk_paths[0])]

@@ -772,11 +772,20 @@ Project **Settings → Render Settings → Render Pipeline** chooses the composi
 - **v2 — fast (parallel chunks)** splits the timeline across CPU processes,
   skips full-frame float blending on single-segment frames and concatenates the
   encoded chunks without re-encoding. NVENC is used when available, with the
-  worker count capped to avoid driver session limits.
+  worker count capped to avoid driver session limits. While it runs, the render
+  banner shows live detail such as
+  `Rendering frames… 2140/18000 (72.4 fps, ~219s remaining) · v2` (the editor
+  formats the ETA as `~3m 39s`), so you can see frames generated, generation
+  rate and remaining time.
 
 The choice is stored per project, so bulk renders use each project's own
 pipeline. `STORYFLOW_V2_WORKERS` can override the automatic worker count (for
 example `STORYFLOW_V2_WORKERS=4`).
+
+Each render is exported to a unique `output/render-<uuid>.mp4` file and then
+moved to `renderings/<rendering-id>.mp4`. A re-render therefore always adds a
+new gallery asset and can never overwrite an older video — including projects
+whose first video was registered before the per-render file layout existed.
 
 ### Configuring the AI model
 

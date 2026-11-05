@@ -179,6 +179,32 @@ describe('TimelineEditorPage', () => {
     expect(screen.getByText('Export')).toBeInTheDocument();
   });
 
+  it('shows detailed Pipeline v2 frame progress, rate and ETA', async () => {
+    useProjectStore.setState({
+      project: mockProject,
+      segments: [mockSegment],
+      isLoading: false,
+      error: null,
+      renderStatus: 'rendering',
+      renderProgress: {
+        current_segment: 2140,
+        total_segments: 18000,
+        percentage: 12,
+        current_phase:
+          'Rendering frames… 2140/18000 (72.4 fps, ~219s remaining) · v2',
+      },
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/2140\/18000/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/72\.4 fps/)).toBeInTheDocument();
+    // The editor humanises the raw seconds from the backend.
+    expect(screen.getByText(/~3m 39s remaining/)).toBeInTheDocument();
+  });
+
   it('disabled action buttons have correct tooltips', async () => {
     useProjectStore.setState({
       project: mockProject,

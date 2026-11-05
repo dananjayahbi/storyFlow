@@ -1,3 +1,4 @@
+import glob
 import json
 import logging
 import os
@@ -3560,17 +3561,26 @@ def _resolve_video_path(project):
         candidates.append(os.path.join(settings.MEDIA_ROOT, upgraded))
 
     # Conventional account-scoped path
-    candidates.append(
-        os.path.join(
-            project_dir(
-                project.section,
-                project.id,
-                account_id=project.account_id,
-            ),
-            'output',
-            'final.mp4',
-        )
+    conventional_output_dir = os.path.join(
+        project_dir(
+            project.section,
+            project.id,
+            account_id=project.account_id,
+        ),
+        'output',
     )
+    candidates.append(os.path.join(conventional_output_dir, 'final.mp4'))
+    # Renders that finished but were not registered (for example an
+    # interrupted request) use a unique render-<uuid>.mp4 file.
+    try:
+        unique_renders = sorted(
+            glob.glob(os.path.join(conventional_output_dir, 'render-*.mp4')),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        candidates.extend(unique_renders)
+    except OSError:
+        pass
 
     # Pre-account layout, kept for stores that have not been migrated yet
     candidates.append(
@@ -3620,13 +3630,27 @@ def _ensure_legacy_rendering(project):
     except OSError:
         file_size = 0
 
+    # Store the path we actually resolved.  Older rows were created with an
+    # empty project.output_path (or a stale one), which only worked because the
+    # Gallery used to fall back to the project's newest output.  Persisting the
+    # real media-relative path keeps the legacy asset self-contained.
+    stored_path = project.output_path or ''
+    try:
+        relative = os.path.relpath(video_path, settings.MEDIA_ROOT)
+        if not relative.startswith('..'):
+            stored_path = relative.replace('\\', '/')
+        else:
+            stored_path = video_path
+    except (TypeError, ValueError):
+        stored_path = video_path
+
     try:
         rendering, _created = Rendering.objects.get_or_create(
             pk=project.id,
             defaults={
                 'project': project,
                 'title': project.title,
-                'file_path': project.output_path or '',
+                'file_path': stored_path,
                 'resolution_width': project.resolution_width,
                 'resolution_height': project.resolution_height,
                 'framerate': project.framerate,
@@ -3760,10 +3784,10 @@ def gallery_list_view(request):
 
     items = []
     for rendering in queryset:
-        video_path = (
-            resolve_rendering_video(rendering)
-            or _resolve_video_path(rendering.project)
-        )
+        # Each gallery card must stream its own file.  Falling back to the
+        # project's newest output would make an older card play the new video
+        # (the exact symptom of a re-render "replacing" a gallery asset).
+        video_path = resolve_rendering_video(rendering)
         if not video_path:
             # Never advertise an asset whose file has disappeared.
             continue
@@ -3916,10 +3940,10 @@ def gallery_stream_view(request, project_id):
     """
     rendering = _get_rendering(request, project_id)
     if rendering:
-        video_path = (
-            resolve_rendering_video(rendering)
-            or _resolve_video_path(rendering.project)
-        )
+        # Resolve only this rendering's own file.  Falling back to the
+        # project's current output would silently play a newer video for an
+        # older gallery card whose file is missing.
+        video_path = resolve_rendering_video(rendering)
         title = rendering.title
     else:
         # Compatibility path: callers that still pass a project id.
@@ -3997,10 +4021,10 @@ def gallery_download_view(request, project_id):
     """
     rendering = _get_rendering(request, project_id)
     if rendering:
-        video_path = (
-            resolve_rendering_video(rendering)
-            or _resolve_video_path(rendering.project)
-        )
+        # Resolve only this rendering's own file.  Falling back to the
+        # project's current output would silently play a newer video for an
+        # older gallery card whose file is missing.
+        video_path = resolve_rendering_video(rendering)
         title = rendering.title
         fallback_id = rendering.id
     else:

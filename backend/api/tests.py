@@ -1645,6 +1645,28 @@ class VideoRendererTests(TestCase):
         self.assertGreater(result["file_size"], 0)
         self.assertGreater(result["duration"], 0)
 
+    def test_default_render_output_is_unique_and_keeps_previous_video(self):
+        """A re-render must never overwrite the previous exported file."""
+        from core_engine.video_renderer import render_project
+
+        first = render_project(str(self.project.id))
+        first_path = first["output_path"]
+        self.assertNotEqual(os.path.basename(first_path), "final.mp4")
+        self.assertTrue(os.path.isfile(first_path))
+        with open(first_path, "rb") as handle:
+            first_bytes = handle.read()
+        self.assertGreater(len(first_bytes), 0)
+
+        second = render_project(str(self.project.id))
+
+        self.assertNotEqual(first_path, second["output_path"])
+        self.assertTrue(os.path.isfile(second["output_path"]))
+        # The original export is still on disk, byte-for-byte.
+        self.assertTrue(os.path.isfile(first_path))
+        with open(first_path, "rb") as handle:
+            self.assertEqual(handle.read(), first_bytes)
+
+
     def test_render_progress_callback(self):
         """Progress callback is invoked for each segment + export phase."""
         from core_engine.video_renderer import render_project

@@ -188,7 +188,9 @@ The same tab has a three-block **demo playground**:
 
 - Render all blocks into one MP4 with FFmpeg.
 - Background music is mixed under the narration during rendering.
-- Progress is reported per phase (segments, frames, encoding, finalising).
+- Progress is reported per phase (segments, frames, encoding, finalising). The
+  v2 compositor reports live frame detail as well: generated frames out of the
+  total, frames per second and the estimated remaining time.
 - Renders can be cancelled.
 - Each project chooses **Pipeline v1** (original sequential compositor, default)
   or **Pipeline v2** (parallel frame chunks, fast single-segment path, NVENC
@@ -202,8 +204,9 @@ The same tab has a three-block **demo playground**:
   playback, seeking, download and fullscreen. Each render also records how long
   the full video-generation pipeline took; the gallery card, player footer and
   project-detail completion banner show it (for example "Rendered in 2m 13s").
-- Each render is stored as its own asset linked to the project, so re-rendering
-  never overwrites an earlier version.
+- Each render is exported to its own unique file before becoming an asset, so
+  re-rendering always adds a new gallery item and never replaces an earlier
+  video. Each card streams only its own file.
 - Assets move through **Rendered → Ready to publish → Published**; the Gallery
   uses a compact single-row filter bar (status/project/title), multi-select
   status changes and deletion of one or many rendered MP4s.

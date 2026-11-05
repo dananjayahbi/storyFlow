@@ -963,6 +963,22 @@ the exact visual contract but attacks the remaining CPU bottlenecks:
    demuxer and muxes the existing audio track (`-c:v copy`), so the final
    quality is not reduced by a second encode.
 
+**Live progress.** Each worker writes its finished-frame count to an atomic
+`progress_<chunk>.json` file about four times per second of rendered video.
+The parent aggregates those counts and emits the same
+`Rendering frames… <done>/<total> (<rate> fps, ~<eta> remaining)` label the
+v1 compositor uses, with a `· v2` suffix. Because the frontend already parses
+that label, the existing phase-aware progress bar shows generated frames,
+total frames, live generation rate and ETA without a separate API.
+
+**Unique exports.** When `render_project()` is called without an explicit
+destination it writes to `output/render-<uuid>.mp4` instead of the shared
+`output/final.mp4`. `register_rendering()` then moves that file to
+`renderings/<rendering-id>.mp4`, so every re-render adds a new gallery asset
+and cannot overwrite an older one (including legacy assets that still point at
+`output/final.mp4`). Missing rendering files are no longer substituted with the
+project's newest output, so each gallery card always plays its own video.
+
 Worker count defaults to the CPU count (capped at 4, because each worker
 already runs OpenCV/FFmpeg threads) and can be overridden with
 `STORYFLOW_V2_WORKERS`. Chunks are at least one second long. The editor's

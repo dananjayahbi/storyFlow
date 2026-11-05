@@ -58,7 +58,9 @@ class FastCompositorV2Tests(SimpleTestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def _render(self, renderer, name: str, workers: int = 2):
+    def _render(
+        self, renderer, name: str, workers: int = 2, on_progress=None,
+    ):
         output = os.path.join(self.temp_dir, name)
         with patch.dict(os.environ, {"STORYFLOW_V2_WORKERS": str(workers)}):
             return renderer(
@@ -73,6 +75,7 @@ class FastCompositorV2Tests(SimpleTestCase):
                 use_nvenc=False,
                 crossfade_duration=0.5,
                 inter_segment_silence=0.0,
+                on_progress=on_progress,
             ), output
 
     def test_timeline_matches_v1_math(self):
@@ -105,6 +108,40 @@ class FastCompositorV2Tests(SimpleTestCase):
             fast_render_segments, "v1.mp4", workers=1,
         )
         self.assertEqual(_frame_count(output_v1), _frame_count(output_v2))
+
+    def test_reports_live_frame_progress_with_rate_and_eta(self):
+        """v2 must expose frames rendered, generation rate and remaining time."""
+        events = []
+
+        def on_progress(current, total, message):
+            events.append((current, total, message))
+
+        stats, output = self._render(
+            fast_render_segments_v2,
+            "v2-progress.mp4",
+            workers=2,
+            on_progress=on_progress,
+        )
+
+        frame_events = [
+            event for event in events
+            if event[2].startswith("Rendering frames…")
+        ]
+        self.assertTrue(frame_events, events)
+        self.assertTrue(
+            any(
+                f"/{stats['frames_rendered']} (" in message
+                and "fps" in message
+                and "remaining)" in message
+                for _current, _total, message in frame_events
+            ),
+            frame_events,
+        )
+        # The final frame report must account for every generated frame.
+        self.assertEqual(
+            frame_events[-1][0], stats["frames_rendered"],
+        )
+        self.assertTrue(os.path.isfile(output))
 
     def test_empty_segment_list_is_rejected(self):
         with self.assertRaises(ValueError):

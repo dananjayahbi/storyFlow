@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -601,8 +602,10 @@ def render_project(
         project_id: UUID string of the project to render.
         on_progress: Optional callback ``(current, total, description)``
             invoked after each segment and before export.
-        output_path: Optional explicit destination.  When omitted the normal
-            ``<project>/output/final.mp4`` path is used.
+        output_path: Optional explicit destination.  When omitted the render
+            is written to a unique ``<project>/output/render-<uuid>.mp4``
+            file, so a re-render can never overwrite a previous gallery
+            asset.
         include_bgm: ``False`` forces a narration-only render even when the
             project has a music track selected.  ``None`` keeps project
             behaviour.
@@ -842,7 +845,16 @@ def render_project(
         output_path = os.path.abspath(str(output_path))
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
     else:
-        output_path = render_utils.get_output_path(str(project_id))
+        # Write every render to a unique file.  The previous implementation
+        # reused output/final.mp4, which meant a re-render could overwrite a
+        # legacy gallery asset that still pointed at that shared file.  The
+        # caller then moves this file to renderings/<rendering-id>.mp4, so no
+        # two renderings ever share content again.
+        default_output = render_utils.get_output_path(str(project_id))
+        output_path = os.path.join(
+            os.path.dirname(default_output),
+            f"render-{uuid.uuid4().hex}.mp4",
+        )
     logger.info("Output path: %s", output_path)
 
     # ------------------------------------------------------------------

@@ -2,8 +2,8 @@
 
 A :class:`~api.models.Rendering` is one concrete rendered MP4 produced from a
 project.  Render task callbacks use :func:`register_rendering` to move the
-freshly exported ``final.mp4`` into a permanent per-rendering file, while the
-Gallery API uses :func:`resolve_rendering_video` and
+freshly exported ``output/render-<uuid>.mp4`` into a permanent per-rendering
+file, while the Gallery API uses :func:`resolve_rendering_video` and
 :func:`delete_rendering` to stream and remove those assets.
 
 The functions here deliberately avoid importing ``api.views`` at module import
@@ -102,7 +102,7 @@ def resolve_rendering_video(rendering: Rendering) -> str | None:
 def register_rendering(project: Project, output_path: str, **metadata) -> Rendering:
     """Persist one completed render and move its file into renderings/.
 
-    ``output_path`` is the absolute ``final.mp4`` path returned by the render
+    ``output_path`` is the absolute export path returned by the render
     pipeline.  It is moved to ``.../renderings/<rendering-id>.mp4`` so a later
     re-render cannot overwrite it.  The project's ``output_path`` continues to
     point at the newest rendering for the project-detail player.
