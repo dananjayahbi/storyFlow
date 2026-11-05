@@ -548,6 +548,99 @@ class ProjectViewSet(viewsets.ModelViewSet):
             'readiness': readiness,
         })
 
+    def _metadata_text_generation(self, request, pk, kind):
+        """Shared request handling for title/description generation."""
+        project, error_response = self._metadata_project(request, pk)
+        if error_response is not None:
+            return error_response
+
+        readiness = metadata_prompts.thumbnail_readiness(project)
+        if not readiness['script_ready']:
+            return Response(
+                {
+                    'error': (
+                        'Craft the script before generating upload metadata.'
+                    ),
+                    'readiness': readiness,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        segments = list(project.segments.all().order_by('sequence_index'))
+        raw_system_prompt = request.data.get('system_prompt')
+        if isinstance(raw_system_prompt, str):
+            system_prompt = raw_system_prompt
+        else:
+            system_prompt = (
+                project.title_system_prompt
+                if kind == 'title'
+                else project.description_system_prompt
+            )
+        user_message = str(request.data.get('message') or '')
+        thumbnail_prompt = str(request.data.get('thumbnail_prompt') or '')
+
+        try:
+            config = _resolve_ai_client_config(project.account)
+            if kind == 'title':
+                result = metadata_prompts.generate_title(
+                    project=project,
+                    segments=segments,
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                    thumbnail_prompt=thumbnail_prompt,
+                    model=config['model'],
+                    base_url=config['base_url'],
+                    api_key=config['api_key'],
+                    temperature=config['temperature'],
+                )
+                project.upload_title = result['title']
+                project.save(update_fields=['upload_title'])
+                return Response({
+                    'title': result['title'],
+                    'model': result['model'],
+                    'readiness': readiness,
+                })
+
+            result = metadata_prompts.generate_description(
+                project=project,
+                segments=segments,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                thumbnail_prompt=thumbnail_prompt,
+                model=config['model'],
+                base_url=config['base_url'],
+                api_key=config['api_key'],
+                temperature=config['temperature'],
+            )
+            project.upload_description = result['description']
+            project.save(update_fields=['upload_description'])
+            return Response({
+                'description': result['description'],
+                'model': result['model'],
+                'readiness': readiness,
+            })
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            logger.error('%s generation failed: %s', kind, exc)
+            return Response(
+                {'error': str(exc) or 'The AI model could not draft metadata.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+    @action(detail=True, methods=['post'], url_path='metadata/generate-title')
+    def metadata_generate_title(self, request, pk=None):
+        """Generate and save an upload-ready YouTube title."""
+        return self._metadata_text_generation(request, pk, 'title')
+
+    @action(detail=True, methods=['post'], url_path='metadata/generate-description')
+    def metadata_generate_description(self, request, pk=None):
+        """Generate and save an SEO-finetuned YouTube description."""
+        return self._metadata_text_generation(request, pk, 'description')
+
     @action(detail=True, methods=['get', 'post'], url_path='metadata/thumbnails')
     def metadata_thumbnails(self, request, pk=None):
         """List or upload project thumbnail candidates."""

@@ -28,6 +28,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import {
   deleteProjectThumbnailAsset,
+  generateProjectDescription,
+  generateProjectTitle,
   generateThumbnailPrompt,
   setActiveProjectThumbnail,
   updateProject,
@@ -111,6 +113,85 @@ async function copyText(value: string): Promise<void> {
   document.body.removeChild(helper);
 }
 
+interface SystemPromptSectionProps {
+  id: string;
+  heading: string;
+  hint: string;
+  ariaLabel: string;
+  saveLabel: string;
+  value: string;
+  onChange: (value: string) => void;
+  open: boolean;
+  onToggle: () => void;
+  onSave: () => void;
+  saving: boolean;
+  placeholder?: string;
+}
+
+function SystemPromptSection({
+  id,
+  heading,
+  hint,
+  ariaLabel,
+  saveLabel,
+  value,
+  onChange,
+  open,
+  onToggle,
+  onSave,
+  saving,
+  placeholder,
+}: SystemPromptSectionProps) {
+  return (
+    <section className="rounded-lg border">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={id}
+      >
+        <span>
+          <span className="block text-sm font-medium">{heading}</span>
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            {hint}
+          </span>
+        </span>
+        {open ? (
+          <ChevronDown className="size-4 shrink-0" />
+        ) : (
+          <ChevronRight className="size-4 shrink-0" />
+        )}
+      </button>
+      {open && (
+        <div id={id} className="border-t px-4 py-3">
+          <Textarea
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={placeholder}
+            className="min-h-40 font-mono text-xs"
+            aria-label={ariaLabel}
+          />
+          <div className="mt-2 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onSave}
+              disabled={saving}
+            >
+              {saving ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : null}
+              {saveLabel}
+            </Button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function MetadataManagementModal({
   open,
   onOpenChange,
@@ -133,6 +214,29 @@ export function MetadataManagementModal({
   const [draggingThumbnail, setDraggingThumbnail] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [activeTab, setActiveTab] = useState<
+    'thumbnail' | 'title' | 'description'
+  >('thumbnail');
+
+  // Title metadata
+  const [titleSystemPrompt, setTitleSystemPrompt] = useState('');
+  const [titleSystemOpen, setTitleSystemOpen] = useState(false);
+  const [savingTitlePrompt, setSavingTitlePrompt] = useState(false);
+  const [titleMessage, setTitleMessage] = useState('');
+  const [generatedTitle, setGeneratedTitle] = useState('');
+  const [generatingTitle, setGeneratingTitle] = useState(false);
+  const [usingAsProjectTitle, setUsingAsProjectTitle] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
+
+  // Description metadata
+  const [descriptionSystemPrompt, setDescriptionSystemPrompt] = useState('');
+  const [descriptionSystemOpen, setDescriptionSystemOpen] = useState(false);
+  const [savingDescriptionPrompt, setSavingDescriptionPrompt] = useState(false);
+  const [descriptionMessage, setDescriptionMessage] = useState('');
+  const [generatedDescription, setGeneratedDescription] = useState('');
+  const [generatingDescription, setGeneratingDescription] = useState(false);
+  const [descriptionError, setDescriptionError] = useState<string | null>(null);
+
   const thumbnailInputRef = useRef<HTMLInputElement>(null);
   const externalInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
@@ -152,15 +256,26 @@ export function MetadataManagementModal({
     if (!open) return;
     setSystemPrompt(project.thumbnail_system_prompt ?? '');
     setSystemOpen(false);
+    setTitleSystemPrompt(project.title_system_prompt ?? '');
+    setTitleSystemOpen(false);
+    setDescriptionSystemPrompt(project.description_system_prompt ?? '');
+    setDescriptionSystemOpen(false);
+    setActiveTab('thumbnail');
     setSelectedIds(
       imageSegments
         .slice(0, DEFAULT_SELECTION)
         .map((segment) => segment.id),
     );
     setMessage('');
+    setTitleMessage('');
+    setDescriptionMessage('');
     setDocuments([]);
     setPrompt('');
+    setGeneratedTitle(project.upload_title ?? '');
+    setGeneratedDescription(project.upload_description ?? '');
     setError(null);
+    setTitleError(null);
+    setDescriptionError(null);
     setThumbnails(project.thumbnails ?? []);
     setExternalImages((previous) => {
       previous.forEach((item) => URL.revokeObjectURL(item.url));
@@ -175,6 +290,16 @@ export function MetadataManagementModal({
     if (!open) return;
     setThumbnails(project.thumbnails ?? []);
   }, [open, project.thumbnails]);
+
+  useEffect(() => {
+    if (!open) return;
+    setGeneratedTitle(project.upload_title ?? '');
+  }, [open, project.upload_title]);
+
+  useEffect(() => {
+    if (!open) return;
+    setGeneratedDescription(project.upload_description ?? '');
+  }, [open, project.upload_description]);
 
   useEffect(() => {
     if (open) return;
@@ -282,6 +407,140 @@ export function MetadataManagementModal({
       toast.error(detail);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const saveTitleSystemPrompt = async () => {
+    setSavingTitlePrompt(true);
+    try {
+      await updateProject(project.id, {
+        title_system_prompt: titleSystemPrompt,
+      });
+      await onProjectRefreshed();
+      toast.success('Title system prompt saved.');
+    } catch (saveError) {
+      toast.error(
+        errorMessage(saveError, 'Could not save the title system prompt.'),
+      );
+    } finally {
+      setSavingTitlePrompt(false);
+    }
+  };
+
+  const thumbnailPromptContext = () =>
+    prompt || thumbnails.find((item) => item.is_active)?.prompt || '';
+
+  const handleGenerateTitle = async () => {
+    setTitleError(null);
+    if (!readiness.script_ready) {
+      setTitleError('Craft the script before generating an upload title.');
+      return;
+    }
+    setGeneratingTitle(true);
+    try {
+      const result = await generateProjectTitle(project.id, {
+        systemPrompt: titleSystemPrompt,
+        message: titleMessage,
+        thumbnailPrompt: thumbnailPromptContext(),
+      });
+      setGeneratedTitle(result.title);
+      await onProjectRefreshed();
+      toast.success('Upload-ready title generated.');
+    } catch (generateError) {
+      const detail = errorMessage(
+        generateError,
+        'The AI model could not draft an upload title.',
+      );
+      setTitleError(detail);
+      toast.error(detail);
+    } finally {
+      setGeneratingTitle(false);
+    }
+  };
+
+  const handleUseAsProjectTitle = async () => {
+    if (!generatedTitle.trim()) return;
+    setUsingAsProjectTitle(true);
+    try {
+      await updateProject(project.id, { title: generatedTitle.trim() });
+      await onProjectRefreshed();
+      toast.success('Project title updated.');
+    } catch (renameError) {
+      toast.error(
+        errorMessage(renameError, 'Could not update the project title.'),
+      );
+    } finally {
+      setUsingAsProjectTitle(false);
+    }
+  };
+
+  const handleCopyTitle = async () => {
+    if (!generatedTitle) return;
+    try {
+      await copyText(generatedTitle);
+      toast.success('Title copied to the clipboard.');
+    } catch {
+      toast.error('Could not copy the title.');
+    }
+  };
+
+  const saveDescriptionSystemPrompt = async () => {
+    setSavingDescriptionPrompt(true);
+    try {
+      await updateProject(project.id, {
+        description_system_prompt: descriptionSystemPrompt,
+      });
+      await onProjectRefreshed();
+      toast.success('Description system prompt saved.');
+    } catch (saveError) {
+      toast.error(
+        errorMessage(
+          saveError,
+          'Could not save the description system prompt.',
+        ),
+      );
+    } finally {
+      setSavingDescriptionPrompt(false);
+    }
+  };
+
+  const handleGenerateDescription = async () => {
+    setDescriptionError(null);
+    if (!readiness.script_ready) {
+      setDescriptionError(
+        'Craft the script before generating a description.',
+      );
+      return;
+    }
+    setGeneratingDescription(true);
+    try {
+      const result = await generateProjectDescription(project.id, {
+        systemPrompt: descriptionSystemPrompt,
+        message: descriptionMessage,
+        thumbnailPrompt: thumbnailPromptContext(),
+      });
+      setGeneratedDescription(result.description);
+      await onProjectRefreshed();
+      toast.success('Upload-ready description generated.');
+    } catch (generateError) {
+      const detail = errorMessage(
+        generateError,
+        'The AI model could not draft a description.',
+      );
+      setDescriptionError(detail);
+      toast.error(detail);
+    } finally {
+      setGeneratingDescription(false);
+    }
+  };
+
+  const handleCopyDescription = async () => {
+    if (!generatedDescription) return;
+    try {
+      await copyText(generatedDescription);
+      toast.success('Description copied to the clipboard.');
+    } catch {
+      toast.error('Could not copy the description.');
     }
   };
 
@@ -400,7 +659,38 @@ export function MetadataManagementModal({
           </DialogDescription>
         </DialogHeader>
 
+        <div
+          role="tablist"
+          aria-label="Metadata sections"
+          className="flex shrink-0 gap-1 border-b px-4 sm:px-6"
+        >
+          {(
+            [
+              ['thumbnail', 'Thumbnail'],
+              ['title', 'Title'],
+              ['description', 'Description'],
+            ] as const
+          ).map(([tab, label]) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                '-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors',
+                activeTab === tab
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="flex-1 overflow-y-auto">
+          {activeTab === 'thumbnail' && (
           <div className="mx-auto grid max-w-7xl gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(340px,440px)]">
             {/* ── Left: references and prompt controls ── */}
             <div className="min-w-0 space-y-5">
@@ -429,59 +719,20 @@ export function MetadataManagementModal({
                 )}
               </div>
 
-              {/* System prompt */}
-              <section className="rounded-lg border">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                  onClick={() => setSystemOpen((previous) => !previous)}
-                  aria-expanded={systemOpen}
-                  aria-controls="thumbnail-system-prompt"
-                >
-                  <span>
-                    <span className="block text-sm font-medium">
-                      System prompt
-                    </span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      Collapsed by default. Leave empty to use the built-in
-                      thumbnail art director.
-                    </span>
-                  </span>
-                  {systemOpen ? (
-                    <ChevronDown className="size-4 shrink-0" />
-                  ) : (
-                    <ChevronRight className="size-4 shrink-0" />
-                  )}
-                </button>
-                {systemOpen && (
-                  <div
-                    id="thumbnail-system-prompt"
-                    className="border-t px-4 py-3"
-                  >
-                    <Textarea
-                      value={systemPrompt}
-                      onChange={(event) => setSystemPrompt(event.target.value)}
-                      placeholder="You are a senior YouTube thumbnail art director…"
-                      className="min-h-40 font-mono text-xs"
-                      aria-label="Thumbnail system prompt"
-                    />
-                    <div className="mt-2 flex justify-end">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void saveSystemPrompt()}
-                        disabled={savingSystem}
-                      >
-                        {savingSystem ? (
-                          <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                        ) : null}
-                        Save system prompt
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </section>
+              <SystemPromptSection
+                id="thumbnail-system-prompt"
+                heading="System prompt"
+                hint="Collapsed by default. Leave empty to use the built-in thumbnail art director."
+                ariaLabel="Thumbnail system prompt"
+                saveLabel="Save system prompt"
+                placeholder="You are a senior YouTube thumbnail art director…"
+                value={systemPrompt}
+                onChange={setSystemPrompt}
+                open={systemOpen}
+                onToggle={() => setSystemOpen((previous) => !previous)}
+                onSave={() => void saveSystemPrompt()}
+                saving={savingSystem}
+              />
 
               {/* Storyboard references */}
               <section className="space-y-2">
@@ -872,6 +1123,229 @@ export function MetadataManagementModal({
               </section>
             </div>
           </div>
+          )}
+
+          {activeTab === 'title' && (
+            <div className="mx-auto grid max-w-5xl gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+              <div className="min-w-0 space-y-5">
+                <div
+                  className={cn(
+                    'rounded-lg border p-3 text-sm',
+                    readiness.script_ready
+                      ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+                      : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
+                  )}
+                >
+                  {readiness.script_ready ? (
+                    <p className="flex items-center gap-2">
+                      <CheckCircle2 className="size-4 shrink-0" />
+                      The title is drafted from the full script and saved with
+                      this project.
+                    </p>
+                  ) : (
+                    <p>Craft the script before generating an upload title.</p>
+                  )}
+                </div>
+
+                <SystemPromptSection
+                  id="title-system-prompt"
+                  heading="Title system prompt"
+                  hint="Collapsed by default. Leave empty to use the built-in SEO title strategist."
+                  ariaLabel="Title system prompt"
+                  saveLabel="Save title prompt"
+                  placeholder="You are a YouTube SEO title strategist…"
+                  value={titleSystemPrompt}
+                  onChange={setTitleSystemPrompt}
+                  open={titleSystemOpen}
+                  onToggle={() => setTitleSystemOpen((previous) => !previous)}
+                  onSave={() => void saveTitleSystemPrompt()}
+                  saving={savingTitlePrompt}
+                />
+
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">Your title instructions</h3>
+                  <Textarea
+                    value={titleMessage}
+                    onChange={(event) => setTitleMessage(event.target.value)}
+                    placeholder="For example: emphasise the mystery without misleading the viewer."
+                    className="min-h-24 text-sm"
+                    aria-label="Your title instructions"
+                  />
+                </section>
+
+                {titleError && (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {titleError}
+                  </p>
+                )}
+
+                <Button
+                  type="button"
+                  onClick={() => void handleGenerateTitle()}
+                  disabled={!readiness.script_ready || generatingTitle}
+                  className="w-full"
+                >
+                  {generatingTitle ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 size-4" />
+                  )}
+                  {generatingTitle ? 'Drafting title…' : 'Generate title'}
+                </Button>
+              </div>
+
+              <div className="min-w-0 space-y-4">
+                <section className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-medium">Upload-ready title</h3>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => void handleCopyTitle()}
+                      disabled={!generatedTitle}
+                    >
+                      <Copy className="mr-1.5 size-3.5" />
+                      Copy
+                    </Button>
+                  </div>
+                  <Textarea
+                    readOnly
+                    value={generatedTitle}
+                    placeholder="Generate a title to see it here."
+                    className="min-h-24 text-base font-medium"
+                    aria-label="Generated upload title"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Saved separately from the project working title
+                    “{project.title}”.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => void handleUseAsProjectTitle()}
+                    disabled={!generatedTitle.trim() || usingAsProjectTitle}
+                  >
+                    {usingAsProjectTitle ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="mr-2 size-4" />
+                    )}
+                    Use as project title
+                  </Button>
+                </section>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'description' && (
+            <div className="mx-auto grid max-w-5xl gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+              <div className="min-w-0 space-y-5">
+                <div
+                  className={cn(
+                    'rounded-lg border p-3 text-sm',
+                    readiness.script_ready
+                      ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+                      : 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-400',
+                  )}
+                >
+                  {readiness.script_ready ? (
+                    <p className="flex items-center gap-2">
+                      <CheckCircle2 className="size-4 shrink-0" />
+                      The description is optimised for search and saved with
+                      this project.
+                    </p>
+                  ) : (
+                    <p>Craft the script before generating a description.</p>
+                  )}
+                </div>
+
+                <SystemPromptSection
+                  id="description-system-prompt"
+                  heading="Description system prompt"
+                  hint="Collapsed by default. Leave empty to use the built-in SEO copywriter."
+                  ariaLabel="Description system prompt"
+                  saveLabel="Save description prompt"
+                  placeholder="You are a YouTube SEO copywriter…"
+                  value={descriptionSystemPrompt}
+                  onChange={setDescriptionSystemPrompt}
+                  open={descriptionSystemOpen}
+                  onToggle={() =>
+                    setDescriptionSystemOpen((previous) => !previous)
+                  }
+                  onSave={() => void saveDescriptionSystemPrompt()}
+                  saving={savingDescriptionPrompt}
+                />
+
+                <section className="space-y-2">
+                  <h3 className="text-sm font-medium">
+                    Your description instructions
+                  </h3>
+                  <Textarea
+                    value={descriptionMessage}
+                    onChange={(event) =>
+                      setDescriptionMessage(event.target.value)
+                    }
+                    placeholder="For example: include the main search phrases and end with a subscribe call to action."
+                    className="min-h-24 text-sm"
+                    aria-label="Your description instructions"
+                  />
+                </section>
+
+                {descriptionError && (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                    {descriptionError}
+                  </p>
+                )}
+
+                <Button
+                  type="button"
+                  onClick={() => void handleGenerateDescription()}
+                  disabled={!readiness.script_ready || generatingDescription}
+                  className="w-full"
+                >
+                  {generatingDescription ? (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 size-4" />
+                  )}
+                  {generatingDescription
+                    ? 'Drafting description…'
+                    : 'Generate description'}
+                </Button>
+              </div>
+
+              <div className="min-w-0 space-y-4">
+                <section className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-medium">
+                      Upload-ready description
+                    </h3>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => void handleCopyDescription()}
+                      disabled={!generatedDescription}
+                    >
+                      <Copy className="mr-1.5 size-3.5" />
+                      Copy
+                    </Button>
+                  </div>
+                  <Textarea
+                    readOnly
+                    value={generatedDescription}
+                    placeholder="Generate a description to see it here."
+                    className="min-h-72 text-sm"
+                    aria-label="Generated description"
+                  />
+                </section>
+              </div>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>

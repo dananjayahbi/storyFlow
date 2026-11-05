@@ -171,6 +171,13 @@ class Project(models.Model):
     # Editable system prompt used by metadata management to draft a YouTube
     # thumbnail image prompt.  Empty means use the built-in default prompt.
     thumbnail_system_prompt = models.TextField(blank=True, default='')
+    # Editable prompts and saved output for the upload-ready YouTube title and
+    # description.  The project's own ``title`` stays the internal working
+    # title; the operator can explicitly promote ``upload_title`` to it.
+    title_system_prompt = models.TextField(blank=True, default='')
+    description_system_prompt = models.TextField(blank=True, default='')
+    upload_title = models.CharField(max_length=255, blank=True, default='')
+    upload_description = models.TextField(blank=True, default='')
 
     # ── Per-project settings (copied from GlobalSettings on creation) ──
 

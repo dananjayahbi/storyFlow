@@ -857,6 +857,8 @@ class ProjectDetailSerializer(
             'has_manual_thumbnail', 'active_thumbnail_url',
             'has_active_thumbnail', 'thumbnail_source',
             'thumbnail_system_prompt',
+            'title_system_prompt', 'description_system_prompt',
+            'upload_title', 'upload_description',
             'reset_settings',
             # ── Per-project settings ──
             'default_voice_id', 'tts_speed',

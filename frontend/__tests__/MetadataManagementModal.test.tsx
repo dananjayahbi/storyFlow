@@ -4,6 +4,8 @@ import { MetadataManagementModal } from '@/components/MetadataManagementModal';
 import type { ProjectDetail, ProjectThumbnail, Segment } from '@/lib/types';
 import {
   deleteProjectThumbnailAsset,
+  generateProjectDescription,
+  generateProjectTitle,
   generateThumbnailPrompt,
   setActiveProjectThumbnail,
   updateProject,
@@ -21,6 +23,8 @@ jest.mock('sonner', () => ({
 
 jest.mock('@/lib/api', () => ({
   generateThumbnailPrompt: jest.fn(),
+  generateProjectTitle: jest.fn(),
+  generateProjectDescription: jest.fn(),
   uploadProjectThumbnailAsset: jest.fn(),
   setActiveProjectThumbnail: jest.fn(),
   deleteProjectThumbnailAsset: jest.fn(),
@@ -28,6 +32,8 @@ jest.mock('@/lib/api', () => ({
 }));
 
 const mockGenerate = generateThumbnailPrompt as jest.Mock;
+const mockGenerateTitle = generateProjectTitle as jest.Mock;
+const mockGenerateDescription = generateProjectDescription as jest.Mock;
 const mockUpload = uploadProjectThumbnailAsset as jest.Mock;
 const mockActivate = setActiveProjectThumbnail as jest.Mock;
 const mockDelete = deleteProjectThumbnailAsset as jest.Mock;
@@ -283,5 +289,93 @@ describe('MetadataManagementModal', () => {
       expect(mockDelete).toHaveBeenCalledWith('project-1', 'thumb-2'),
     );
     expect(onProjectRefreshed).toHaveBeenCalled();
+  });
+
+  it('generates an upload-ready title and can promote it to the project title', async () => {
+    const project = makeProject([makeSegment(0), makeSegment(1)], {
+      title_system_prompt: 'Saved title prompt.',
+      upload_title: '',
+    });
+    mockGenerateTitle.mockResolvedValue({
+      title: 'The Secret Trench Nobody Explored',
+      model: 'test-model',
+    });
+    mockUpdateProject.mockResolvedValue({
+      ...project,
+      title: 'The Secret Trench Nobody Explored',
+    });
+    const { onProjectRefreshed } = renderModal(project);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Title' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /Title system prompt/i }),
+    );
+    fireEvent.change(screen.getByLabelText('Title system prompt'), {
+      target: { value: 'Custom title prompt.' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: /Save title prompt/i }),
+    );
+    await waitFor(() =>
+      expect(mockUpdateProject).toHaveBeenCalledWith('project-1', {
+        title_system_prompt: 'Custom title prompt.',
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Generate title$/i }));
+
+    await waitFor(() => expect(mockGenerateTitle).toHaveBeenCalledTimes(1));
+    const [projectId, payload] = mockGenerateTitle.mock.calls[0];
+    expect(projectId).toBe('project-1');
+    expect(payload.systemPrompt).toBe('Custom title prompt.');
+    await waitFor(() =>
+      expect(screen.getByLabelText('Generated upload title')).toHaveValue(
+        'The Secret Trench Nobody Explored',
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Use as project title/i }),
+    );
+    await waitFor(() =>
+      expect(mockUpdateProject).toHaveBeenCalledWith('project-1', {
+        title: 'The Secret Trench Nobody Explored',
+      }),
+    );
+    expect(onProjectRefreshed).toHaveBeenCalled();
+  });
+
+  it('generates a copyable SEO description separately from the title', async () => {
+    const project = makeProject([makeSegment(0), makeSegment(1)], {
+      description_system_prompt: 'Saved description prompt.',
+    });
+    mockGenerateDescription.mockResolvedValue({
+      description:
+        'The abyss hides a secret.\n\nWatch the full documentary.\n\n#ocean #documentary',
+      model: 'test-model',
+    });
+    renderModal(project);
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Description' }));
+    fireEvent.change(
+      screen.getByLabelText('Your description instructions'),
+      { target: { value: 'Mention the trench.' } },
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: /^Generate description$/i }),
+    );
+
+    await waitFor(() =>
+      expect(mockGenerateDescription).toHaveBeenCalledWith('project-1', {
+        systemPrompt: 'Saved description prompt.',
+        message: 'Mention the trench.',
+        thumbnailPrompt: '',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText('Generated description')).toHaveValue(
+        'The abyss hides a secret.\n\nWatch the full documentary.\n\n#ocean #documentary',
+      ),
+    );
   });
 });

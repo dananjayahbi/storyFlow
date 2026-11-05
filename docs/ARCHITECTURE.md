@@ -1189,6 +1189,42 @@ the image parts.
 
 ---
 
+### 7.4.6 YouTube metadata management — title and description (New feature #16)
+
+**Files:** `core_engine/metadata_prompts.py`, `api/views.py`
+(`ProjectViewSet`), `components/MetadataManagementModal.tsx`
+
+The same Metadata management dialog has **Title** and **Description** tabs.
+Each tab has its own collapsed, editable system prompt and instruction box,
+plus a separate generate button:
+
+- **Title** uses `DEFAULT_TITLE_SYSTEM_PROMPT` (an SEO title strategist) and
+  writes one upload-ready title of 60-95 characters.
+- **Description** uses `DEFAULT_DESCRIPTION_SYSTEM_PROMPT` (an SEO copywriter)
+  and writes a hook, 2-4 paragraphs and a short hashtag line.
+
+Both prompts are stored per project in `Project.title_system_prompt` and
+`Project.description_system_prompt`. Generated output is persisted separately
+from the internal project title in `Project.upload_title` and
+`Project.upload_description`; both are returned by the project detail endpoint
+and shown in read-only copyable boxes. The title box has a **Use as project
+title** action that promotes the generated title to `Project.title` through the
+normal PATCH endpoint, so the working title is never overwritten implicitly.
+
+Title and description generation only need the script (not the storyboard
+images), but they include the optional active thumbnail prompt when one exists
+so the cover and copy stay consistent.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/projects/<id>/metadata/generate-title/` | Generate and save an upload-ready title |
+| POST | `/api/projects/<id>/metadata/generate-description/` | Generate and save an SEO description |
+
+Both endpoints accept `system_prompt`, `message` and `thumbnail_prompt`, and
+are YouTube-only like the thumbnail routes.
+
+---
+
 ### 7.5 Subtitle Engine
 
 **File:** `core_engine/subtitle_engine.py` (~360 lines)

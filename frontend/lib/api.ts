@@ -257,6 +257,55 @@ export async function deleteProjectThumbnailAsset(
   );
 }
 
+export interface UploadMetadataRequest {
+  systemPrompt?: string;
+  message?: string;
+  /** Optional thumbnail prompt so the text aligns with the selected cover. */
+  thumbnailPrompt?: string;
+}
+
+export interface GenerateTitleResponse {
+  title: string;
+  model: string;
+}
+
+export interface GenerateDescriptionResponse {
+  description: string;
+  model: string;
+}
+
+/** Generate and persist an upload-ready YouTube title. */
+export async function generateProjectTitle(
+  projectId: string,
+  payload: UploadMetadataRequest,
+): Promise<GenerateTitleResponse> {
+  const { data } = await api.post<GenerateTitleResponse>(
+    `/api/projects/${projectId}/metadata/generate-title/`,
+    {
+      system_prompt: payload.systemPrompt,
+      message: payload.message ?? '',
+      thumbnail_prompt: payload.thumbnailPrompt ?? '',
+    },
+  );
+  return data;
+}
+
+/** Generate and persist an SEO-finetuned YouTube description. */
+export async function generateProjectDescription(
+  projectId: string,
+  payload: UploadMetadataRequest,
+): Promise<GenerateDescriptionResponse> {
+  const { data } = await api.post<GenerateDescriptionResponse>(
+    `/api/projects/${projectId}/metadata/generate-description/`,
+    {
+      system_prompt: payload.systemPrompt,
+      message: payload.message ?? '',
+      thumbnail_prompt: payload.thumbnailPrompt ?? '',
+    },
+  );
+  return data;
+}
+
 export async function importProject(payload: ImportProjectRequest): Promise<ProjectDetail> {
   const response = await api.post<ProjectDetail>('/api/projects/import/', payload);
   return response.data;

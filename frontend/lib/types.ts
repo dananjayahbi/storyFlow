@@ -84,6 +84,12 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   thumbnail_readiness?: ThumbnailReadiness;
   /** Editable system prompt for thumbnail prompt generation (empty = default). */
   thumbnail_system_prompt?: string;
+  /** Editable system prompts for upload-ready title/description generation. */
+  title_system_prompt?: string;
+  description_system_prompt?: string;
+  /** Saved upload-ready YouTube metadata (separate from the project title). */
+  upload_title?: string;
+  upload_description?: string;
 
   // ── Per-project settings ──
   default_voice_id: string;

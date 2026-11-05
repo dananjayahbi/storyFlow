@@ -241,6 +241,139 @@ class MetadataManagementTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('at least 2', response.data['error'])
 
+    def test_title_and_description_prompts_can_be_saved(self):
+        response = self.client.patch(
+            f'/api/projects/{self.project.id}/{self.scope}',
+            {
+                'title_system_prompt': 'My title prompt.',
+                'description_system_prompt': 'My description prompt.',
+            },
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['title_system_prompt'], 'My title prompt.')
+        self.assertEqual(
+            response.data['description_system_prompt'],
+            'My description prompt.',
+        )
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.title_system_prompt, 'My title prompt.')
+        self.assertEqual(
+            self.project.description_system_prompt, 'My description prompt.'
+        )
+
+    def test_generate_title_uses_saved_prompt_and_persists_upload_title(self):
+        self.project.title_system_prompt = 'Saved title prompt.'
+        self.project.save(update_fields=['title_system_prompt'])
+        with mock.patch(
+            'core_engine.ai_client.chat_completion',
+            return_value='"The Deep Sea Secret Nobody Tells You"',
+        ) as completion:
+            response = self.client.post(
+                f'/api/projects/{self.project.id}/metadata/generate-title/'
+                f'{self.scope}',
+                {},
+                format='multipart',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertEqual(
+            response.data['title'],
+            'The Deep Sea Secret Nobody Tells You',
+        )
+        self.assertEqual(response.data['model'], 'test-vision-model')
+        self.project.refresh_from_db()
+        self.assertEqual(
+            self.project.upload_title,
+            'The Deep Sea Secret Nobody Tells You',
+        )
+
+        messages = completion.call_args.kwargs['messages']
+        self.assertEqual(messages[0]['content'], 'Saved title prompt.')
+        self.assertIn('Deep Sea Documentary', messages[1]['content'])
+        self.assertIn('Block 1 narration about the abyss', messages[1]['content'])
+
+        detail = self._detail()
+        self.assertEqual(
+            detail['upload_title'],
+            'The Deep Sea Secret Nobody Tells You',
+        )
+
+    def test_generate_description_persists_upload_description(self):
+        with mock.patch(
+            'core_engine.ai_client.chat_completion',
+            return_value=(
+                'The abyss hides a secret.\n\n'
+                'This documentary follows the team into the deep.\n\n'
+                '#ocean #documentary'
+            ),
+        ) as completion:
+            response = self.client.post(
+                f'/api/projects/{self.project.id}/metadata/generate-description/'
+                f'{self.scope}',
+                {
+                    'system_prompt': 'Custom description prompt.',
+                    'message': 'Mention the trench.',
+                    'thumbnail_prompt': 'A diver facing the abyss.',
+                },
+                format='multipart',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIn('The abyss hides a secret.', response.data['description'])
+        self.assertTrue(response.data['description'].endswith('#ocean #documentary'))
+        self.project.refresh_from_db()
+        self.assertEqual(
+            self.project.upload_description,
+            response.data['description'],
+        )
+
+        messages = completion.call_args.kwargs['messages']
+        self.assertEqual(messages[0]['content'], 'Custom description prompt.')
+        self.assertIn('Mention the trench.', messages[1]['content'])
+        self.assertIn('A diver facing the abyss.', messages[1]['content'])
+
+    def test_generate_title_requires_a_script(self):
+        empty_project = Project.objects.create(
+            title='Empty project', section='youtube', account=self.account
+        )
+        Segment.objects.create(
+            project=empty_project,
+            sequence_index=0,
+            text_content='',
+        )
+        response = self.client.post(
+            f'/api/projects/{empty_project.id}/metadata/generate-title/'
+            f'{self.scope}',
+            {},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Craft the script', response.data['error'])
+
+    def test_generate_title_is_youtube_only(self):
+        facebook_account = Account.objects.create(
+            name='Facebook Metadata', section='facebook'
+        )
+        facebook_project = Project.objects.create(
+            title='Facebook metadata project',
+            section='facebook',
+            account=facebook_account,
+        )
+        Segment.objects.create(
+            project=facebook_project,
+            sequence_index=0,
+            text_content='A Facebook story.',
+        )
+        response = self.client.post(
+            f'/api/projects/{facebook_project.id}/metadata/generate-title/'
+            f'?section=facebook&account={facebook_account.id}',
+            {},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('only available for YouTube', response.data['error'])
+
     def test_build_messages_include_external_images_and_pdf_text(self):
         all_segments = list(self.project.segments.all().order_by('sequence_index'))
         messages = metadata_prompts.build_thumbnail_messages(
