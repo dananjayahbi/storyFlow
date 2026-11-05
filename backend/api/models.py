@@ -409,6 +409,9 @@ class Rendering(models.Model):
     segment_count = models.PositiveIntegerField(default=0)
     file_size = models.PositiveBigIntegerField(default=0)
     duration = models.FloatField(null=True, blank=True)
+    # Wall-clock time spent in the video render pipeline for this asset,
+    # in seconds.  Null for legacy rows that predate the measurement.
+    render_time_seconds = models.FloatField(null=True, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -835,6 +835,7 @@ class ProjectDetailSerializer(
     segments = SegmentSerializer(many=True, read_only=True)
     thumbnails = ProjectThumbnailSerializer(many=True, read_only=True)
     rendering_count = serializers.SerializerMethodField()
+    latest_rendering = serializers.SerializerMethodField()
     account_name = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
     manual_thumbnail_url = serializers.SerializerMethodField()
@@ -853,7 +854,8 @@ class ProjectDetailSerializer(
             'id', 'title', 'section', 'account', 'account_name',
             'created_at', 'updated_at', 'status', 'resolution_width',
             'resolution_height', 'framerate', 'output_path', 'segments',
-            'rendering_count', 'thumbnails', 'thumbnail_readiness',
+            'rendering_count', 'latest_rendering', 'thumbnails',
+            'thumbnail_readiness',
             'thumbnail', 'thumbnail_url', 'manual_thumbnail_url',
             'has_manual_thumbnail', 'active_thumbnail_url',
             'has_active_thumbnail', 'thumbnail_source',
@@ -889,6 +891,20 @@ class ProjectDetailSerializer(
 
     def get_rendering_count(self, obj):
         return obj.renderings.count()
+
+    def get_latest_rendering(self, obj):
+        """Return the newest render's timing metadata for the editor banner."""
+        latest = obj.renderings.order_by('-created_at').first()
+        if latest is None:
+            return None
+        return {
+            'id': str(latest.id),
+            'created_at': latest.created_at.isoformat(),
+            'status': latest.status,
+            'status_label': latest.get_status_display(),
+            'duration': latest.duration,
+            'render_time_seconds': latest.render_time_seconds,
+        }
 
     def get_account_name(self, obj):
         return obj.account.name if obj.account_id else None

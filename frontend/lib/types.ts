@@ -74,10 +74,22 @@ export interface ProjectRenderReadiness {
 }
 
 /** Extended project data returned by the detail endpoint. */
+export interface LatestRendering {
+  id: string;
+  created_at: string;
+  status: RenderingStatus;
+  status_label: string;
+  duration: number | null;
+  /** Wall-clock seconds spent in the video render pipeline. */
+  render_time_seconds: number | null;
+}
+
 export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   output_path: string | null;
   segments: Segment[];
   rendering_count?: number;
+  /** Newest render, including how long it took to generate. */
+  latest_rendering?: LatestRendering | null;
   /** Uploaded thumbnail candidates; one may be active. */
   thumbnails?: ProjectThumbnail[];
   /** Backend-computed gating for thumbnail prompt generation. */
@@ -440,6 +452,8 @@ export interface RenderProgress {
   total_segments: number;
   percentage: number;
   current_phase: string;
+  /** Wall-clock seconds the completed render took, when known. */
+  render_time_seconds?: number | null;
 }
 
 /** Response from GET /api/projects/{id}/status/. */
@@ -724,6 +738,8 @@ export interface GalleryItem {
   segment_count: number;
   file_size: number;
   duration: number | null;
+  /** Wall-clock seconds spent rendering this video, when known. */
+  render_time_seconds?: number | null;
   stream_url: string;
   download_url: string;
 }

@@ -195,7 +195,9 @@ The same tab has a three-block **demo playground**:
   only offers ready projects, rendering them sequentially with cancel and
   automatic readiness refresh afterwards.
 - Completed videos appear in the **Gallery**, with hover previews, in-browser
-  playback, seeking, download and fullscreen.
+  playback, seeking, download and fullscreen. Each render also records how long
+  the full video-generation pipeline took; the gallery card, player footer and
+  project-detail completion banner show it (for example "Rendered in 2m 13s").
 - Each render is stored as its own asset linked to the project, so re-rendering
   never overwrites an earlier version.
 - Assets move through **Rendered → Ready to publish → Published**; the Gallery

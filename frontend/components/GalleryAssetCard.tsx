@@ -25,7 +25,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { cn, formatGenerationTime } from '@/lib/utils';
 
 /**
  * Long video titles scroll like a news ticker on hover.  The text only
@@ -241,6 +241,11 @@ export function GalleryAssetCard({
               <span>{formatGalleryRelativeTime(item.created_at)}</span>
               <span>{item.segment_count} segments</span>
               <span>{formatGalleryFileSize(item.file_size)}</span>
+              {item.render_time_seconds != null && (
+                <span title="Time spent generating the full video">
+                  Rendered in {formatGenerationTime(item.render_time_seconds)}
+                </span>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center">

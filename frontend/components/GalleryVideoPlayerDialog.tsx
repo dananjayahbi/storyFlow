@@ -46,7 +46,7 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatGenerationTime } from '@/lib/utils';
 import { useMediaKeyboardShortcuts } from '@/lib/useMediaKeyboardShortcuts';
 
 function formatAbsoluteDate(dateString: string): string {
@@ -590,6 +590,11 @@ export function GalleryVideoPlayerDialog({
             <span>{item.framerate} fps</span>
             <span>{item.segment_count} segments</span>
             <span>{formatGalleryFileSize(item.file_size)}</span>
+            {item.render_time_seconds != null && (
+              <span title="Time spent generating the full video">
+                Rendered in {formatGenerationTime(item.render_time_seconds)}
+              </span>
+            )}
             <Badge variant="outline" className={cn('gap-1 text-[10px]', status.badge)}>
               <span className={cn('size-1.5 rounded-full', status.dot)} />
               {status.label}

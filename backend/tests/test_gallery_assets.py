@@ -36,7 +36,10 @@ class GalleryAssetTests(APITestCase):
         shutil.rmtree(TEMP_MEDIA_ROOT, ignore_errors=True)
         super().tearDownClass()
 
-    def _rendering(self, project, status='rendered', name='asset.mp4'):
+    def _rendering(
+        self, project, status='rendered', name='asset.mp4',
+        render_time_seconds=None,
+    ):
         relative = f'Facebook/{self.account.id}/{project.id}/renderings/{name}'
         absolute = os.path.join(settings.MEDIA_ROOT, relative)
         os.makedirs(os.path.dirname(absolute), exist_ok=True)
@@ -48,6 +51,7 @@ class GalleryAssetTests(APITestCase):
             file_path=relative,
             status=status,
             file_size=len(b'video-bytes'),
+            render_time_seconds=render_time_seconds,
         )
 
     def test_list_returns_multiple_renderings_per_project(self):
@@ -62,6 +66,36 @@ class GalleryAssetTests(APITestCase):
         self.assertTrue(
             all(item['project_id'] == str(self.project.id) for item in response.data)
         )
+
+    def test_list_exposes_render_time_seconds(self):
+        rendering = self._rendering(
+            self.project, name='timed.mp4', render_time_seconds=125.5,
+        )
+
+        response = self.client.get('/api/gallery/?section=facebook')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = next(
+            entry for entry in response.data
+            if entry['id'] == str(rendering.id)
+        )
+        self.assertEqual(item['render_time_seconds'], 125.5)
+
+    def test_project_detail_exposes_latest_render_time_seconds(self):
+        rendering = self._rendering(
+            self.project, name='latest.mp4', render_time_seconds=91.25,
+        )
+
+        response = self.client.get(
+            f'/api/projects/{self.project.id}/'
+            f'?section=facebook&account={self.account.id}'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        latest = response.data['latest_rendering']
+        self.assertEqual(latest['id'], str(rendering.id))
+        self.assertEqual(latest['render_time_seconds'], 91.25)
+        self.assertEqual(latest['status'], 'rendered')
 
     def test_filter_by_project_status_and_search(self):
         rendered = self._rendering(self.project, name='rendered.mp4')
@@ -134,6 +168,7 @@ class GalleryAssetTests(APITestCase):
             source,
             duration=12.5,
             segment_count=3,
+            render_time_seconds=42.75,
         )
 
         self.assertTrue(os.path.isfile(source) is False)
@@ -142,6 +177,7 @@ class GalleryAssetTests(APITestCase):
         self.assertTrue(rendering.file_path.endswith(f'{rendering.id}.mp4'))
         self.assertEqual(rendering.status, 'rendered')
         self.assertEqual(rendering.duration, 12.5)
+        self.assertEqual(rendering.render_time_seconds, 42.75)
         self.project.refresh_from_db()
         self.assertEqual(self.project.output_path, rendering.file_path)
 

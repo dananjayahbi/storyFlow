@@ -24,7 +24,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { cn, formatGenerationTime } from '@/lib/utils';
 import { generateSegmentTtsScript } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -84,6 +84,12 @@ export default function TimelineEditorPage() {
     renderStatus, renderProgress, outputUrl,
     startRender, resetRenderState, cancelRender, downloadVideo,
   } = useProjectStore();
+
+  // Persisted/just-finished render duration for the completed banner.
+  const lastRenderTimeSeconds =
+    renderProgress?.render_time_seconds ??
+    project?.latest_rendering?.render_time_seconds ??
+    null;
 
   // ── Rename state ──
   const [isRenaming, setIsRenaming] = useState(false);
@@ -645,6 +651,11 @@ export default function TimelineEditorPage() {
                   <p className="text-xs font-medium text-green-600 dark:text-green-400 flex items-center gap-1.5">
                     <CheckCircle className="h-3 w-3" />
                     Render complete — ready to download
+                    {lastRenderTimeSeconds != null && (
+                      <span className="font-normal text-muted-foreground">
+                        · generated in {formatGenerationTime(lastRenderTimeSeconds)}
+                      </span>
+                    )}
                   </p>
                 )}
                 {renderStatus === 'failed' && (

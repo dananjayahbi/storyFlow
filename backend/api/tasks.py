@@ -432,8 +432,11 @@ def render_task_function(project_id: str, task_id: str) -> None:
             )
 
     try:
-        # Step 4 — blocking render call
+        # Step 4 — blocking render call.  Measure the full video-render
+        # pipeline so the Gallery can show how long each video took.
+        render_started = time.perf_counter()
         result = render_project(project_id, on_progress=on_progress)
+        render_time_seconds = round(time.perf_counter() - render_started, 2)
 
         # Step 5 — success: keep every render as its own gallery asset.
         # register_rendering moves the exported final.mp4 into a permanent
@@ -453,6 +456,7 @@ def render_task_function(project_id: str, task_id: str) -> None:
                 duration=result.get("duration"),
                 file_size=result.get("file_size"),
                 segment_count=result.get("total_segments"),
+                render_time_seconds=render_time_seconds,
             )
 
         # Store result data in TaskManager progress for the status endpoint
@@ -464,6 +468,7 @@ def render_task_function(project_id: str, task_id: str) -> None:
             output_path=result.get("output_path", ""),
             duration=result.get("duration", 0),
             file_size=result.get("file_size", 0),
+            render_time_seconds=render_time_seconds,
         )
 
     except RenderCancelled:

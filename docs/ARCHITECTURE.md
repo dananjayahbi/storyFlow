@@ -554,7 +554,7 @@ Each completed export creates one `Rendering` row. It is the durable link betwee
 - **Project link:** FK to `Project` (`related_name="renderings"`); deleting the project cascades the rows, while deleting a rendering never deletes the project/script.
 - **File:** `file_path` points at `<Section>/<account>/<project>/renderings/<rendering-id>.mp4`, so re-rendering cannot overwrite an earlier version.
 - **Publishing workflow:** `status` is `rendered`, `ready_to_publish` or `published`; `published_at` records the transition to published.
-- **Metadata:** title snapshot, resolution, framerate, segment count, duration, file size and timestamps.
+- **Metadata:** title snapshot, resolution, framerate, segment count, duration, file size, timestamps, and `render_time_seconds` — the wall-clock time spent in the full video-render pipeline. The editor's completed banner, gallery cards and player footer format it as `2m 13s`; rows created before this measurement simply leave it null.
 - **Compatibility:** rows backfilled from pre-feature projects reuse the project id, so old `/api/gallery/<project-id>/...` links continue to resolve.
 
 #### Segment Model (Content Unit)

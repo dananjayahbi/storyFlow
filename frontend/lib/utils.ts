@@ -34,6 +34,26 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
+ * Format a generation duration for display in the editor and Gallery.
+ *
+ * @example formatGenerationTime(9.4)    → "9s"
+ * @example formatGenerationTime(133.2)  → "2m 13s"
+ * @example formatGenerationTime(3725)   → "1h 2m"
+ */
+export function formatGenerationTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  const total = Math.round(seconds);
+  if (total < 60) return `${total}s`;
+  const hours = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (hours > 0) {
+    return secs > 0 ? `${hours}h ${mins}m ${secs}s` : `${hours}h ${mins}m`;
+  }
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+/**
  * Format bytes into a human-readable file size string.
  *
  * @example formatFileSize(1024)      → "1.0 KB"

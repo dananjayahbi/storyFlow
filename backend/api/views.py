@@ -1096,11 +1096,16 @@ class ProjectViewSet(viewsets.ModelViewSet):
         elif project.status == STATUS_COMPLETED:
             if project.output_path:
                 data['output_url'] = media_url(project.output_path)
+            latest_rendering = project.renderings.order_by('-created_at').first()
             data['progress'] = {
                 'current_segment': total_segments,
                 'total_segments': total_segments,
                 'percentage': 100,
                 'current_phase': 'Export complete',
+                'render_time_seconds': (
+                    latest_rendering.render_time_seconds
+                    if latest_rendering else None
+                ),
             }
 
         # Step 5 — FAILED: last known progress, no output_url
@@ -3668,6 +3673,7 @@ def _gallery_item(rendering, video_path):
         'segment_count': rendering.segment_count,
         'file_size': file_size or 0,
         'duration': rendering.duration,
+        'render_time_seconds': rendering.render_time_seconds,
         'stream_url': f'/api/gallery/{rendering.id}/stream/',
         'download_url': f'/api/gallery/{rendering.id}/download/',
     }

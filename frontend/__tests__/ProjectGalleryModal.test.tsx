@@ -24,6 +24,7 @@ const mockItem: GalleryItem = {
   segment_count: 8,
   file_size: 12 * 1024 * 1024,
   duration: 42,
+  render_time_seconds: 125,
   stream_url: '/api/gallery/video-1/stream/',
   download_url: '/api/gallery/video-1/download/',
 };
@@ -77,6 +78,17 @@ describe('ProjectGalleryModal', () => {
     expect(
       player.querySelector('video')?.getAttribute('src'),
     ).toContain('/api/gallery/video-1/stream/');
+  });
+
+  it('shows the render generation time on the card and in the player', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    expect(await screen.findAllByText(/Rendered in 2m 5s/)).toHaveLength(1);
+
+    await user.click(screen.getByText('First video'));
+
+    expect(await screen.findAllByText(/Rendered in 2m 5s/)).toHaveLength(2);
   });
 
   it('updates the status of one rendering from the player popup', async () => {

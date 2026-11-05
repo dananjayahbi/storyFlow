@@ -757,6 +757,12 @@ player (seek, volume, speed, loop, picture-in-picture and fullscreen), or use
 the download button. The popup player also supports keyboard navigation (Space,
 arrows, J/L, M, Home/End and F); a hint row in the player lists the shortcuts.
 
+Every render stores the wall-clock time spent in the full video-render pipeline.
+Gallery cards, the player's metadata footer and the project-detail completion
+banner show it as **Rendered in 2m 13s** (older assets without a measurement
+simply omit it). Re-rendering creates a new asset with its own timing, so you
+can compare pipeline performance across versions.
+
 ### Configuring the AI model
 
 Each account has its own model and system prompt. Open
