@@ -303,6 +303,22 @@ keeps a single `<audio>` element mounted for the lifetime of the component and
 commits the final slider value on pointer/key release, so dragging the timeline
 never fights with `timeupdate` events.
 
+The custom audio and gallery-video players are keyboard operable. Focus the
+player (or open the gallery player popup) and use:
+
+| Key | Action |
+|-----|--------|
+| `Space` / `K` | Play or pause |
+| `←` / `→` | Seek back / forward 5 s (`Shift` = 10 s) |
+| `J` / `L` | Seek back / forward 10 s |
+| `↑` / `↓` | Volume up / down |
+| `M` | Mute / unmute |
+| `Home` / `End` | Jump to the start / end |
+| `F` | Toggle fullscreen (video player) |
+
+Native `<video controls>` players (project preview and Audio Mix demo) keep the
+browser's own media shortcuts.
+
 ### Dynamic soundtrack generation (MusicGen)
 
 StoryFlow can compose a continuous soundtrack for a documentary script with
@@ -738,7 +754,8 @@ own gallery asset linked back to the project.
 Tiles use a responsive masonry layout: 2 columns on phones, scaling up to 6
 columns on wide screens. Hover a tile for a muted preview, click it for the full
 player (seek, volume, speed, loop, picture-in-picture and fullscreen), or use
-the download button.
+the download button. The popup player also supports keyboard navigation (Space,
+arrows, J/L, M, Home/End and F); a hint row in the player lists the shortcuts.
 
 ### Configuring the AI model
 

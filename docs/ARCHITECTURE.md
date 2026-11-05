@@ -1658,6 +1658,27 @@ controls and save behaviour.
 | `Shift+?` | Show Shortcuts Help |
 | `Escape` | Close Modals |
 
+##### Media player shortcuts
+
+`AudioPlayer` and `GalleryVideoPlayerDialog` use the shared
+`useMediaKeyboardShortcuts` hook (`frontend/lib/useMediaKeyboardShortcuts.ts`).
+The listener is scoped to the inline player so several segment players can
+coexist; the gallery dialog attaches it to the document while its modal is
+open. Typing fields, the volume range input and focused buttons keep their
+native keyboard behaviour.
+
+| Key | Action |
+|-----|--------|
+| `Space` / `K` | Play or pause |
+| `←` / `→` | Seek ±5 s (`Shift` doubles the step) |
+| `J` / `L` | Seek ±10 s |
+| `↑` / `↓` | Volume ±10 % (dialog ±5 %) |
+| `M` | Mute / unmute |
+| `Home` / `End` | Jump to start / end |
+| `F` | Fullscreen (video only) |
+
+Native `<video controls>` instances already expose the browser's media keys.
+
 #### Bulk Render Queue
 
 The `/bulk-create` page allows batch rendering multiple projects:

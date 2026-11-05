@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn, formatTime } from '@/lib/utils';
 import { getApiBaseUrl } from '@/lib/apiConfig';
+import { useMediaKeyboardShortcuts } from '@/lib/useMediaKeyboardShortcuts';
 
 interface AudioPlayerProps {
   /** Full URL to the .wav file (relative or absolute). */
@@ -17,6 +18,7 @@ interface AudioPlayerProps {
 }
 
 export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const isSeekingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -119,8 +121,28 @@ export function AudioPlayer({ audioUrl, duration, className }: AudioPlayerProps)
     setIsPlaying(false);
   }, []);
 
+  // Keyboard shortcuts (Space/K play-pause, arrows seek/volume, M mute, …).
+  // Scoped to this player so several segment players can coexist.
+  useMediaKeyboardShortcuts(containerRef, audioRef, {
+    enabled: isLoaded && !hasError,
+    onTogglePlay: togglePlay,
+    seekStep: 5,
+    volumeStep: 0.1,
+  });
+
   return (
-    <div className={cn('flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2', className)}>
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      role="group"
+      aria-label="Audio player"
+      aria-keyshortcuts="Space K ArrowLeft ArrowRight J L ArrowUp ArrowDown M Home End"
+      className={cn(
+        'flex flex-col gap-1 rounded-md sm:flex-row sm:items-center sm:gap-2',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        className,
+      )}
+    >
       {/* The <audio> element is always mounted so React never swaps the
           element (and its media session) while loading or after an error. */}
       <audio

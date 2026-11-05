@@ -109,6 +109,31 @@ describe('AudioPlayer', () => {
     expect(getAudioEl().currentTime).toBeGreaterThan(0);
   });
 
+  it('exposes keyboard navigation on the player surface', async () => {
+    render(<AudioPlayer audioUrl="/test.wav" duration={10} />);
+    fireAudioEvent('loadedmetadata');
+    const player = screen.getByRole('group', { name: 'Audio player' });
+
+    // Space toggles play/pause.
+    await act(async () => {
+      fireEvent.keyDown(player, { key: ' ' });
+    });
+    expect(playSpy).toHaveBeenCalled();
+
+    // Left/right arrows seek by five seconds.
+    fireEvent.keyDown(player, { key: 'ArrowRight' });
+    expect(getAudioEl().currentTime).toBe(5);
+    fireEvent.keyDown(player, { key: 'ArrowLeft' });
+    expect(getAudioEl().currentTime).toBe(0);
+
+    // Up/down arrows adjust volume and M toggles mute.
+    getAudioEl().volume = 0.5;
+    fireEvent.keyDown(player, { key: 'ArrowUp' });
+    expect(getAudioEl().volume).toBeCloseTo(0.6);
+    fireEvent.keyDown(player, { key: 'm' });
+    expect(getAudioEl().muted).toBe(true);
+  });
+
   it('syncs the displayed time after a native seek', () => {
     render(<AudioPlayer audioUrl="/test.wav" duration={10} />);
     fireAudioEvent('loadedmetadata');

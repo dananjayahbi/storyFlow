@@ -47,6 +47,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useMediaKeyboardShortcuts } from '@/lib/useMediaKeyboardShortcuts';
 
 function formatAbsoluteDate(dateString: string): string {
   return new Date(dateString).toLocaleString();
@@ -233,6 +234,20 @@ export function GalleryVideoPlayerDialog({
     if (video?.requestFullscreen) void video.requestFullscreen();
   }, []);
 
+  // Keyboard navigation for the modal player. The dialog is modal, so the
+  // listener is attached to the document while it is open; typing fields and
+  // the volume slider keep their native keyboard behaviour.
+  useMediaKeyboardShortcuts(null, videoRef, {
+    enabled: !!item,
+    onTogglePlay: togglePlay,
+    onSkip: skip,
+    onToggleMute: toggleMute,
+    onVolumeChange: handleVolumeChange,
+    onToggleFullscreen: toggleFullscreen,
+    seekStep: 5,
+    volumeStep: 0.05,
+  });
+
   const status = item ? galleryStatusMeta(item.status) : null;
 
   return (
@@ -245,6 +260,7 @@ export function GalleryVideoPlayerDialog({
       <DialogContent
         showCloseButton={false}
         aria-describedby={undefined}
+        aria-keyshortcuts="Space K ArrowLeft ArrowRight J L ArrowUp ArrowDown M Home End F"
         className="sm:max-w-[95vw] max-w-[95vw] w-[95vw] max-h-[95vh] p-0 gap-0 overflow-hidden"
       >
         {/* Custom header with proper button layout */}
@@ -534,6 +550,34 @@ export function GalleryVideoPlayerDialog({
                 </Tooltip>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Keyboard shortcut hint */}
+        {item && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-1.5 text-[11px] text-muted-foreground">
+            <span>
+              <kbd className="rounded border px-1 font-mono text-[10px]">Space</kbd>{' '}
+              play/pause
+            </span>
+            <span>
+              <kbd className="rounded border px-1 font-mono text-[10px]">←</kbd>
+              <kbd className="rounded border px-1 font-mono text-[10px]">→</kbd>{' '}
+              seek 5s
+            </span>
+            <span>
+              <kbd className="rounded border px-1 font-mono text-[10px]">↑</kbd>
+              <kbd className="rounded border px-1 font-mono text-[10px]">↓</kbd>{' '}
+              volume
+            </span>
+            <span>
+              <kbd className="rounded border px-1 font-mono text-[10px]">M</kbd>{' '}
+              mute
+            </span>
+            <span>
+              <kbd className="rounded border px-1 font-mono text-[10px]">F</kbd>{' '}
+              fullscreen
+            </span>
           </div>
         )}
 

@@ -204,7 +204,10 @@ The same tab has a three-block **demo playground**:
 - A project's detail header has **Project gallery**, a full-viewport modal that
   lists every rendering for that project (including its own delete actions).
   Clicking a tile opens the shared popup player, and both the player header and
-  each tile's status badge can update that individual asset's status.
+  each tile's status badge can update that individual asset's status. The
+  inline audio player and the gallery popup player support keyboard navigation:
+  Space/K play-pause, arrows seek and change volume, J/L seek 10 s, M mutes,
+  Home/End jump to the ends and F toggles fullscreen.
 
 ### 3.9 Script Craft (AI writer)
 
