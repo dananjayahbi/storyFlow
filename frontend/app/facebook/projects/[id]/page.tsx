@@ -11,6 +11,7 @@ import { BgmToolbarControls } from '@/components/BgmToolbarControls';
 import { BgmGenerationProgress } from '@/components/BgmGenerationProgress';
 import ImportDialog from '@/components/ImportDialog';
 import { ProjectGalleryModal } from '@/components/ProjectGalleryModal';
+import { MetadataManagementModal } from '@/components/MetadataManagementModal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,7 +19,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ArrowLeft, Volume2, Film, Loader2, X, FileUp, Download, CheckCircle, AlertCircle,
-  ChevronLeft, ChevronRight, ChevronDown, Pencil, Sparkles, Zap, Images,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, Sparkles, Zap, Images, Tags,
 } from 'lucide-react';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -69,11 +70,12 @@ export default function TimelineEditorPage() {
   const id = params.id as string;
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showGalleryModal, setShowGalleryModal] = useState(false);
+  const [showMetadataModal, setShowMetadataModal] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
   const {
     project, segments, isLoading, error,
-    fetchProject, addSegment, importSegmentsToProject, updateSegment, deleteSegment,
+    fetchProject, refreshProject, addSegment, importSegmentsToProject, updateSegment, deleteSegment,
     uploadImage, removeImage, reset,
     bulkGenerationProgress, bulkError, clearBulkError,
     generateAllAudio, cancelGeneration,
@@ -506,6 +508,18 @@ export default function TimelineEditorPage() {
                   </Badge>
                 )}
               </Button>
+              {section === 'youtube' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 text-xs"
+                  onClick={() => setShowMetadataModal(true)}
+                  title="Draft the thumbnail prompt and manage project thumbnails"
+                >
+                  <Tags className="mr-1.5 size-3.5" />
+                  Metadata management
+                </Button>
+              )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <Tooltip delayDuration={0}>
@@ -796,6 +810,15 @@ export default function TimelineEditorPage() {
           projectTitle={project.title}
           onChanged={() => fetchProject(id)}
         />
+
+        {section === 'youtube' && (
+          <MetadataManagementModal
+            open={showMetadataModal}
+            onOpenChange={setShowMetadataModal}
+            project={project}
+            onProjectRefreshed={() => refreshProject(id)}
+          />
+        )}
       </div>
     </TooltipProvider>
   );

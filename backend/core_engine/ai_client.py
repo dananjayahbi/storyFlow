@@ -219,7 +219,7 @@ def chat_completion(
     base_url: str,
     api_key: str,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float = 0.7,
     timeout: int = 180,
 ) -> str:

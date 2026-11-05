@@ -75,6 +75,24 @@ def project_thumbnail_path(instance, filename):
     )
 
 
+def project_thumbnail_asset_path(instance, filename):
+    """Store one generated thumbnail variant under the project's folder.
+
+    Metadata management can keep several uploaded thumbnails and switch
+    between them, so every variant gets a unique file name.  The active
+    variant is tracked with ``ProjectThumbnail.is_active`` rather than by
+    overwriting the manual cover field.
+    """
+    extension = os.path.splitext(filename)[1].lower() or '.jpg'
+    return project_relpath(
+        instance.project.section,
+        instance.project.id,
+        'thumbnails',
+        f'{uuid.uuid4().hex[:12]}{extension}',
+        account_id=instance.project.account_id,
+    )
+
+
 class Account(models.Model):
     """A Facebook page or YouTube account owned by one workspace section.
 
@@ -150,6 +168,9 @@ class Project(models.Model):
         null=True,
         max_length=500,
     )
+    # Editable system prompt used by metadata management to draft a YouTube
+    # thumbnail image prompt.  Empty means use the built-in default prompt.
+    thumbnail_system_prompt = models.TextField(blank=True, default='')
 
     # ── Per-project settings (copied from GlobalSettings on creation) ──
 
@@ -291,6 +312,45 @@ class Project(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class ProjectThumbnail(models.Model):
+    """One uploaded YouTube thumbnail candidate for a project.
+
+    Metadata management lets the operator generate several thumbnail prompts
+    and upload several renders.  Exactly one may be active at a time; the
+    active variant becomes the project's cover everywhere (projects page,
+    tiles, gallery headers) without overwriting the legacy manual
+    ``Project.thumbnail`` field.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='thumbnails',
+    )
+    image = models.ImageField(
+        upload_to=project_thumbnail_asset_path,
+        max_length=500,
+    )
+    # Prompt that produced this thumbnail (kept for auditing and reuse).
+    prompt = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['project'],
+                condition=models.Q(is_active=True),
+                name='unique_active_thumbnail_per_project',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Thumbnail for {self.project.title}'
 
 
 RENDERING_STATUS_RENDERED = 'rendered'

@@ -23,7 +23,7 @@ from rest_framework.response import Response
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
     OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
-    DefaultProjectSettings,
+    DefaultProjectSettings, ProjectThumbnail,
     STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED, RENDERABLE_STATUSES,
     RENDERING_STATUSES, RENDERING_STATUS_PUBLISHED,
     SECTION_CHOICES, apply_project_profile, resolve_project_defaults,
@@ -35,7 +35,7 @@ from .serializers import (
     AccountSettingsSerializer, DefaultProjectSettingsSerializer,
     LogoSerializer, OutroVideoSerializer,
     VoiceReferenceSerializer, ScriptSerializer, ChatSessionSerializer,
-    BGMClipSerializer, ALLOWED_RESOLUTIONS,
+    BGMClipSerializer, ProjectThumbnailSerializer, ALLOWED_RESOLUTIONS,
 )
 from .parsers import ParseError
 from .renderings import delete_rendering, resolve_rendering_video
@@ -52,9 +52,11 @@ from .tasks import get_task_manager, render_task_function
 from .validators import (
     validate_image_upload, validate_project_for_render, validate_font_upload,
     validate_voice_reference_upload, validate_bgm_upload,
+    validate_reference_document,
 )
 from core_engine import tts as tts_engine
 from core_engine import music_generator
+from core_engine import metadata_prompts
 from core_engine.model_loader import KokoroModelLoader
 from core_engine.tts_wrapper import construct_audio_path, VALID_VOICE_IDS
 from core_engine import render_utils
@@ -382,6 +384,279 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 }
             )
         return Response({'results': items})
+
+    # ── YouTube metadata management ──────────────────────────────────
+    def _metadata_project(self, request, pk):
+        """Resolve the project and reject metadata work outside YouTube."""
+        project = self.get_object()
+        if project.section != 'youtube':
+            return project, Response(
+                {
+                    'error': (
+                        'Metadata management is only available for YouTube '
+                        'projects.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return project, None
+
+    @staticmethod
+    def _parse_id_list(value):
+        """Accept a JSON array or a comma-separated list of segment IDs."""
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple)):
+            return [str(item) for item in value if str(item).strip()]
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.startswith('['):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if str(item).strip()]
+        return [part.strip() for part in text.split(',') if part.strip()]
+
+    @action(detail=True, methods=['post'], url_path='metadata/thumbnail-prompt')
+    def metadata_thumbnail_prompt(self, request, pk=None):
+        """Draft a thumbnail image prompt from the script and references.
+
+        Request (multipart when files are attached)::
+
+            system_prompt   optional override (saved prompt is the fallback)
+            message         operator instruction
+            segment_ids     JSON array / comma list of storyboard references
+            reference_images  one or more extra image files
+            reference_docs    one or more PDF/TXT/MD/CSV/JSON files
+        """
+        project, error_response = self._metadata_project(request, pk)
+        if error_response is not None:
+            return error_response
+
+        readiness = metadata_prompts.thumbnail_readiness(project)
+        if not readiness['ready']:
+            if not readiness['script_ready']:
+                message = (
+                    'Craft the script before generating a thumbnail prompt.'
+                )
+            else:
+                message = (
+                    f'Add images to at least {readiness["required_images"]} of '
+                    f'{readiness["segment_count"]} blocks before generating a '
+                    'thumbnail prompt.'
+                )
+            return Response(
+                {'error': message, 'readiness': readiness},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        all_segments = list(
+            project.segments.all().order_by('sequence_index')
+        )
+        image_segments = [
+            segment
+            for segment in all_segments
+            if segment.image_file and os.path.exists(segment.image_file.path)
+        ]
+
+        requested_ids = self._parse_id_list(request.data.get('segment_ids'))
+        if requested_ids:
+            by_id = {str(segment.id): segment for segment in image_segments}
+            unknown = [item for item in requested_ids if item not in by_id]
+            if unknown:
+                return Response(
+                    {
+                        'error': (
+                            'Some selected blocks do not belong to this '
+                            'project or have no image.'
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            selected_segments = [
+                by_id[item] for item in requested_ids if item in by_id
+            ]
+        else:
+            selected_segments = image_segments[
+                :metadata_prompts.DEFAULT_BLOCK_REFERENCE_IMAGES
+            ]
+
+        if len(selected_segments) < metadata_prompts.MIN_BLOCK_REFERENCE_IMAGES:
+            return Response(
+                {
+                    'error': (
+                        'Select at least '
+                        f'{metadata_prompts.MIN_BLOCK_REFERENCE_IMAGES} '
+                        'storyboard images as references.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        external_images = request.FILES.getlist('reference_images')
+        for upload in external_images:
+            validate_image_upload(upload)
+
+        documents = request.FILES.getlist('reference_docs')
+        for upload in documents:
+            validate_reference_document(upload)
+
+        raw_system_prompt = request.data.get('system_prompt')
+        if isinstance(raw_system_prompt, str):
+            system_prompt = raw_system_prompt
+        else:
+            system_prompt = project.thumbnail_system_prompt
+
+        user_message = str(request.data.get('message') or '')
+
+        try:
+            config = _resolve_ai_client_config(project.account)
+            result = metadata_prompts.generate_thumbnail_prompt(
+                project=project,
+                segments=all_segments,
+                selected_segments=selected_segments,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                external_images=external_images,
+                documents=documents,
+                model=config['model'],
+                base_url=config['base_url'],
+                api_key=config['api_key'],
+                temperature=config['temperature'],
+            )
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            logger.error('Thumbnail prompt generation failed: %s', exc)
+            return Response(
+                {'error': str(exc) or 'The AI model could not draft a prompt.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({
+            'prompt': result['prompt'],
+            'model': result['model'],
+            'used_segment_ids': [str(segment.id) for segment in selected_segments],
+            'external_image_count': len(external_images),
+            'document_count': len(documents),
+            'readiness': readiness,
+        })
+
+    @action(detail=True, methods=['get', 'post'], url_path='metadata/thumbnails')
+    def metadata_thumbnails(self, request, pk=None):
+        """List or upload project thumbnail candidates."""
+        project, error_response = self._metadata_project(request, pk)
+        if error_response is not None:
+            return error_response
+
+        context = self.get_serializer_context()
+
+        if request.method == 'GET':
+            serializer = ProjectThumbnailSerializer(
+                project.thumbnails.all(), many=True, context=context
+            )
+            return Response(serializer.data)
+
+        upload = (
+            request.FILES.get('image')
+            or request.FILES.get('thumbnail')
+        )
+        if upload is None:
+            return Response(
+                {'error': 'Choose a thumbnail image to upload.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        validate_image_upload(upload)
+
+        prompt = str(request.data.get('prompt') or '')
+        requested_active = request.data.get('is_active', True)
+        make_active = str(requested_active).lower() not in (
+            'false', '0', 'no', 'off',
+        )
+        has_existing = project.thumbnails.exists()
+
+        with transaction.atomic():
+            if make_active:
+                project.thumbnails.update(is_active=False)
+            thumbnail = ProjectThumbnail.objects.create(
+                project=project,
+                image=upload,
+                prompt=prompt,
+                is_active=make_active or not has_existing,
+            )
+
+        serializer = ProjectThumbnailSerializer(thumbnail, context=context)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=['patch', 'delete'],
+        url_path=r'metadata/thumbnails/(?P<thumbnail_id>[^/.]+)',
+    )
+    def metadata_thumbnail_detail(self, request, pk=None, thumbnail_id=None):
+        """Activate, rename or delete one thumbnail candidate."""
+        project, error_response = self._metadata_project(request, pk)
+        if error_response is not None:
+            return error_response
+
+        thumbnail = project.thumbnails.filter(pk=thumbnail_id).first()
+        if thumbnail is None:
+            return Response(
+                {'error': 'Thumbnail not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        context = self.get_serializer_context()
+
+        if request.method == 'DELETE':
+            was_active = thumbnail.is_active
+            try:
+                if thumbnail.image:
+                    thumbnail.image.delete(save=False)
+            except Exception:  # pragma: no cover - file may already be gone
+                pass
+            thumbnail.delete()
+            if was_active:
+                replacement = project.thumbnails.order_by('-created_at').first()
+                if replacement is not None:
+                    project.thumbnails.filter(pk=replacement.pk).update(
+                        is_active=True
+                    )
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        update_fields = []
+        if 'prompt' in request.data:
+            thumbnail.prompt = str(request.data.get('prompt') or '')
+            update_fields.append('prompt')
+
+        if 'is_active' in request.data:
+            activate = str(request.data.get('is_active')).lower() in (
+                'true', '1', 'yes', 'on',
+            )
+            if activate:
+                with transaction.atomic():
+                    project.thumbnails.exclude(pk=thumbnail.pk).update(
+                        is_active=False
+                    )
+                    thumbnail.is_active = True
+                    thumbnail.save(update_fields=['is_active'])
+                if 'prompt' in request.data:
+                    thumbnail.save(update_fields=update_fields)
+            else:
+                thumbnail.is_active = False
+                update_fields.append('is_active')
+                thumbnail.save(update_fields=update_fields)
+        elif update_fields:
+            thumbnail.save(update_fields=update_fields)
+
+        serializer = ProjectThumbnailSerializer(thumbnail, context=context)
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='reset-settings')
     def reset_settings(self, request, pk=None):

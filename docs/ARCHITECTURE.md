@@ -1138,6 +1138,57 @@ buttons (`BgmToolbarControls` and the settings panel): they stay disabled until
 
 ---
 
+### 7.4.5 YouTube metadata management — thumbnail prompts (Issue #15)
+
+**Files:** `core_engine/metadata_prompts.py`, `api/views.py` (`ProjectViewSet`),
+`components/MetadataManagementModal.tsx`
+
+The YouTube workspace has a full-viewport **Metadata management** dialog on the
+project detail page (the Facebook side has no entry point and the backend
+rejects metadata routes for Facebook projects). Thumbnail prompt generation is
+gated the same way in the UI and the API:
+
+- the project has at least one segment with narration (the script is crafted);
+- at least **half of the blocks** have images (`ceil(segment_count / 2)`);
+- at least **two storyboard images** are selected as references.
+
+The dialog sends the script, the selected block images, optional extra image
+references and PDF/TXT/Markdown/CSV/JSON notes to the account's configured
+OpenAI-compatible chat model. Images are re-encoded to compact base64 JPEG data
+URLs before they are added as multimodal `image_url` parts; document text is
+extracted inline (`pypdf` is used for PDFs when installed). The editable
+**system prompt** is collapsed by default and stored per project in
+`Project.thumbnail_system_prompt`; an empty value falls back to
+`DEFAULT_THUMBNAIL_SYSTEM_PROMPT` in `core_engine/metadata_prompts.py`. The
+generated prompt is returned as plain text and shown in a copyable box.
+
+Uploaded thumbnail candidates live in `ProjectThumbnail` and are stored under
+`Storage/<Section>/<account>/<project>/thumbnails/`. Exactly one candidate per
+project can be active. Cover priority is now:
+
+1. the active `ProjectThumbnail`;
+2. the legacy manual `Project.thumbnail`;
+3. the first segment image.
+
+Deleting the active candidate promotes the newest remaining candidate so the
+project keeps a generated cover. The Projects page and tile view use the same
+`thumbnail_url` serializer field, so the active thumbnail appears everywhere
+without a second fetch.
+
+**Endpoints (YouTube only)**
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/projects/<id>/metadata/thumbnail-prompt/` | Draft a prompt from the script, block images and references |
+| GET/POST | `/api/projects/<id>/metadata/thumbnails/` | List or upload thumbnail candidates |
+| PATCH/DELETE | `/api/projects/<id>/metadata/thumbnails/<thumbnail_id>/` | Activate/update or delete a candidate |
+
+The AI model must accept image content parts (a vision-capable model); text-only
+models still receive the full script and document references but will reject
+the image parts.
+
+---
+
 ### 7.5 Subtitle Engine
 
 **File:** `core_engine/subtitle_engine.py` (~360 lines)

@@ -22,6 +22,10 @@ opencv-python-headless>=4.8.0
 # CUDA 12.x: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 # torch is installed separately — not pinned here due to CPU/CUDA variants
 
+# YouTube metadata management: optional PDF text extraction for thumbnail
+# prompt references.  TXT/Markdown/CSV/JSON work without it.
+pypdf>=4.0
+
 # Qwen3-TTS (optional GPU engine) is NOT installed here: qwen-tts requires
 # Python 3.10-3.12 while this project runs on Python 3.14.  It lives in its own
 # virtualenv at backend/qwen_tts/.venv - see backend/qwen_tts/requirements-qwen.txt

@@ -15,6 +15,7 @@ import {
   TaskStatusResponse,
   GlobalSettings,
   ProjectSettingsProfile,
+  ProjectThumbnail,
   GalleryItem,
   RenderingStatus,
   Logo,
@@ -163,6 +164,97 @@ export async function removeProjectThumbnail(
     thumbnail: null,
   });
   return data;
+}
+
+// ── YouTube metadata management ──
+
+export interface ThumbnailPromptRequest {
+  systemPrompt?: string;
+  message?: string;
+  segmentIds: string[];
+  referenceImages?: File[];
+  referenceDocs?: File[];
+}
+
+export interface ThumbnailPromptResponse {
+  prompt: string;
+  model: string;
+  used_segment_ids: string[];
+  external_image_count: number;
+  document_count: number;
+}
+
+/**
+ * Draft a thumbnail image prompt from the script, selected storyboard blocks
+ * and optional external image/document references.
+ */
+export async function generateThumbnailPrompt(
+  projectId: string,
+  payload: ThumbnailPromptRequest,
+): Promise<ThumbnailPromptResponse> {
+  const form = new FormData();
+  if (payload.systemPrompt !== undefined) {
+    form.append('system_prompt', payload.systemPrompt);
+  }
+  form.append('message', payload.message ?? '');
+  form.append('segment_ids', JSON.stringify(payload.segmentIds));
+  for (const file of payload.referenceImages ?? []) {
+    form.append('reference_images', file);
+  }
+  for (const file of payload.referenceDocs ?? []) {
+    form.append('reference_docs', file);
+  }
+  const { data } = await api.post<ThumbnailPromptResponse>(
+    `/api/projects/${projectId}/metadata/thumbnail-prompt/`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return data;
+}
+
+export async function getProjectThumbnails(
+  projectId: string,
+): Promise<ProjectThumbnail[]> {
+  const { data } = await api.get<ProjectThumbnail[]>(
+    `/api/projects/${projectId}/metadata/thumbnails/`,
+  );
+  return data;
+}
+
+export async function uploadProjectThumbnailAsset(
+  projectId: string,
+  file: File,
+  prompt = '',
+): Promise<ProjectThumbnail> {
+  const form = new FormData();
+  form.append('image', file);
+  form.append('prompt', prompt);
+  const { data } = await api.post<ProjectThumbnail>(
+    `/api/projects/${projectId}/metadata/thumbnails/`,
+    form,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  );
+  return data;
+}
+
+export async function setActiveProjectThumbnail(
+  projectId: string,
+  thumbnailId: string,
+): Promise<ProjectThumbnail> {
+  const { data } = await api.patch<ProjectThumbnail>(
+    `/api/projects/${projectId}/metadata/thumbnails/${thumbnailId}/`,
+    { is_active: true },
+  );
+  return data;
+}
+
+export async function deleteProjectThumbnailAsset(
+  projectId: string,
+  thumbnailId: string,
+): Promise<void> {
+  await api.delete(
+    `/api/projects/${projectId}/metadata/thumbnails/${thumbnailId}/`,
+  );
 }
 
 export async function importProject(payload: ImportProjectRequest): Promise<ProjectDetail> {

@@ -27,9 +27,10 @@ interface ProjectThumbnailProps {
 /**
  * Cover image for a project row/tile.
  *
- * Priority is handled by the API: a manually uploaded thumbnail wins, then the
- * first segment image.  When neither exists we show an animated placeholder so
- * the grid still feels alive instead of rendering an empty grey box.
+ * Priority is handled by the API: the active Metadata management thumbnail
+ * wins, then a manually uploaded thumbnail, then the first segment image.
+ * When none exists we show an animated placeholder so the grid still feels
+ * alive instead of rendering an empty grey box.
  */
 export function ProjectThumbnail({
   project,

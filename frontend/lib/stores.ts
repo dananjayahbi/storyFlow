@@ -99,6 +99,8 @@ interface ProjectStore {
 
   // Actions
   fetchProject: (id: string) => Promise<void>;
+  /** Re-read the project (segments included) without flashing the loading UI. */
+  refreshProject: (id: string) => Promise<void>;
   addSegment: (data?: { text_content?: string; image_prompt?: string }) => Promise<void>;
   importSegmentsToProject: (payload: { format: 'json' | 'text'; segments?: Array<{ text_content: string; image_prompt?: string }>; raw_text?: string }) => Promise<void>;
   updateSegment: (id: string, data: UpdateSegmentPayload) => Promise<void>;
@@ -225,6 +227,17 @@ export const useProjectStore = create<ProjectStore>()((set, get) => ({
       }
     } catch {
       set({ error: 'Failed to load project', isLoading: false });
+    }
+  },
+
+  refreshProject: async (id) => {
+    // Used after metadata operations (thumbnail upload/activation) so the
+    // project cover updates without blanking the editor with the skeleton.
+    try {
+      const project = await getProject(id);
+      set({ project });
+    } catch {
+      // Silent: the metadata dialog already reports its own failures.
     }
   },
 

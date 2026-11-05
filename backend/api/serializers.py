@@ -6,7 +6,7 @@ from rest_framework import serializers
 from .models import (
     Account, Project, Segment, GlobalSettings, AccountSettings, Logo,
     OutroVideo, VoiceReference, Script, ChatSession, BGMClip, Rendering,
-    DefaultProjectSettings, SECTION_CHOICES,
+    DefaultProjectSettings, ProjectThumbnail, SECTION_CHOICES,
     apply_project_profile, resolve_project_defaults, normalize_subtitle_y,
 )
 from .parsers import JSONParser, TextParser, ParseError
@@ -20,6 +20,7 @@ from core_engine.tts import (
     QWEN_MAX_TOKENS_MIN,
     QWEN_SPEAKERS,
 )
+from core_engine.metadata_prompts import thumbnail_readiness
 
 # ── Allowed resolution presets (width × height) ──
 ALLOWED_RESOLUTIONS = {
@@ -139,13 +140,36 @@ class AccountSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class ProjectThumbnailSerializer(serializers.ModelSerializer):
+    """Serialise one metadata-management thumbnail candidate."""
+
+    url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectThumbnail
+        fields = ['id', 'url', 'prompt', 'is_active', 'created_at']
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        if not obj.image:
+            return None
+        url = media_url(obj.image.name)
+        if not url:
+            return None
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
+
 class ProjectThumbnailMixin:
     """Expose a project's cover image and the first segment-image fallback.
 
-    A manual cover always wins.  Otherwise the first segment that actually has
-    an image is used, so a project gets a useful thumbnail as soon as its
-    storyboard is illustrated.  Projects with neither return ``null`` and the
-    frontend renders its animated placeholder.
+    Priority:
+      1. The active thumbnail uploaded from Metadata management (YouTube).
+      2. The legacy manual cover.
+      3. The first segment that actually has an image.
+
+    Projects with none return ``null`` and the frontend renders its animated
+    placeholder.
     """
 
     def _absolute_media_url(self, path):
@@ -154,6 +178,19 @@ class ProjectThumbnailMixin:
             return None
         request = self.context.get('request')
         return request.build_absolute_uri(url) if request else url
+
+    def _active_thumbnail(self, obj):
+        cache = getattr(self, '_active_thumbnail_cache', None)
+        if cache is None:
+            cache = self._active_thumbnail_cache = {}
+        key = str(obj.pk)
+        if key not in cache:
+            cache[key] = (
+                obj.thumbnails.filter(is_active=True).first()
+                if hasattr(obj, 'thumbnails')
+                else None
+            )
+        return cache[key]
 
     def _segment_thumbnail(self, obj):
         cache = getattr(self, '_segment_thumbnail_cache', None)
@@ -174,6 +211,16 @@ class ProjectThumbnailMixin:
             )
         return cache[key]
 
+    def get_active_thumbnail_url(self, obj):
+        thumbnail = self._active_thumbnail(obj)
+        if not thumbnail or not thumbnail.image:
+            return None
+        return self._absolute_media_url(thumbnail.image.name)
+
+    def get_has_active_thumbnail(self, obj):
+        thumbnail = self._active_thumbnail(obj)
+        return bool(thumbnail and thumbnail.image)
+
     def get_manual_thumbnail_url(self, obj):
         if not obj.thumbnail:
             return None
@@ -183,11 +230,16 @@ class ProjectThumbnailMixin:
         return bool(obj.thumbnail)
 
     def get_thumbnail_source(self, obj):
+        if self.get_has_active_thumbnail(obj):
+            return 'active'
         if obj.thumbnail:
             return 'manual'
         return 'segment' if self._segment_thumbnail(obj) else None
 
     def get_thumbnail_url(self, obj):
+        active = self.get_active_thumbnail_url(obj)
+        if active:
+            return active
         if obj.thumbnail:
             return self._absolute_media_url(obj.thumbnail.name)
         return self._absolute_media_url(self._segment_thumbnail(obj))
@@ -200,6 +252,8 @@ class ProjectSerializer(ProjectThumbnailMixin, serializers.ModelSerializer):
     thumbnail_url = serializers.SerializerMethodField()
     manual_thumbnail_url = serializers.SerializerMethodField()
     has_manual_thumbnail = serializers.SerializerMethodField()
+    active_thumbnail_url = serializers.SerializerMethodField()
+    has_active_thumbnail = serializers.SerializerMethodField()
     thumbnail_source = serializers.SerializerMethodField()
 
     class Meta:
@@ -210,7 +264,8 @@ class ProjectSerializer(ProjectThumbnailMixin, serializers.ModelSerializer):
             'resolution_height', 'framerate', 'segment_count',
             'rendering_count',
             'thumbnail', 'thumbnail_url', 'manual_thumbnail_url',
-            'has_manual_thumbnail', 'thumbnail_source',
+            'has_manual_thumbnail', 'active_thumbnail_url',
+            'has_active_thumbnail', 'thumbnail_source',
         ]
         read_only_fields = [
             'id', 'account', 'created_at', 'updated_at', 'status',
@@ -777,12 +832,16 @@ class ProjectDetailSerializer(
     serializers.ModelSerializer,
 ):
     segments = SegmentSerializer(many=True, read_only=True)
+    thumbnails = ProjectThumbnailSerializer(many=True, read_only=True)
     rendering_count = serializers.SerializerMethodField()
     account_name = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
     manual_thumbnail_url = serializers.SerializerMethodField()
     has_manual_thumbnail = serializers.SerializerMethodField()
+    active_thumbnail_url = serializers.SerializerMethodField()
+    has_active_thumbnail = serializers.SerializerMethodField()
     thumbnail_source = serializers.SerializerMethodField()
+    thumbnail_readiness = serializers.SerializerMethodField()
     # Write-only switch used by the UI to re-apply the matching default
     # profile after the user explicitly asks for it.
     reset_settings = serializers.BooleanField(write_only=True, required=False)
@@ -793,9 +852,11 @@ class ProjectDetailSerializer(
             'id', 'title', 'section', 'account', 'account_name',
             'created_at', 'updated_at', 'status', 'resolution_width',
             'resolution_height', 'framerate', 'output_path', 'segments',
-            'rendering_count',
+            'rendering_count', 'thumbnails', 'thumbnail_readiness',
             'thumbnail', 'thumbnail_url', 'manual_thumbnail_url',
-            'has_manual_thumbnail', 'thumbnail_source',
+            'has_manual_thumbnail', 'active_thumbnail_url',
+            'has_active_thumbnail', 'thumbnail_source',
+            'thumbnail_system_prompt',
             'reset_settings',
             # ── Per-project settings ──
             'default_voice_id', 'tts_speed',
@@ -828,6 +889,9 @@ class ProjectDetailSerializer(
 
     def get_account_name(self, obj):
         return obj.account.name if obj.account_id else None
+
+    def get_thumbnail_readiness(self, obj):
+        return thumbnail_readiness(obj)
 
     def update(self, instance, validated_data):
         """Replace/clear the manual cover and remove the stale file.

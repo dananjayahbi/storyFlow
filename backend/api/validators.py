@@ -278,6 +278,43 @@ def validate_bgm_upload(file):
     return file
 
 
+# ── Metadata reference documents (YouTube thumbnails) ──
+ALLOWED_REFERENCE_DOCUMENT_EXTENSIONS = [
+    '.pdf', '.txt', '.md', '.csv', '.json',
+]
+MAX_REFERENCE_DOCUMENT_SIZE = 20 * 1024 * 1024  # 20 MB
+
+
+def validate_reference_document(file):
+    """Validate a PDF/TXT/Markdown/CSV/JSON reference upload.
+
+    Content is extracted later by the metadata prompt builder.  This guard
+    only keeps unsupported or oversized files out of the request.
+    """
+    ext = os.path.splitext(file.name)[1].lower()
+    if ext not in ALLOWED_REFERENCE_DOCUMENT_EXTENSIONS:
+        raise ValidationError({
+            'error': 'Invalid reference document',
+            'details': (
+                'Accepted formats: '
+                + ', '.join(ALLOWED_REFERENCE_DOCUMENT_EXTENSIONS)
+                + f'. Got: {ext or "(no extension)"}'
+            ),
+        })
+
+    if file.size > MAX_REFERENCE_DOCUMENT_SIZE:
+        raise ValidationError({
+            'error': 'File too large',
+            'details': (
+                'Reference documents must be under 20 MB. Got: '
+                f'{file.size / (1024 * 1024):.1f}MB'
+            ),
+        })
+
+    file.seek(0)
+    return file
+
+
 def validate_font_upload(file):
     """Validate an uploaded font file (.ttf or .otf).
 

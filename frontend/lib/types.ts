@@ -24,13 +24,37 @@ export interface Project {
   segment_count: number;
   /** Number of rendered gallery assets linked to this project. */
   rendering_count?: number;
-  /** Ready-to-use cover URL: manual thumbnail, else first segment image. */
+  /** Ready-to-use cover URL: active thumbnail, manual thumbnail, else segment. */
   thumbnail_url?: string | null;
   /** URL of the manually uploaded cover, when one exists. */
   manual_thumbnail_url?: string | null;
   has_manual_thumbnail?: boolean;
+  /** URL of the active Metadata management thumbnail, when one exists. */
+  active_thumbnail_url?: string | null;
+  has_active_thumbnail?: boolean;
   /** Where `thumbnail_url` came from. */
-  thumbnail_source?: 'manual' | 'segment' | null;
+  thumbnail_source?: 'active' | 'manual' | 'segment' | null;
+}
+
+/** One uploaded YouTube thumbnail candidate from Metadata management. */
+export interface ProjectThumbnail {
+  id: string;
+  url: string | null;
+  prompt: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+/** Gating state for YouTube thumbnail generation. */
+export interface ThumbnailReadiness {
+  script_ready: boolean;
+  images_ready: boolean;
+  ready: boolean;
+  segment_count: number;
+  text_segment_count: number;
+  image_count: number;
+  required_images: number;
+  min_reference_images: number;
 }
 
 /** One project's render preflight result from /api/projects/render-readiness/. */
@@ -54,6 +78,12 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   output_path: string | null;
   segments: Segment[];
   rendering_count?: number;
+  /** Uploaded thumbnail candidates; one may be active. */
+  thumbnails?: ProjectThumbnail[];
+  /** Backend-computed gating for thumbnail prompt generation. */
+  thumbnail_readiness?: ThumbnailReadiness;
+  /** Editable system prompt for thumbnail prompt generation (empty = default). */
+  thumbnail_system_prompt?: string;
 
   // ── Per-project settings ──
   default_voice_id: string;
