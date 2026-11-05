@@ -98,17 +98,36 @@ MOTION_PRESETS: Tuple[str, ...] = (
 )
 
 #: Comfortable camera speed, expressed as frame widths per second.  A 5 s
-#: segment therefore travels about 17 % of the frame instead of whipping
-#: across it.
-PAN_SPEED_TARGET = 0.035
+#: segment therefore travels about 22 % of the frame instead of whipping
+#: across it.  This is deliberately above the old 3.5 % target, because
+#: slower moves could look frozen on short clips.
+PAN_SPEED_TARGET = 0.045
 
 #: Comfortable zoom speed as a fraction of the base crop scale per second.
-ZOOM_RATE_TARGET = 0.025
+ZOOM_RATE_TARGET = 0.03
 
-#: Below these thresholds a move is practically invisible; the planner picks
-#: a different motion instead of producing a nearly static shot.
+#: Minimum pan-room fraction required before a pan is considered at all.
+#: Below this the highlighted subject leaves almost no space and the planner
+#: substitutes a zoom instead of producing a nearly static shot.
 MIN_PAN_ROOM = 0.018
-MIN_ZOOM_ROOM = 0.035
+
+#: Minimum amount of visible change across a whole clip, expressed as a
+#: fraction of the crop size (pan) or crop scale (zoom).  A plan that cannot
+#: reach this amount is considered ineffective and another motion is chosen.
+MIN_PAN_TRAVEL = 0.04
+MIN_ZOOM_SPAN = 0.04
+
+#: Preferred minimum on-screen speed.  The required amount grows with the
+#: clip length up to ``MAX_REQUIRED_MOTION``; past that point a 10 % change
+#: spread over a long segment is still clearly visible.
+MIN_PAN_SPEED = 0.012
+MIN_ZOOM_RATE = 0.012
+MAX_REQUIRED_MOTION = 0.10
+
+#: A highlighted rectangle may leave the rendered frame by at most this
+#: fraction of its own width/height on any edge.  This gives the planner up
+#: to 10 % more travel room while keeping most of the subject visible.
+FOCUS_OVERFLOW_RATIO = 0.10
 
 #: Extra zoom headroom used by the slow zoom presets.
 ZOOM_IN_RANGE = 0.12
@@ -504,11 +523,17 @@ def get_focus_area_bounds(
     source_height: int,
     crop_width: int,
     crop_height: int,
+    overflow_ratio: float = 0.0,
 ) -> Tuple[int, int, int, int]:
     """Translate a normalised focus rectangle into crop-position bounds.
 
     The returned ``(min_x, max_x, min_y, max_y)`` describe every top-left
-    crop position that still keeps the marked subject inside the crop.
+    crop position that keeps the marked subject sufficiently visible.
+    ``overflow_ratio`` relaxes the bounds so up to that fraction of the
+    rectangle's width/height may leave the frame on one edge.  The renderer
+    uses :data:`FOCUS_OVERFLOW_RATIO` to gain extra pan room; the default
+    ``0.0`` keeps the strict containment used by older helpers and tests.
+
     When the rectangle is larger than the crop (for example a focus area
     that fills most of the frame), the bounds collapse to its centre.
 
@@ -518,6 +543,7 @@ def get_focus_area_bounds(
         source_height: Height of the prepared frame in pixels.
         crop_width: Width of the Ken Burns crop box in pixels.
         crop_height: Height of the Ken Burns crop box in pixels.
+        overflow_ratio: Fraction of the rectangle allowed off-frame per edge.
 
     Returns:
         ``(min_x, max_x, min_y, max_y)`` as non-negative integers.
@@ -533,13 +559,20 @@ def get_focus_area_bounds(
     fw = max(1, min(fw, source_width - fx))
     fh = max(1, min(fh, source_height - fy))
 
+    # Allow the marked subject to leave the frame by up to ``overflow_ratio``
+    # of its own size.  The allowance is applied per edge; because the focus
+    # crop is normally larger than the rectangle, only one edge can be
+    # clipped at a time, so the total clip stays within the limit.
+    margin_x = int(round(fw * max(0.0, float(overflow_ratio))))
+    margin_y = int(round(fh * max(0.0, float(overflow_ratio))))
+
     # To keep the focus rectangle inside the crop:
     #   crop_left <= fx                 → left <= fx
     #   crop_left >= fx + fw - crop_w   → left >= fx + fw - crop_w
-    min_x = max(0, fx + fw - crop_width)
-    max_x = min(source_width - crop_width, fx)
-    min_y = max(0, fy + fh - crop_height)
-    max_y = min(source_height - crop_height, fy)
+    min_x = max(0, fx + fw - crop_width - margin_x)
+    max_x = min(source_width - crop_width, fx + margin_x)
+    min_y = max(0, fy + fh - crop_height - margin_y)
+    max_y = min(source_height - crop_height, fy + margin_y)
 
     if min_x > max_x:
         centre = fx + fw // 2 - crop_width // 2
@@ -594,22 +627,55 @@ def focus_area_inside_crop(
     source_width: int,
     source_height: int,
     tolerance: float = 1.0,
+    overflow_ratio: float = 0.0,
 ) -> bool:
-    """Return ``True`` when the crop still fully contains the subject.
+    """Return ``True`` when the crop keeps the subject sufficiently visible.
 
-    Used by the planner and its tests as the single containment contract:
-    the highlighted rectangle must never leave the visible frame, at any
-    point in the animation.
+    With ``overflow_ratio=0`` (the default) the whole rectangle must stay in
+    frame.  Pass :data:`FOCUS_OVERFLOW_RATIO` to check the real renderer
+    contract: the highlighted area may come off-frame by at most that
+    fraction of its own size on each edge.
     """
     fx = float(focus_area['x']) * source_width
     fy = float(focus_area['y']) * source_height
     fw = float(focus_area['w']) * source_width
     fh = float(focus_area['h']) * source_height
+    margin_x = fw * max(0.0, float(overflow_ratio))
+    margin_y = fh * max(0.0, float(overflow_ratio))
     return (
-        x <= fx + tolerance
-        and y <= fy + tolerance
-        and x + crop_width >= fx + fw - tolerance
-        and y + crop_height >= fy + fh - tolerance
+        x <= fx + margin_x + tolerance
+        and y <= fy + margin_y + tolerance
+        and x + crop_width >= fx + fw - margin_x - tolerance
+        and y + crop_height >= fy + fh - margin_y - tolerance
+    )
+
+
+def focus_area_clipped_fraction(
+    focus_area: dict,
+    x: int,
+    y: int,
+    crop_width: int,
+    crop_height: int,
+    source_width: int,
+    source_height: int,
+) -> Tuple[float, float]:
+    """Return how much of the rectangle is outside the crop, per axis.
+
+    The result is ``(clipped_width_fraction, clipped_height_fraction)`` in
+    ``0..1``.  Used by tests to prove the renderer never lets more than
+    :data:`FOCUS_OVERFLOW_RATIO` of the highlighted subject disappear.
+    """
+    fx = float(focus_area['x']) * source_width
+    fy = float(focus_area['y']) * source_height
+    fw = float(focus_area['w']) * source_width
+    fh = float(focus_area['h']) * source_height
+    if fw <= 0 or fh <= 0:
+        return 1.0, 1.0
+    visible_w = max(0.0, min(x + crop_width, fx + fw) - max(x, fx))
+    visible_h = max(0.0, min(y + crop_height, fy + fh) - max(y, fy))
+    return (
+        max(0.0, 1.0 - visible_w / fw),
+        max(0.0, 1.0 - visible_h / fh),
     )
 
 
@@ -632,11 +698,13 @@ def _focus_bounds_for_crop(
     source_height: int,
     crop_width: int,
     crop_height: int,
+    overflow_ratio: float = 0.0,
 ) -> Tuple[int, int, int, int]:
     """Allowed crop top-left range for the current crop size."""
     if focus_area:
         return get_focus_area_bounds(
             focus_area, source_width, source_height, crop_width, crop_height,
+            overflow_ratio=overflow_ratio,
         )
     return (
         0,
@@ -678,50 +746,55 @@ def _direction_vector(segment_index: int) -> Tuple[int, int, str, str]:
 
 def _select_motion(
     preferred: str,
-    pan_room: float,
-    zoom_in_room: float,
-    zoom_out_room: float,
+    pan_ok: bool,
+    pan_zoom_ok: bool,
+    zoom_in_ok: bool,
+    zoom_out_ok: bool,
 ) -> str:
-    """Adapt the preferred preset to the room actually available.
+    """Adapt the preferred preset to the motion that is actually visible.
 
-    A large subject leaves little panning space, so the planner substitutes a
-    slow zoom (or the reverse for a small subject) instead of producing a
-    barely visible pan.  When nothing has enough room the pan is kept, but the
-    caller shortens it to the available travel instead of rushing.
+    ``*_ok`` flags are produced by the planner after measuring the available
+    room and comparing the achievable movement with the minimum visible
+    threshold.  A large subject with very little panning space therefore
+    falls back to a zoom (or a combined move) instead of producing a barely
+    perceptible pan.
     """
     if preferred == MOTION_PAN_ZOOM:
-        if (
-            pan_room >= MIN_PAN_ROOM
-            or zoom_in_room >= MIN_ZOOM_ROOM
-            or zoom_out_room >= MIN_ZOOM_ROOM
-        ):
+        if pan_zoom_ok and (zoom_in_ok or zoom_out_ok):
             return MOTION_PAN_ZOOM
+        if pan_ok:
+            return MOTION_PAN
+        if zoom_in_ok:
+            return MOTION_ZOOM_IN
+        if zoom_out_ok:
+            return MOTION_ZOOM_OUT
         return MOTION_PAN
 
     if preferred == MOTION_ZOOM_IN:
-        if zoom_in_room >= MIN_ZOOM_ROOM:
+        if zoom_in_ok:
             return MOTION_ZOOM_IN
-        if pan_room >= MIN_PAN_ROOM:
+        if pan_ok:
             return MOTION_PAN
-        if zoom_out_room >= MIN_ZOOM_ROOM:
+        if zoom_out_ok:
             return MOTION_ZOOM_OUT
         return MOTION_PAN
 
     if preferred == MOTION_ZOOM_OUT:
-        if zoom_out_room >= MIN_ZOOM_ROOM:
+        if zoom_out_ok:
             return MOTION_ZOOM_OUT
-        if pan_room >= MIN_PAN_ROOM:
+        if pan_ok:
             return MOTION_PAN
-        if zoom_in_room >= MIN_ZOOM_ROOM:
+        if zoom_in_ok:
             return MOTION_ZOOM_IN
         return MOTION_PAN
 
-    # Preferred pan: zoom only when the subject leaves too little travel.
-    if pan_room >= MIN_PAN_ROOM:
+    # Preferred pan: zoom whenever the subject leaves too little travel for a
+    # visible sweep.
+    if pan_ok:
         return MOTION_PAN
-    if zoom_in_room >= MIN_ZOOM_ROOM:
+    if zoom_in_ok:
         return MOTION_ZOOM_IN
-    if zoom_out_room >= MIN_ZOOM_ROOM:
+    if zoom_out_ok:
         return MOTION_ZOOM_OUT
     return MOTION_PAN
 
@@ -745,11 +818,13 @@ def plan_ken_burns_motion(
     * ``zoom_in`` / ``zoom_out`` — a slow, subtle zoom.
     * ``pan_zoom`` — both at reduced strength.
 
-    The crop is never allowed to shrink below the rectangle, so the marked
-    subject stays inside the frame for the whole animation.  Pan distance is
-    derived from a target on-screen speed and then capped by the available
-    room; a large subject therefore moves more slowly (or zooms instead)
-    rather than being rushed across the frame.
+    A move is only selected when it produces a minimum visible change.  A
+    large subject with little panning room therefore falls back to a zoom
+    (or a combined move) rather than producing a nearly static shot.  The
+    highlighted rectangle may leave the frame by at most
+    :data:`FOCUS_OVERFLOW_RATIO` of its own size, which gives the planner
+    extra travel room.  Pan distance is derived from a target on-screen
+    speed and then capped by the available room.
 
     Returns:
         A dictionary consumed by :func:`sample_ken_burns_motion`.
@@ -776,12 +851,31 @@ def plan_ken_burns_motion(
     min_scale = min(min_scale, max_scale)
     min_scale = max(0.05, min_scale)
 
+    # --- Visible-motion thresholds --------------------------------------
+    # A move that changes less than these amounts is practically invisible,
+    # so the planner substitutes another motion instead of producing a
+    # frozen-looking shot.  The requirement grows with clip length, then
+    # stops at MAX_REQUIRED_MOTION where the total change is already clear.
+    effective_duration = max(0.0, float(duration))
+    required_pan = max(
+        MIN_PAN_TRAVEL,
+        min(MAX_REQUIRED_MOTION, MIN_PAN_SPEED * effective_duration),
+    )
+    required_zoom = max(
+        MIN_ZOOM_SPAN,
+        min(MAX_REQUIRED_MOTION, MIN_ZOOM_RATE * effective_duration),
+    )
+
     # --- Measure available pan room at the subject-safe crop -------------
+    # The highlighted rectangle may leave the frame by FOCUS_OVERFLOW_RATIO,
+    # which widens the safe crop-position range and gives the motion more
+    # room without losing the subject.
     pan_crop_w, pan_crop_h = _crop_for_scale(
         base_width, base_height, min_scale, source_width, source_height,
     )
     pan_bounds = _focus_bounds_for_crop(
         subject, source_width, source_height, pan_crop_w, pan_crop_h,
+        overflow_ratio=FOCUS_OVERFLOW_RATIO,
     )
     room_x_px = max(0, pan_bounds[1] - pan_bounds[0])
     room_y_px = max(0, pan_bounds[3] - pan_bounds[2])
@@ -790,45 +884,104 @@ def plan_ken_burns_motion(
         room_y_px / pan_crop_h if pan_crop_h else 0.0,
     )
 
-    # --- Measure available zoom headroom ---------------------------------
-    # The zoom span follows the same practical-speed idea as the pan: it is
-    # proportional to the clip length, then capped by the fixed preset range
-    # and by how much room the prepared source frame actually provides.
-    effective_duration = max(0.0, float(duration))
-    zoom_in_span = min(ZOOM_IN_RANGE, ZOOM_RATE_TARGET * effective_duration)
-    zoom_out_span = min(ZOOM_OUT_RANGE, ZOOM_RATE_TARGET * effective_duration)
-    zoom_in_start_scale = min(
-        max_scale, min_scale * (1.0 + zoom_in_span),
+    # --- Measure available zoom room -------------------------------------
+    # A zoom can use the natural headroom above the subject-safe crop.  When
+    # the subject fills the prepared frame there is no headroom, so the
+    # planner may shrink the crop by up to FOCUS_OVERFLOW_RATIO (letting that
+    # much of the subject leave the frame) to keep the shot visibly moving.
+    zoom_span_target = max(
+        MIN_ZOOM_SPAN, ZOOM_RATE_TARGET * effective_duration,
     )
-    zoom_out_end_scale = min(
-        max_scale, min_scale * (1.0 + zoom_out_span),
+    overflow_min_scale = max(
+        0.05, min_scale * (1.0 - FOCUS_OVERFLOW_RATIO),
     )
-    zoom_in_room = max(0.0, zoom_in_start_scale - min_scale)
-    zoom_out_room = max(0.0, zoom_out_end_scale - min_scale)
+    headroom_up = max(0.0, max_scale - min_scale)
+    headroom_down = max(0.0, min_scale - overflow_min_scale)
+
+    def _zoom_shape(direction: str, span: float):
+        up_part = min(span, headroom_up)
+        down_part = min(max(0.0, span - up_part), headroom_down)
+        effect = up_part + down_part
+        if direction == MOTION_ZOOM_IN:
+            return min_scale + up_part, min_scale - down_part, effect
+        return min_scale - down_part, min_scale + up_part, effect
+
+    zoom_in_start_scale, zoom_in_end_scale, zoom_in_room = _zoom_shape(
+        MOTION_ZOOM_IN, min(ZOOM_IN_RANGE, zoom_span_target),
+    )
+    zoom_out_start_scale, zoom_out_end_scale, zoom_out_room = _zoom_shape(
+        MOTION_ZOOM_OUT, min(ZOOM_OUT_RANGE, zoom_span_target),
+    )
+
+    # --- Decide which motions are actually visible -----------------------
+    direction_x, direction_y, start_name, end_name = _direction_vector(
+        segment_index,
+    )
+    pan_fraction_target = (
+        max(PAN_SPEED_TARGET, MIN_PAN_SPEED) * effective_duration
+    )
+
+    def _pan_effect(factor: float) -> float:
+        target_x = abs(direction_x) * pan_fraction_target * factor
+        target_y = abs(direction_y) * pan_fraction_target * factor
+        travel_x = min(
+            room_x_px / pan_crop_w if pan_crop_w else 0.0, target_x,
+        )
+        travel_y = min(
+            room_y_px / pan_crop_h if pan_crop_h else 0.0, target_y,
+        )
+        return max(travel_x, travel_y)
+
+    pan_effect = _pan_effect(1.0)
+    pan_zoom_effect = _pan_effect(PAN_ZOOM_FACTOR)
+    pan_ok = pan_room >= MIN_PAN_ROOM and pan_effect >= required_pan
+    pan_zoom_ok = (
+        pan_ok
+        and pan_zoom_effect >= required_pan * PAN_ZOOM_FACTOR
+    )
+    zoom_in_ok = zoom_in_room >= required_zoom
+    zoom_out_ok = zoom_out_room >= required_zoom
 
     preferred = MOTION_PRESETS[segment_index % len(MOTION_PRESETS)]
     motion = _select_motion(
-        preferred, pan_room, zoom_in_room, zoom_out_room,
+        preferred, pan_ok, pan_zoom_ok, zoom_in_ok, zoom_out_ok,
     )
+
+    # If the preferred family had no effective option, fall back to whichever
+    # move still produces the most visible change instead of a static shot.
+    if motion == MOTION_PAN and not pan_ok:
+        motion = max(
+            (
+                (pan_effect / required_pan if required_pan else 0.0,
+                 MOTION_PAN),
+                (zoom_in_room / required_zoom if required_zoom else 0.0,
+                 MOTION_ZOOM_IN),
+                (zoom_out_room / required_zoom if required_zoom else 0.0,
+                 MOTION_ZOOM_OUT),
+            )
+        )[1]
 
     # --- Resolve the endpoint scales -------------------------------------
     start_scale = end_scale = min_scale
     pan_factor = 0.0
     if motion == MOTION_ZOOM_IN:
-        start_scale, end_scale = zoom_in_start_scale, min_scale
+        start_scale, end_scale = zoom_in_start_scale, zoom_in_end_scale
     elif motion == MOTION_ZOOM_OUT:
-        start_scale, end_scale = min_scale, zoom_out_end_scale
+        start_scale, end_scale = zoom_out_start_scale, zoom_out_end_scale
     elif motion == MOTION_PAN_ZOOM:
         pan_factor = PAN_ZOOM_FACTOR
-        prefer_in = zoom_in_room >= MIN_ZOOM_ROOM and (
-            zoom_out_room < MIN_ZOOM_ROOM or segment_index % 2 == 0
+        prefer_in = zoom_in_ok and (
+            not zoom_out_ok or segment_index % 2 == 0
         )
         if prefer_in:
-            start_scale, end_scale = zoom_in_start_scale, min_scale
-        elif zoom_out_room >= MIN_ZOOM_ROOM:
-            start_scale, end_scale = min_scale, zoom_out_end_scale
+            start_scale, end_scale = zoom_in_start_scale, zoom_in_end_scale
+        elif zoom_out_ok:
+            start_scale, end_scale = zoom_out_start_scale, zoom_out_end_scale
         else:
             motion = MOTION_PAN
+            pan_factor = 0.0
+    if motion == MOTION_PAN:
+        pan_factor = 1.0
 
     start_crop = _crop_for_scale(
         base_width, base_height, start_scale, source_width, source_height,
@@ -838,30 +991,26 @@ def plan_ken_burns_motion(
     )
 
     # --- Pan distance: target speed, capped by the free space ------------
-    direction_x, direction_y, start_name, end_name = _direction_vector(
-        segment_index,
-    )
-    if motion == MOTION_PAN:
-        pan_factor = 1.0
-
     reference_crop_w = (start_crop[0] + end_crop[0]) / 2.0
     reference_crop_h = (start_crop[1] + end_crop[1]) / 2.0
     target_x = (
-        abs(direction_x) * PAN_SPEED_TARGET * max(0.0, duration)
-        * reference_crop_w * pan_factor
+        abs(direction_x) * max(PAN_SPEED_TARGET, MIN_PAN_SPEED)
+        * effective_duration * reference_crop_w * pan_factor
     )
     target_y = (
-        abs(direction_y) * PAN_SPEED_TARGET * max(0.0, duration)
-        * reference_crop_h * pan_factor
+        abs(direction_y) * max(PAN_SPEED_TARGET, MIN_PAN_SPEED)
+        * effective_duration * reference_crop_h * pan_factor
     )
     travel_x = min(room_x_px, target_x)
     travel_y = min(room_y_px, target_y)
 
     start_bounds = _focus_bounds_for_crop(
         subject, source_width, source_height, *start_crop,
+        overflow_ratio=FOCUS_OVERFLOW_RATIO,
     )
     end_bounds = _focus_bounds_for_crop(
         subject, source_width, source_height, *end_crop,
+        overflow_ratio=FOCUS_OVERFLOW_RATIO,
     )
     start_centre_range = _centre_range(start_bounds, *start_crop)
     end_centre_range = _centre_range(end_bounds, *end_crop)
@@ -918,12 +1067,15 @@ def plan_ken_burns_motion(
     end_cy = min(max(end_cy, end_centre_range[2]), end_centre_range[3])
 
     pan_speed = 0.0
-    if duration > 0:
+    if effective_duration > 0:
         pan_speed = max(
-            travel_x / (duration * max(1.0, reference_crop_w)),
-            travel_y / (duration * max(1.0, reference_crop_h)),
+            travel_x / (effective_duration * max(1.0, reference_crop_w)),
+            travel_y / (effective_duration * max(1.0, reference_crop_h)),
         )
-    zoom_speed = abs(end_scale - start_scale) / duration if duration > 0 else 0.0
+    zoom_speed = (
+        abs(end_scale - start_scale) / effective_duration
+        if effective_duration > 0 else 0.0
+    )
 
     plan = {
         "motion": motion,
@@ -961,8 +1113,9 @@ def sample_ken_burns_motion(
 
     Returns ``(x, y, crop_width, crop_height)`` where ``x``/``y`` are the
     top-left corner of the crop.  The position is clamped to the subject
-    bounds for the *current* crop size on every frame, so a highlighted
-    rectangle can never leave the rendered frame, even mid-zoom.
+    bounds for the *current* crop size on every frame, so at most
+    :data:`FOCUS_OVERFLOW_RATIO` of a highlighted rectangle can leave the
+    rendered frame, even mid-zoom.
     """
     span = plan.get("duration", 0.0) if duration is None else duration
     if span is None or span <= 0:
@@ -995,6 +1148,7 @@ def sample_ken_burns_motion(
     if subject:
         bounds = get_focus_area_bounds(
             subject, source_w, source_h, crop_w, crop_h,
+            overflow_ratio=FOCUS_OVERFLOW_RATIO,
         )
         x = max(bounds[0], min(x, bounds[1]))
         y = max(bounds[2], min(y, bounds[3]))
@@ -1304,16 +1458,17 @@ def apply_ken_burns(
     Converts a static cover image into a MoviePy :class:`VideoClip` with
     animated camera motion.  A smart planner measures the free space
     around the optional highlighted subject and chooses a pan, a slow
-    zoom, or a combined move with a comfortable speed.  The crop centre
-    and size are interpolated together, and the crop is clamped to the
-    subject-safe bounds on every frame.
+    zoom, or a combined move with a visible amount of movement.  The crop
+    centre and size are interpolated together, and the crop is clamped to
+    the subject-safe bounds on every frame.  Up to 10 % of the highlighted
+    rectangle may leave the frame, which gives the planner extra room.
 
     Algorithm overview
     ------------------
     1. Load and prepare the source image (upscale for zoom headroom).
     2. Measure the subject rectangle and available pan/zoom room.
-    3. Choose a deterministic motion preset and adapt its speed to the
-       available room (large subjects pan less, or zoom instead).
+    3. Choose a deterministic motion preset; substitute a zoom when the
+       available room cannot produce a visible pan.
     4. Build a ``make_frame(t)`` closure that samples the motion plan and
        extracts the region for each time instant.
     5. Construct and return a :class:`VideoClip`.
@@ -1336,9 +1491,10 @@ def apply_ken_burns(
         focus_y: Vertical position of the render frame inside the source
             image (0..1).  Defaults to centred.
         focus_area: Optional ``{"x", "y", "w", "h"}`` subject rectangle
-            normalised to the prepared frame.  The planner keeps this
-            rectangle inside the rendered frame for the whole animation
-            and adapts the motion speed to the free space around it.
+            normalised to the prepared frame.  The planner keeps it
+            sufficiently visible for the whole animation (at most 10 % may
+            leave the frame) and adapts the motion speed to the free space
+            around it.
         focus_areas: Legacy list form of ``focus_area``.  Only the first
             valid rectangle is used; the rest are ignored so old projects
             can still be rendered without rewriting their stored data.

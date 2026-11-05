@@ -510,8 +510,8 @@ export function ImageUploader({
               </span>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Ken Burns keeps this area in frame and adapts the pan or zoom
-              speed to the space around it.
+              Ken Burns keeps this area in frame (up to 10% may leave the
+              edge) and adapts the pan or zoom speed to the space around it.
             </p>
           </div>
         )}

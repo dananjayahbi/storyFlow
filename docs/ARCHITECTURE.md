@@ -969,24 +969,29 @@ the room actually available:
 | 6 | Slow zoom in |
 
 * **Pan** — sweeps along the deterministic 7-direction cycle. The distance is
-  `PAN_SPEED_TARGET × duration × frame width`, then capped by the free space
-  left around the subject. A large subject therefore moves more slowly instead
-  of being rushed across the frame.
+  `PAN_SPEED_TARGET × duration × frame width` (raised to 0.045 frame/s so
+  short clips never look frozen), then capped by the free space left around
+  the subject.
 * **Zoom in / out** — a subtle 12–15 % crop-scale change, centred on the
   subject for a slow, cinematic move.
 * **Pan + zoom** — both motions at reduced strength for extra variety.
 
-When the preferred preset has too little room (`MIN_PAN_ROOM` /
-`MIN_ZOOM_ROOM`), the planner substitutes another motion. A subject that
-almost fills the frame gets a zoom or a very short pan rather than a nearly
-static shot.
+**Minimum visible motion.** Before choosing a motion the planner compares the
+achievable pan distance and zoom span with a visibility threshold
+(`MIN_PAN_TRAVEL` / `MIN_ZOOM_SPAN`, growing with clip length up to
+`MAX_REQUIRED_MOTION = 10 %`). A move below the threshold is skipped. When a
+large subject leaves too little panning room, the planner substitutes a slow
+zoom (or a combined move) instead of producing a nearly static shot. The
+preferred preset is therefore a starting point, not a guarantee.
 
 **Subject containment.** Only **one** highlighted rectangle is supported per
 image (`MAX_FOCUS_AREAS = 1`). The crop is never allowed to shrink below the
-rectangle's size, and every sampled frame is clamped to the bounds that keep
-the rectangle fully inside the crop. The highlighted area therefore cannot
-leave the rendered frame, even during a zoom. Legacy rows with several
-rectangles are rendered using the first one without mutating stored data.
+rectangle's size, and every sampled frame is clamped to the subject-safe
+bounds. Up to `FOCUS_OVERFLOW_RATIO = 10 %` of the rectangle's own width or
+height may leave the frame on one edge; this overflow is what gives panning
+the extra room needed for a visible move. The remaining part of the subject
+stays visible for the whole animation. Legacy rows with several rectangles
+are rendered using the first one without mutating stored data.
 
 **Per-Frame Algorithm:**
 1. Sample the motion plan with smoothstep easing.

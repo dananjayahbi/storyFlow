@@ -181,11 +181,13 @@ it. The rectangle is stored in `image_focus_areas` (a one-element
 `image_focus_area` field for older clients. The renderer zooms out just enough
 to keep the subject visible, then picks a pan, a slow zoom, or a combined move.
 Its smart motion planner measures the free space left around the rectangle and
-uses that to choose a comfortable speed: a large subject gets a slower, shorter
-move (or a zoom) instead of a rushed sweep, and the rectangle is clamped inside
-the frame on every frame of the animation. Press the focus button to clear the
-area; a block with no area keeps the default full-frame camera path. Because
-the setting is per segment, images that do not need highlighting are rendered
+only accepts a move that produces a visible amount of movement. If a large
+subject leaves too little panning room, it switches to a slow zoom (or a
+combined pan+zoom) instead of producing a frozen-looking shot. Up to 10 % of
+the marked rectangle may leave the frame, which gives panning more room while
+keeping most of the subject visible. Press the focus button to clear the area;
+a block with no area keeps the default full-frame camera path. Because the
+setting is per segment, images that do not need highlighting are rendered
 exactly as before. Legacy projects that stored several rectangles are rendered
 with the first one, without rewriting their saved data.
 

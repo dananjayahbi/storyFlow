@@ -80,10 +80,11 @@ backend restart.
   source before Ken Burns pans and zooms inside that frame. All seven camera
   presets move, so the first block animates like every other block. A block
   can also mark **one** subject rectangle (`image_focus_areas`); the renderer
-  keeps it inside the frame for the whole animation, zooms out if needed, and
-  measures the free space around it to choose a comfortable pan, slow zoom or
-  combined move. Large subjects get a slower, shorter move (or a zoom) instead
-  of a rushed sweep. Blocks with no marked area keep the default full-frame
+  keeps it sufficiently visible for the whole animation (at most 10 % may
+  leave the frame), zooms out if needed, and measures the free space around it
+  to choose a pan, slow zoom or combined move. A move is only used when it is
+  actually visible, so a large subject switches to a zoom instead of producing
+  a frozen-looking pan. Blocks with no marked area keep the default full-frame
   path; legacy rows with several rectangles are rendered using the first one.
 - The editor supports adding, deleting, reordering, renaming and locking blocks.
 - The left sidebar has one **Settings** panel. The old Details tab was removed;
