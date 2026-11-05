@@ -158,12 +158,19 @@ export function GlobalSettingsPanel() {
 
   // Wrapper for RenderSettingsForm that maps render_* field names to ProjectDetail field names
   const handleRenderSettingChange = useCallback(
-    async (data: { zoom_intensity?: number; render_width?: number; render_height?: number; render_fps?: number }) => {
+    async (data: {
+      zoom_intensity?: number;
+      render_width?: number;
+      render_height?: number;
+      render_fps?: number;
+      render_pipeline?: 'v1' | 'v2';
+    }) => {
       const mapped: Parameters<typeof updateProjectSettings>[0] = {};
       if (data.zoom_intensity !== undefined) mapped.zoom_intensity = data.zoom_intensity;
       if (data.render_width !== undefined) mapped.resolution_width = data.render_width;
       if (data.render_height !== undefined) mapped.resolution_height = data.render_height;
       if (data.render_fps !== undefined) mapped.framerate = data.render_fps;
+      if (data.render_pipeline !== undefined) mapped.render_pipeline = data.render_pipeline;
       // Switching resolution pulls that resolution's defaults into this
       // project only. Other projects keep their own snapshots.
       if (
@@ -660,6 +667,7 @@ export function GlobalSettingsPanel() {
               renderWidth={project.resolution_width ?? 1920}
               renderHeight={project.resolution_height ?? 1080}
               renderFps={project.framerate ?? 30}
+              renderPipeline={project.render_pipeline ?? 'v1'}
               onChange={handleRenderSettingChange}
             />
           </section>

@@ -945,6 +945,32 @@ output = foreground × α + background × (1 − α)
 - Pixel format: `yuv420p`
 - Container flag: `+faststart` (web streaming)
 
+#### Pipeline v2 (parallel, opt-in)
+
+**File:** `core_engine/fast_compositor_v2.py`
+
+`Project.render_pipeline` selects `v1` (default, unchanged) or `v2`. v2 keeps
+the exact visual contract but attacks the remaining CPU bottlenecks:
+
+1. The timeline is split into contiguous frame ranges. Each range is rendered
+   by a separate process, so frame generation and encoding run in parallel.
+   Only segments overlapping a range are decoded, keeping memory bounded.
+2. Frames where a single segment is visible skip the full-frame `float32`
+   blend/divide that v1 performs on every frame. The crossfade path is only
+   used inside actual transition windows.
+3. Each worker encodes its chunk with `FFmpegFrameWriter` (NVENC when
+   available). The parent then concatenates the chunks with FFmpeg's concat
+   demuxer and muxes the existing audio track (`-c:v copy`), so the final
+   quality is not reduced by a second encode.
+
+Worker count defaults to the CPU count (capped at 4, because each worker
+already runs OpenCV/FFmpeg threads) and can be overridden with
+`STORYFLOW_V2_WORKERS`. Chunks are at least one second long. The editor's
+**Settings → Render Settings → Render Pipeline** selector persists the choice
+per project; bulk renders use each project's selection. If an NVENC chunk fails
+(consumer drivers can cap concurrent sessions), the parent retries that chunk
+with libx264 instead of failing the render.
+
 ---
 
 ### 7.3 Ken Burns Effect Engine

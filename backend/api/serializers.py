@@ -874,6 +874,7 @@ class ProjectDetailSerializer(
             'subtitle_font', 'subtitle_color',
             'subtitles_enabled', 'custom_font_file',
             'zoom_intensity', 'ken_burns_zoom', 'transition_duration',
+            'render_pipeline',
             'inter_segment_silence',
             'logo_enabled', 'active_logo', 'logo_scale',
             'logo_position', 'logo_opacity', 'logo_margin',

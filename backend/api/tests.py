@@ -1632,6 +1632,19 @@ class VideoRendererTests(TestCase):
             result["duration"], expected_duration, delta=0.5
         )
 
+    def test_render_with_v2_pipeline(self):
+        """Selecting Pipeline v2 renders the same project successfully."""
+        from core_engine.video_renderer import render_project
+
+        self.project.render_pipeline = 'v2'
+        self.project.save(update_fields=['render_pipeline'])
+
+        result = render_project(str(self.project.id))
+
+        self.assertTrue(os.path.exists(result["output_path"]))
+        self.assertGreater(result["file_size"], 0)
+        self.assertGreater(result["duration"], 0)
+
     def test_render_progress_callback(self):
         """Progress callback is invoked for each segment + export phase."""
         from core_engine.video_renderer import render_project

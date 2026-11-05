@@ -190,6 +190,10 @@ The same tab has a three-block **demo playground**:
 - Background music is mixed under the narration during rendering.
 - Progress is reported per phase (segments, frames, encoding, finalising).
 - Renders can be cancelled.
+- Each project chooses **Pipeline v1** (original sequential compositor, default)
+  or **Pipeline v2** (parallel frame chunks, fast single-segment path, NVENC
+  when available) in Settings → Render Settings. v2 concatenates encoded
+  chunks without re-encoding, so visual output matches v1.
 - **Bulk Create** is account-scoped: `GET /api/projects/render-readiness/`
   applies the exact render validator (including on-disk files) and the page
   only offers ready projects, rendering them sequentially with cancel and

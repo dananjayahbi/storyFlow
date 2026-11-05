@@ -763,6 +763,21 @@ banner show it as **Rendered in 2m 13s** (older assets without a measurement
 simply omit it). Re-rendering creates a new asset with its own timing, so you
 can compare pipeline performance across versions.
 
+#### Render pipelines (v1 / v2)
+
+Project **Settings → Render Settings → Render Pipeline** chooses the compositor:
+
+- **v1 — stable (sequential)** is the original fast compositor and remains the
+  default. Existing projects keep rendering exactly as before.
+- **v2 — fast (parallel chunks)** splits the timeline across CPU processes,
+  skips full-frame float blending on single-segment frames and concatenates the
+  encoded chunks without re-encoding. NVENC is used when available, with the
+  worker count capped to avoid driver session limits.
+
+The choice is stored per project, so bulk renders use each project's own
+pipeline. `STORYFLOW_V2_WORKERS` can override the automatic worker count (for
+example `STORYFLOW_V2_WORKERS=4`).
+
 ### Configuring the AI model
 
 Each account has its own model and system prompt. Open

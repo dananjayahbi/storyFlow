@@ -24,8 +24,16 @@ interface RenderSettingsFormProps {
   renderHeight: number;
   /** Current render FPS. */
   renderFps: number;
+  /** Selected compositor engine. */
+  renderPipeline?: 'v1' | 'v2';
   /** Called with partial settings update to persist changes. */
-  onChange: (data: { zoom_intensity?: number; render_width?: number; render_height?: number; render_fps?: number }) => Promise<void>;
+  onChange: (data: {
+    zoom_intensity?: number;
+    render_width?: number;
+    render_height?: number;
+    render_fps?: number;
+    render_pipeline?: 'v1' | 'v2';
+  }) => Promise<void>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -62,6 +70,7 @@ export function RenderSettingsForm({
   renderWidth,
   renderHeight,
   renderFps,
+  renderPipeline = 'v1',
   onChange,
 }: RenderSettingsFormProps) {
   // ── Local slider state for responsive UI ──
@@ -219,6 +228,35 @@ export function RenderSettingsForm({
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      {/* ── Render Pipeline Engine ── */}
+      <div className="space-y-1.5">
+        <label className="text-xs text-muted-foreground font-medium">
+          Render Pipeline
+        </label>
+        <Select
+          value={renderPipeline}
+          onValueChange={(value) =>
+            onChange({ render_pipeline: value as 'v1' | 'v2' })
+          }
+        >
+          <SelectTrigger className="h-9 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="v1">
+              v1 — stable (sequential)
+            </SelectItem>
+            <SelectItem value="v2">
+              v2 — fast (parallel chunks)
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-[10px] text-muted-foreground">
+          v2 splits the timeline across CPU workers for faster exports. v1 is
+          kept unchanged for comparison and fallback.
+        </p>
       </div>
     </div>
   );

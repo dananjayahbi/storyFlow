@@ -93,6 +93,16 @@ def project_thumbnail_asset_path(instance, filename):
     )
 
 
+#: Available video-compositing engines.  ``v1`` is the original sequential
+#: fast compositor; ``v2`` keeps the same visual contract but renders frame
+#: ranges in parallel and skips unnecessary float blending.
+RENDER_PIPELINE_CHOICES = [
+    ('v1', 'v1 — stable (sequential)'),
+    ('v2', 'v2 — fast (parallel)'),
+]
+RENDER_PIPELINE_DEFAULT = 'v1'
+
+
 class Account(models.Model):
     """A Facebook page or YouTube account owned by one workspace section.
 
@@ -231,6 +241,11 @@ class Project(models.Model):
     zoom_intensity = models.FloatField(default=1.3)
     ken_burns_zoom = models.FloatField(default=1.2)
     transition_duration = models.FloatField(default=0.5)
+    render_pipeline = models.CharField(
+        max_length=8,
+        choices=RENDER_PIPELINE_CHOICES,
+        default=RENDER_PIPELINE_DEFAULT,
+    )
 
     # Audio / timing
     inter_segment_silence = models.FloatField(default=0.3)

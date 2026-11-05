@@ -31,7 +31,9 @@ import proglog
 
 from core_engine import render_utils
 from core_engine.ken_burns import apply_ken_burns
-from core_engine.fast_compositor import fast_render_segments
+from core_engine.fast_compositor import (  # noqa: F401  (kept for callers)
+    fast_render_segments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1150,8 +1152,22 @@ def render_project(
             except Exception as logo_err:
                 logger.warning("Could not read logo settings: %s", logo_err)
 
-        # Run the fast compositor
-        render_stats = fast_render_segments(
+        # Read the selected engine. v1 stays the default so existing projects
+        # render exactly as before; v2 is opt-in per project.
+        pipeline = getattr(project, "render_pipeline", "v1") or "v1"
+        if pipeline == "v2":
+            from core_engine.fast_compositor_v2 import (
+                fast_render_segments_v2 as render_segments,
+            )
+            logger.info("Render pipeline: v2 (parallel)")
+        else:
+            from core_engine.fast_compositor import (
+                fast_render_segments as render_segments,
+            )
+            logger.info("Render pipeline: v1 (sequential)")
+
+        # Run the selected compositor
+        render_stats = render_segments(
             segment_data=segment_data_list,
             output_path=output_path,
             resolution=(res_width, res_height),

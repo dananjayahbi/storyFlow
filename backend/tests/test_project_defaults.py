@@ -241,6 +241,32 @@ class ProjectDefaultsAPITests(APITestCase):
             60,
         )
 
+    def test_render_pipeline_setting_is_per_project(self):
+        first = Project.objects.create(
+            title='Fast pipeline',
+            section='facebook',
+            account=self.account,
+        )
+        second = Project.objects.create(
+            title='Stable pipeline',
+            section='facebook',
+            account=self.account,
+        )
+        self.assertEqual(first.render_pipeline, 'v1')
+
+        response = self.client.patch(
+            f'/api/projects/{first.id}/{self.scope}',
+            {'render_pipeline': 'v2'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['render_pipeline'], 'v2')
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.render_pipeline, 'v2')
+        self.assertEqual(second.render_pipeline, 'v1')
+
     def test_account_settings_update_does_not_rewrite_existing_projects(self):
         project = Project.objects.create(
             title='Existing',

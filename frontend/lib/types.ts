@@ -102,6 +102,8 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   /** Saved upload-ready YouTube metadata (separate from the project title). */
   upload_title?: string;
   upload_description?: string;
+  /** Selected video compositor: v1 (stable) or v2 (parallel). */
+  render_pipeline?: 'v1' | 'v2';
 
   // ── Per-project settings ──
   default_voice_id: string;
