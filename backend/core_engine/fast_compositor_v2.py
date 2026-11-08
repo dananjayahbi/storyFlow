@@ -116,6 +116,7 @@ def _render_chunk(job: dict, progress_callback=None) -> dict:
         load_and_prepare_image,
         normalise_focus_areas,
         plan_ken_burns_motion,
+        plan_manual_ken_burns_motion,
         sample_ken_burns_motion,
     )
     from core_engine.subtitle_engine import chunk_and_time
@@ -172,16 +173,26 @@ def _render_chunk(job: dict, progress_callback=None) -> dict:
         focus_areas = normalise_focus_areas(
             seg.get("focus_areas")
         ) or normalise_focus_areas(seg.get("focus_area"))
-        motion_plan = plan_ken_burns_motion(
-            segment_index=seg["sequence_index"],
+        motion_plan = plan_manual_ken_burns_motion(
+            seg.get("ken_burns_config"),
             duration=visual_duration,
             source_width=src_w,
             source_height=src_h,
             output_width=width,
             output_height=height,
             zoom_intensity=zoom_intensity,
-            focus_area=focus_areas[0] if focus_areas else None,
         )
+        if motion_plan is None:
+            motion_plan = plan_ken_burns_motion(
+                segment_index=seg["sequence_index"],
+                duration=visual_duration,
+                source_width=src_w,
+                source_height=src_h,
+                output_width=width,
+                output_height=height,
+                zoom_intensity=zoom_intensity,
+                focus_area=focus_areas[0] if focus_areas else None,
+            )
         segments_info[index] = {
             "source_image": source_image,
             "motion_plan": motion_plan,

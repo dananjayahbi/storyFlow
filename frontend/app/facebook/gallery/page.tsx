@@ -70,8 +70,13 @@ export default function GalleryPage() {
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
 
   // ── Asset-management state ──
+  const isYouTube = section === 'youtube';
   const [statusFilter, setStatusFilter] = useState<RenderingStatus | 'all'>('all');
-  const [projectFilter, setProjectFilter] = useState<string>('all');
+  // The YouTube gallery opens on each project's primary video only; the
+  // Facebook workspace keeps the previous "everything" behaviour.
+  const [primaryFilter, setPrimaryFilter] = useState<'primary' | 'all'>(
+    isYouTube ? 'primary' : 'all',
+  );
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -82,20 +87,12 @@ export default function GalleryPage() {
     () =>
       filterGalleryItems(items, {
         status: statusFilter,
-        project: projectFilter,
+        primary: primaryFilter,
         query,
         sort,
       }),
-    [items, statusFilter, projectFilter, query, sort],
+    [items, statusFilter, primaryFilter, query, sort],
   );
-
-  const projectOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    items.forEach((item) => map.set(item.project_id, item.project_title));
-    return Array.from(map, ([id, title]) => ({ id, title })).sort((a, b) =>
-      a.title.localeCompare(b.title),
-    );
-  }, [items]);
 
   const allVisibleSelected =
     visibleItems.length > 0 &&
@@ -124,10 +121,10 @@ export default function GalleryPage() {
 
   const clearFilters = useCallback(() => {
     setStatusFilter('all');
-    setProjectFilter('all');
+    setPrimaryFilter(isYouTube ? 'primary' : 'all');
     setQuery('');
     setSort('newest');
-  }, []);
+  }, [isYouTube]);
 
   const handleBulkStatus = useCallback(
     async (status: RenderingStatus) => {
@@ -255,7 +252,7 @@ export default function GalleryPage() {
 
   const hasFilters =
     statusFilter !== 'all' ||
-    projectFilter !== 'all' ||
+    primaryFilter !== (isYouTube ? 'primary' : 'all') ||
     query.trim().length > 0 ||
     sort !== 'newest';
 
@@ -313,19 +310,22 @@ export default function GalleryPage() {
               </SelectContent>
             </Select>
 
-            <Select value={projectFilter} onValueChange={setProjectFilter}>
-              <SelectTrigger className="h-8 w-[180px] text-xs">
-                <SelectValue placeholder="Project" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All projects</SelectItem>
-                {projectOptions.map((project) => (
-                  <SelectItem key={project.id} value={project.id}>
-                    {project.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {isYouTube && (
+              <Select
+                value={primaryFilter}
+                onValueChange={(value) =>
+                  setPrimaryFilter(value as 'primary' | 'all')
+                }
+              >
+                <SelectTrigger className="h-8 w-[170px] text-xs">
+                  <SelectValue placeholder="Videos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="primary">Primary videos</SelectItem>
+                  <SelectItem value="all">All videos</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
 
             <Select
               value={sort}
@@ -470,7 +470,7 @@ export default function GalleryPage() {
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <Search className="size-12 mb-3 opacity-30" />
           <p className="text-base font-medium">No assets match these filters</p>
-          <p className="mt-1 text-sm">Try another status, project or search term</p>
+          <p className="mt-1 text-sm">Try another status, video scope or search term</p>
           <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
             Clear filters
           </Button>

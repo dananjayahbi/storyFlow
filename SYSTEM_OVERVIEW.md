@@ -25,6 +25,21 @@ A typical StoryFlow job is:
 The application is designed for short-form “faceless” videos such as Facebook
 Reels and YouTube documentaries.
 
+### 1.1 Recent additions
+
+- **Manual Ken Burns per block** — switch any block from the automatic planner
+  to a hand-authored Pan, Zoom in, Zoom out or Pan + zoom move.
+- **Ken Burns preview** — a Preview button on every block plays the animation
+  in a modal with the renderer's exact path, easing and timing, so presets can
+  be compared before rendering a video.
+- **Per-project TTS system prompt** — every TTS script rewrite can use the
+  project's own style guide and narration rules.
+- **Thumbnail downloads** — each saved thumbnail in Metadata management has a
+  download button.
+- **Primary video per project** — the newest render becomes primary
+  automatically, older versions can be promoted from the Project gallery, and
+  the YouTube Gallery shows primary videos by default.
+
 ---
 
 ## 2. Two workspaces, many accounts
@@ -86,6 +101,21 @@ backend restart.
   actually visible, so a large subject switches to a zoom instead of producing
   a frozen-looking pan. Blocks with no marked area keep the default full-frame
   path; legacy rows with several rectangles are rendered using the first one.
+- A block can switch from **Automatic** to **Manual** Ken Burns. Manual mode
+  offers four animation presets: **Pan** (place start/end points or draw a pan
+  area), **Zoom in**, **Zoom out** and **Pan + zoom**. Pan points, pan areas and
+  zoom focal points are placed directly on the image preview, and each preset
+  keeps its own settings (path mode, focal point, zoom strength). The move
+  always spans the block's TTS duration, so its speed follows the narration;
+  generate the TTS first so the duration is known. Switching back to Automatic
+  restores the planner described above without losing the manual settings.
+- Every block with an image has a **Preview** button. It opens a modal that
+  plays the current animation (manual or automatic) with the renderer's exact
+  motion plan: the same crop path, smoothstep easing, subject clamping and
+  prepared-frame zoom headroom. Playback, scrubbing and replay are available,
+  and the block's TTS duration sets the speed. When the TTS has not been
+  generated yet the preview uses a 5 s estimate and labels it as such. No
+  temporary video is rendered, so the preview never leaves files behind.
 - The editor supports adding, deleting, reordering, renaming and locking blocks.
 - The left sidebar has one **Settings** panel. The old Details tab was removed;
   the Story Template JSON reference now lives on the Settings page.
@@ -112,6 +142,11 @@ Two engines are supported:
   Kokoro blocks are regenerated while Qwen blocks can be kept.
 - Each block shows which engine produced its current audio.
 - Download a block's narration as **WAV** or **MP3** from its overflow menu.
+- Each project has an optional **TTS System Prompt** in the editor sidebar.
+  It is sent as the system message for every TTS script rewrite, both for a
+  single block and for a batch. Leaving it empty keeps the built-in StoryFlow
+  prompt; the deterministic text normalisation and the 1:1 length guard still
+  run on every model reply.
 
 ### 3.3 Background music (BGM Library)
 
@@ -204,12 +239,22 @@ The same tab has a three-block **demo playground**:
   playback, seeking, download and fullscreen. Each render also records how long
   the full video-generation pipeline took; the gallery card, player footer and
   project-detail completion banner show it (for example "Rendered in 2m 13s").
+- Every gallery card uses the owning project's configured cover as its resting
+  image (the `poster`), so the account Gallery matches the Projects page. The
+  same fallback order applies everywhere: active Metadata-management thumbnail,
+  then legacy manual cover, then the first block image. Tiles without any cover
+  keep the existing video frame.
 - Each render is exported to its own unique file before becoming an asset, so
   re-rendering always adds a new gallery item and never replaces an earlier
   video. Each card streams only its own file.
 - Assets move through **Rendered → Ready to publish → Published**; the Gallery
-  uses a compact single-row filter bar (status/project/title), multi-select
-  status changes and deletion of one or many rendered MP4s.
+  uses a compact single-row filter bar (status/title), multi-select status
+  changes and deletion of one or many rendered MP4s.
+- On YouTube, every project has one **primary video**. A new render becomes
+  primary automatically; the Project gallery can promote any older render with
+  its star action. The account Gallery opens on **Primary videos** only, and a
+  video-scope filter switches it to **All videos**. The old per-project filter
+  was removed in favour of title search.
 - A project's detail header has **Project gallery**, a full-viewport modal that
   lists every rendering for that project (including its own delete actions).
   Clicking a tile opens the shared popup player, and both the player header and
@@ -217,6 +262,11 @@ The same tab has a three-block **demo playground**:
   inline audio player and the gallery popup player support keyboard navigation:
   Space/K play-pause, arrows seek and change volume, J/L seek 10 s, M mutes,
   Home/End jump to the ends and F toggles fullscreen.
+- On YouTube, **Metadata management** drafts a thumbnail prompt plus an
+  upload-ready title and description from the project. It stores multiple
+  thumbnail candidates (paste, drop or upload), lets one be marked active, and
+  each saved thumbnail can be downloaded as its original PNG/JPG/WebP or
+  deleted.
 
 ### 3.9 Script Craft (AI writer)
 
@@ -320,7 +370,7 @@ Assets are account-scoped so two accounts cannot overwrite each other's files.
 | Scripts | `/api/scripts/` |
 | Script Craft | `/api/chat/sessions/`, `/stream/`, `/steer/`, `/stop/`, `/compact/` |
 | BGM | `/api/bgm/`, `/api/bgm/generate/`, `/api/bgm/engine-status/` |
-| Gallery | `/api/gallery/`, per-project stream/download |
+| Gallery | `/api/gallery/` (`?primary=1`), per-project stream/download, `PATCH is_primary` |
 
 ---
 

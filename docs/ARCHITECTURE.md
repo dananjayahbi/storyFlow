@@ -554,7 +554,9 @@ Each completed export creates one `Rendering` row. It is the durable link betwee
 - **Project link:** FK to `Project` (`related_name="renderings"`); deleting the project cascades the rows, while deleting a rendering never deletes the project/script.
 - **File:** `file_path` points at `<Section>/<account>/<project>/renderings/<rendering-id>.mp4`, so re-rendering cannot overwrite an earlier version.
 - **Publishing workflow:** `status` is `rendered`, `ready_to_publish` or `published`; `published_at` records the transition to published.
+- **Primary video:** `is_primary` marks the project's current hero asset. `register_rendering()` clears the flag on older rows and sets it on the new render, so the newest export always becomes primary. The Project gallery can promote any older render through `PATCH /api/gallery/<id>/ {"is_primary": true}`; deleting the primary promotes the newest remaining row. The account Gallery accepts `?primary=1` and the YouTube page uses it by default.
 - **Metadata:** title snapshot, resolution, framerate, segment count, duration, file size, timestamps, and `render_time_seconds` — the wall-clock time spent in the full video-render pipeline. The editor's completed banner, gallery cards and player footer format it as `2m 13s`; rows created before this measurement simply leave it null.
+- **Project cover:** each Gallery item exposes `thumbnail_url` and `thumbnail_source`, resolved through `resolve_project_thumbnail()` — the same fallback used by project serializers: active `ProjectThumbnail` → legacy `Project.thumbnail` → first segment image. The account Gallery and the Project gallery render it as the video poster, and the URL is resolved once per project per list request.
 - **Compatibility:** rows backfilled from pre-feature projects reuse the project id, so old `/api/gallery/<project-id>/...` links continue to resolve.
 
 #### Segment Model (Content Unit)
@@ -565,6 +567,12 @@ Each `Segment` belongs to a `Project` and represents one narration unit:
 - **Media:** `image_file` (uploaded image), `audio_file` (generated TTS WAV), `audio_duration`
 - **Engine provenance:** `audio_engine` records whether the current WAV came
   from `kokoro` or `qwen`, so switching engines regenerates cleanly
+- **Spoken script:** `tts_text` optionally stores the TTS-ready rewrite used by
+  the voice engine while `text_content` keeps the subtitle script untouched
+- **Ken Burns controls:** `image_focus_x`/`image_focus_y` position the frame
+  inside the source, `image_focus_area`/`image_focus_areas` mark the automatic
+  planner's subject, and `ken_burns_config` stores the optional manual
+  per-animation override (disabled by default)
 - **Lock:** `is_locked` flag prevents accidental editing during rendering
 
 #### GlobalSettings Model (Singleton)
@@ -1026,6 +1034,47 @@ large subject leaves too little panning room, the planner substitutes a slow
 zoom (or a combined move) instead of producing a nearly static shot. The
 preferred preset is therefore a starting point, not a guarantee.
 
+**Manual per-block motion (Feature #31).** A segment can store a
+`ken_burns_config` JSON object that takes precedence over the planner:
+
+```json
+{
+  "enabled": true,
+  "animation": "pan | zoom_in | zoom_out | pan_zoom",
+  "pan_mode": "points | area",
+  "start": {"x": 0.2, "y": 0.5},
+  "end": {"x": 0.8, "y": 0.5},
+  "focal_point": {"x": 0.5, "y": 0.5},
+  "area": {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.6},
+  "zoom": 1.25
+}
+```
+
+`normalise_ken_burns_config()` clamps/validates the object and
+`plan_manual_ken_burns_motion()` converts it into the same
+`start_crop`/`end_crop`/`start_centre`/`end_centre` plan shape used by the
+automatic planner, so `sample_ken_burns_motion()` and both compositors need no
+special case. Points are normalised to the prepared frame. Pan moves centre the
+crop on the start and end points (or the longer axis of a drawn area); zoom
+presets hold the focal point while the crop changes between the full frame and
+the requested zoom. Because the plan always spans the clip duration, the move
+speed follows the block's TTS audio length. An empty object or `enabled: false`
+falls back to the automatic planner.
+
+**In-editor preview (Feature #36).** `frontend/lib/kenBurnsPreview.ts` ports
+`plan_manual_ken_burns_motion()`, `plan_ken_burns_motion()` and
+`sample_ken_burns_motion()` to the browser so the editor can show the exact
+move without rendering a temporary video. It reproduces `load_and_prepare_image`
+sizing (cover crop, minimum `output × zoomIntensity`, oversized-frame
+downscale), the manual zoom headroom cap, automatic-motion selection,
+subject-safe bounds, integer rounding and smoothstep easing. The modal
+(`frontend/components/KenBurnsPreviewModal.tsx`) animates the cover-cropped
+image with a CSS transform, so the camera path, timing and framing match the
+renderer. Playback uses the block's TTS audio duration; missing TTS falls back
+to a labelled 5 s estimate. Because it is pure client-side computation there is
+no temporary file, render job or cleanup to manage. The Preview button lives in
+the block's Ken Burns panel and works for both manual and automatic plans.
+
 **Subject containment.** Only **one** highlighted rectangle is supported per
 image (`MAX_FOCUS_AREAS = 1`). The crop is never allowed to shrink below the
 rectangle's size, and every sampled frame is clamped to the subject-safe
@@ -1140,8 +1189,9 @@ override the interpreter path.
 | File | Responsibility |
 | ---- | -------------- |
 | `core_engine/tts_script.py` | Prompt rules, deterministic normaliser, LLM rewrite |
-| `api/models.py` | `Segment.tts_text` stores the optional spoken version |
-| `api/views.py` | `generate-tts-script` (one block) and `generate-all-tts-scripts` (background batch) |
+| `api/models.py` | `Segment.tts_text` stores the optional spoken version; `Project.tts_system_prompt` stores the per-project style guide |
+| `api/views.py` | `generate-tts-script` (one block) and `generate-all-tts-scripts` (background batch); both pass the project prompt |
+| `frontend/components/GlobalSettingsPanel.tsx` | Project **TTS System Prompt** textarea, saved on blur |
 | `frontend/components/SegmentCard.tsx` | Per-block generate/edit UI, auto-expanded when a script exists |
 | `frontend/app/facebook/projects/[id]/page.tsx` | Footer button loops the per-block endpoint with live progress (Issue #35) |
 
@@ -1155,6 +1205,14 @@ The rewrite prompt enforces six groups of rules: strip non-verbal tags and
 emojis, normalise years/dates/quantities/decimals, expand acronyms and
 abbreviations, convert exotic punctuation into comma/period breath cues, add
 phonetic hints for ambiguous words, and preserve 1:1 semantic alignment.
+
+Each project can override the built-in system prompt through
+`Project.tts_system_prompt` (the **TTS System Prompt** field in the editor
+sidebar). `rewrite_for_tts(..., system_prompt=...)` uses that text verbatim as
+the system message for every single-block and batch rewrite; an empty value
+falls back to `TTS_REWRITE_SYSTEM_PROMPT`. The same prompt is therefore applied
+to every block in a batch, and the deterministic normaliser plus the 1:1 length
+guard still run on the reply.
 `normalize_tts_text()` is a deterministic safety net used for legacy blocks and
 as post-processing after every LLM reply; it is idempotent and also expands
 years, ordinals, currency, percentages, fractions and common units.
@@ -2020,6 +2078,8 @@ DELETE /api/settings/outros/{id}/             → 204 No Content
 ```
 GET    /api/tasks/{task_id}/status/            → TaskStatusResponse
 GET    /api/gallery/?section={section}         → GalleryItem[]
+GET    /api/gallery/?section={section}&primary=1 → only primary videos
+PATCH  /api/gallery/{id}/?section={section}   → {"status": "...", "is_primary": true}
 GET    /api/gallery/{id}/stream/?section={section}   → video/mp4 (streaming)
 GET    /api/gallery/{id}/download/?section={section} → video/mp4 (attachment)
 ```

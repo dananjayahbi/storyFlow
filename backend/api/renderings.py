@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
 
 from .models import (
     Project,
@@ -142,21 +143,26 @@ def register_rendering(project: Project, output_path: str, **metadata) -> Render
         except OSError:
             file_size = 0
 
-    rendering = Rendering.objects.create(
-        id=rendering_id,
-        project=project,
-        title=project.title,
-        file_path=stored_path,
-        status=RENDERING_STATUS_RENDERED,
-        resolution_width=project.resolution_width,
-        resolution_height=project.resolution_height,
-        framerate=project.framerate,
-        segment_count=metadata.pop('segment_count', None)
-        or project.segments.count(),
-        file_size=file_size or 0,
-        duration=metadata.pop('duration', None),
-        **metadata,
-    )
+    with transaction.atomic():
+        # The newest render is always the project's primary video.  Older
+        # versions stay in the gallery so nothing is lost.
+        Rendering.objects.filter(project=project).update(is_primary=False)
+        rendering = Rendering.objects.create(
+            id=rendering_id,
+            project=project,
+            title=project.title,
+            file_path=stored_path,
+            status=RENDERING_STATUS_RENDERED,
+            resolution_width=project.resolution_width,
+            resolution_height=project.resolution_height,
+            framerate=project.framerate,
+            segment_count=metadata.pop('segment_count', None)
+            or project.segments.count(),
+            file_size=file_size or 0,
+            duration=metadata.pop('duration', None),
+            is_primary=True,
+            **metadata,
+        )
 
     project.output_path = stored_path
     project.status = STATUS_COMPLETED
@@ -174,6 +180,7 @@ def delete_rendering(rendering: Rendering) -> None:
         if rendering_path
         else bool(project_path)
     )
+    was_primary = bool(rendering.is_primary)
 
     video_path = resolve_rendering_video(rendering)
     rendering.delete()
@@ -188,10 +195,18 @@ def delete_rendering(rendering: Rendering) -> None:
         except OSError:
             pass
 
+    latest = project.renderings.order_by('-created_at').first()
+
+    # Deleting the hero video promotes the newest remaining version so a
+    # project with any renderings always has exactly one primary asset.
+    if was_primary and latest:
+        Rendering.objects.filter(project=project).update(is_primary=False)
+        latest.is_primary = True
+        latest.save(update_fields=['is_primary'])
+
     if not was_current:
         return
 
-    latest = project.renderings.order_by('-created_at').first()
     if latest:
         project.output_path = latest.file_path
         project.status = STATUS_COMPLETED

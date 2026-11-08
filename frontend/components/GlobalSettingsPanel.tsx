@@ -6,6 +6,7 @@ import { Slider } from '@/components/ui/slider';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -89,6 +90,7 @@ export function GlobalSettingsPanel() {
   const [localSpeed, setLocalSpeed] = useState<number | null>(null);
   const [localSilence, setLocalSilence] = useState<number | null>(null);
   const [localDenoise, setLocalDenoise] = useState<number | null>(null);
+  const [ttsPromptDraft, setTtsPromptDraft] = useState('');
 
   // Background-music library + MusicGen state lives in the shared BGM store
   // so the timeline toolbar and this panel stay in sync.
@@ -127,6 +129,7 @@ export function GlobalSettingsPanel() {
       setLocalSpeed(project.tts_speed);
       setLocalSilence(project.inter_segment_silence);
       setLocalDenoise(project.upscale_denoise_strength);
+      setTtsPromptDraft(project.tts_system_prompt ?? '');
     }
   }, [project]);
 
@@ -205,6 +208,14 @@ export function GlobalSettingsPanel() {
     },
     [handleSettingChange]
   );
+
+  // ── Project TTS system prompt (saved on blur) ──
+  const handleTtsPromptBlur = useCallback(() => {
+    if (!project) return;
+    const next = ttsPromptDraft.trim();
+    if (next === (project.tts_system_prompt ?? '').trim()) return;
+    handleSettingChange({ tts_system_prompt: next });
+  }, [handleSettingChange, project, ttsPromptDraft]);
 
   // ── Inter-segment silence slider with debounce ──
   const handleSilenceChange = useCallback(
@@ -509,6 +520,28 @@ export function GlobalSettingsPanel() {
                 step={0.1}
                 onValueChange={handleSpeedChange}
               />
+            </div>
+
+            {/* Per-project TTS script system prompt */}
+            <div className="space-y-1.5 mt-3">
+              <label
+                htmlFor="project-tts-system-prompt"
+                className="text-xs text-muted-foreground"
+              >
+                TTS System Prompt
+              </label>
+              <Textarea
+                id="project-tts-system-prompt"
+                value={ttsPromptDraft}
+                onChange={(event) => setTtsPromptDraft(event.target.value)}
+                onBlur={handleTtsPromptBlur}
+                placeholder="Paste this project's style guide and narration rules. Leave empty to use the built-in StoryFlow prompt."
+                className="min-h-[96px] text-xs leading-relaxed"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Used every time a block&apos;s TTS script is generated. The same
+                prompt is applied to batch and single-block rewrites.
+              </p>
             </div>
           </section>
 

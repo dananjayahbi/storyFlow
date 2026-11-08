@@ -574,6 +574,7 @@ export default function TimelineEditorPage() {
               segments={segments}
               frameWidth={project.resolution_width}
               frameHeight={project.resolution_height}
+              zoomIntensity={project.zoom_intensity}
               onAddSegment={async () => { await addSegment(); }}
               onUpdateSegment={updateSegment}
               onDeleteSegment={deleteSegment}
@@ -819,6 +820,7 @@ export default function TimelineEditorPage() {
           onOpenChange={setShowGalleryModal}
           projectId={id}
           projectTitle={project.title}
+          allowPrimary={section === 'youtube'}
           onChanged={() => fetchProject(id)}
         />
 

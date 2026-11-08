@@ -9,7 +9,7 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from api.models import Account, Project, Rendering
+from api.models import Account, Project, ProjectThumbnail, Rendering, Segment
 
 TEMP_MEDIA_ROOT = tempfile.mkdtemp()
 
@@ -66,6 +66,50 @@ class GalleryAssetTests(APITestCase):
         self.assertTrue(
             all(item['project_id'] == str(self.project.id) for item in response.data)
         )
+
+    def test_gallery_items_use_the_project_thumbnail_fallback_order(self):
+        rendering = self._rendering(self.project, name='cover.mp4')
+
+        def item():
+            response = self.client.get('/api/gallery/?section=facebook')
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            return next(
+                entry for entry in response.data
+                if entry['id'] == str(rendering.id)
+            )
+
+        # No cover at all.
+        self.assertIsNone(item()['thumbnail_url'])
+        self.assertIsNone(item()['thumbnail_source'])
+
+        # Fallback 3: the first segment that actually has an image.  The
+        # earlier image-less segment must be skipped.
+        Segment.objects.create(project=self.project, sequence_index=0)
+        Segment.objects.create(
+            project=self.project,
+            sequence_index=1,
+            image_file='Facebook/segments/first.png',
+        )
+        payload = item()
+        self.assertEqual(payload['thumbnail_source'], 'segment')
+        self.assertTrue(payload['thumbnail_url'].endswith('/media/Facebook/segments/first.png'))
+
+        # Fallback 2: the legacy manual cover.
+        self.project.thumbnail = 'Facebook/covers/manual.png'
+        self.project.save(update_fields=['thumbnail'])
+        payload = item()
+        self.assertEqual(payload['thumbnail_source'], 'manual')
+        self.assertTrue(payload['thumbnail_url'].endswith('/media/Facebook/covers/manual.png'))
+
+        # Fallback 1: the active Metadata-management thumbnail wins.
+        ProjectThumbnail.objects.create(
+            project=self.project,
+            image='Facebook/covers/active.png',
+            is_active=True,
+        )
+        payload = item()
+        self.assertEqual(payload['thumbnail_source'], 'active')
+        self.assertTrue(payload['thumbnail_url'].endswith('/media/Facebook/covers/active.png'))
 
     def test_list_exposes_render_time_seconds(self):
         rendering = self._rendering(
@@ -133,6 +177,11 @@ class GalleryAssetTests(APITestCase):
         first = register_rendering(self.project, sources[0])
         second = register_rendering(self.project, sources[1])
 
+        first.refresh_from_db()
+        second.refresh_from_db()
+        # The newest export always becomes the project's primary video.
+        self.assertFalse(first.is_primary)
+        self.assertTrue(second.is_primary)
         self.assertNotEqual(first.file_path, second.file_path)
         first_path = os.path.join(settings.MEDIA_ROOT, first.file_path)
         second_path = os.path.join(settings.MEDIA_ROOT, second.file_path)
@@ -224,6 +273,53 @@ class GalleryAssetTests(APITestCase):
         self.assertEqual(rendering.render_time_seconds, 42.75)
         self.project.refresh_from_db()
         self.assertEqual(self.project.output_path, rendering.file_path)
+
+    def test_primary_filter_returns_only_the_hero_video(self):
+        older = self._rendering(self.project, name='older.mp4')
+        newer = self._rendering(self.project, name='newer.mp4')
+        Rendering.objects.filter(pk=older.pk).update(is_primary=False)
+        Rendering.objects.filter(pk=newer.pk).update(is_primary=True)
+
+        response = self.client.get(
+            '/api/gallery/?section=facebook&primary=1'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([item['id'] for item in response.data], [str(newer.id)])
+        self.assertTrue(response.data[0]['is_primary'])
+
+    def test_patch_promotes_another_rendering(self):
+        older = self._rendering(self.project, name='older.mp4')
+        newer = self._rendering(self.project, name='newer.mp4')
+        Rendering.objects.filter(pk=older.pk).update(is_primary=True)
+        Rendering.objects.filter(pk=newer.pk).update(is_primary=False)
+
+        response = self.client.patch(
+            f'/api/gallery/{older.id}/?section=facebook',
+            {'is_primary': True},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertTrue(older.is_primary)
+        self.assertFalse(newer.is_primary)
+        self.assertTrue(response.data['is_primary'])
+
+    def test_deleting_the_primary_promotes_the_newest_remaining(self):
+        older = self._rendering(self.project, name='older.mp4')
+        newer = self._rendering(self.project, name='newer.mp4')
+        Rendering.objects.filter(pk=older.pk).update(is_primary=True)
+        Rendering.objects.filter(pk=newer.pk).update(is_primary=False)
+
+        response = self.client.delete(
+            f'/api/gallery/{older.id}/?section=facebook'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        newer.refresh_from_db()
+        self.assertTrue(newer.is_primary)
 
     def test_single_delete_clears_project_output(self):
         rendering = self._rendering(self.project, name='only.mp4')

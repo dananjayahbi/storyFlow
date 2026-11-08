@@ -509,7 +509,8 @@ def fast_render_segments(
             ``audio_duration``, ``text_content``, ``sequence_index`` and
             optional ``focus_x``/``focus_y`` (0..1 frame position) plus
             ``focus_area`` / ``focus_areas`` (one normalised subject
-            rectangle; legacy lists use their first entry).
+            rectangle; legacy lists use their first entry) and optional
+            ``ken_burns_config`` (manual per-segment animation).
         output_path: Path for the output MP4 file.
         resolution: ``(width, height)`` of the output video.
         fps: Frames per second.
@@ -532,6 +533,7 @@ def fast_render_segments(
         load_and_prepare_image,
         normalise_focus_areas,
         plan_ken_burns_motion,
+        plan_manual_ken_burns_motion,
         sample_ken_burns_motion,
     )
     from core_engine.subtitle_engine import chunk_and_time
@@ -599,16 +601,26 @@ def fast_render_segments(
         focus_areas = normalise_focus_areas(
             seg.get("focus_areas")
         ) or normalise_focus_areas(seg.get("focus_area"))
-        motion_plan = plan_ken_burns_motion(
-            segment_index=seg["sequence_index"],
+        motion_plan = plan_manual_ken_burns_motion(
+            seg.get("ken_burns_config"),
             duration=visual_duration,
             source_width=src_w,
             source_height=src_h,
             output_width=width,
             output_height=height,
             zoom_intensity=zoom_intensity,
-            focus_area=focus_areas[0] if focus_areas else None,
         )
+        if motion_plan is None:
+            motion_plan = plan_ken_burns_motion(
+                segment_index=seg["sequence_index"],
+                duration=visual_duration,
+                source_width=src_w,
+                source_height=src_h,
+                output_width=width,
+                output_height=height,
+                zoom_intensity=zoom_intensity,
+                focus_area=focus_areas[0] if focus_areas else None,
+            )
 
         segments_info.append({
             "source_image": source_image,

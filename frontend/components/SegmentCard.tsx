@@ -24,6 +24,7 @@ import { ImagePromptDisplay } from './ImagePromptDisplay';
 import { AudioPlayer } from './AudioPlayer';
 import { GenerateAudioButton } from './GenerateAudioButton';
 import { AudioStatusBadge } from './AudioStatusBadge';
+import { KenBurnsPreviewModal } from './KenBurnsPreviewModal';
 
 /** Stable reference for the default (idle) audio status — avoids new object on each render. */
 const DEFAULT_AUDIO_STATUS: AudioGenerationState = { status: 'idle' };
@@ -37,6 +38,8 @@ interface SegmentCardProps {
   frameWidth?: number;
   /** Render frame height in pixels (project resolution). */
   frameHeight?: number;
+  /** Project Ken Burns zoom intensity, used to mirror the renderer's crop. */
+  zoomIntensity?: number;
   onUpdate: (id: string, data: UpdateSegmentPayload) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   onUploadImage: (id: string, file: File) => Promise<void>;
@@ -44,7 +47,7 @@ interface SegmentCardProps {
 }
 
 function SegmentCardComponent({
-  segment, frameWidth, frameHeight,
+  segment, frameWidth, frameHeight, zoomIntensity = 1.3,
   onUpdate, onDelete, onUploadImage, onRemoveImage,
 }: SegmentCardProps) {
   // Granular selector: only re-renders when THIS segment's audio status changes,
@@ -64,6 +67,7 @@ function SegmentCardComponent({
   // Local UI state
   const [isTextExpanded, setIsTextExpanded] = useState(false);
   const [isSubtitlePreviewOpen, setIsSubtitlePreviewOpen] = useState(false);
+  const [isKenBurnsPreviewOpen, setIsKenBurnsPreviewOpen] = useState(false);
   const [isTtsOpen, setIsTtsOpen] = useState(Boolean(segment.tts_text?.trim()));
   const [ttsDraft, setTtsDraft] = useState(segment.tts_text ?? '');
   const [isGeneratingTts, setIsGeneratingTts] = useState(false);
@@ -391,6 +395,11 @@ function SegmentCardComponent({
             onFocusAreasChange={(id, areas) => onUpdate(id, {
               image_focus_areas: areas,
             })}
+            kenBurnsConfig={segment.ken_burns_config}
+            onKenBurnsConfigChange={(id, config) => onUpdate(id, {
+              ken_burns_config: config,
+            })}
+            onRequestKenBurnsPreview={() => setIsKenBurnsPreviewOpen(true)}
             onUpload={onUploadImage}
             onRemove={onRemoveImage}
           />
@@ -399,6 +408,25 @@ function SegmentCardComponent({
           <ImagePromptDisplay prompt={segment.image_prompt} />
         </div>
       </div>
+
+      {isKenBurnsPreviewOpen && (
+        <KenBurnsPreviewModal
+          open
+          onOpenChange={setIsKenBurnsPreviewOpen}
+          image={segment.image_file}
+          config={segment.ken_burns_config}
+          focusX={segment.image_focus_x}
+          focusY={segment.image_focus_y}
+          focusArea={segment.image_focus_area}
+          focusAreas={segment.image_focus_areas}
+          frameWidth={frameWidth ?? 1920}
+          frameHeight={frameHeight ?? 1080}
+          zoomIntensity={zoomIntensity}
+          segmentIndex={segment.sequence_index}
+          duration={segment.audio_duration}
+          segmentLabel={`#${segment.sequence_index + 1}`}
+        />
+      )}
 
       {/* Subtitle Preview Toggle */}
       <div>

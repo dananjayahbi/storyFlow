@@ -351,6 +351,7 @@ export function GalleryVideoPlayerDialog({
             <video
               ref={videoRef}
               src={getStreamUrl(item.id)}
+              poster={item.thumbnail_url ?? undefined}
               className="w-full object-contain"
               style={{ maxHeight: '80vh' }}
               autoPlay

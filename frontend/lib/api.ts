@@ -928,6 +928,8 @@ export interface GalleryQuery {
   project?: string;
   /** One or more publishing statuses. */
   status?: RenderingStatus[];
+  /** Only the project's primary video when true. */
+  primary?: boolean;
   /** Search in asset/project title. */
   q?: string;
   sort?: 'newest' | 'oldest';
@@ -942,9 +944,20 @@ export async function getGalleryItems(
       ...(section ? { section } : {}),
       ...(query.project ? { project: query.project } : {}),
       ...(query.status?.length ? { status: query.status.join(',') } : {}),
+      ...(query.primary ? { primary: '1' } : {}),
       ...(query.q ? { q: query.q } : {}),
       ...(query.sort ? { sort: query.sort } : {}),
     },
+  });
+  return data;
+}
+
+export async function setGalleryItemPrimary(
+  id: string,
+  isPrimary = true,
+): Promise<GalleryItem> {
+  const { data } = await api.patch<GalleryItem>(`/api/gallery/${id}/`, {
+    is_primary: isPrimary,
   });
   return data;
 }

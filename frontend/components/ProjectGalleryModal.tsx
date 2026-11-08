@@ -8,6 +8,7 @@ import {
   deleteGalleryItem,
   getDownloadUrl,
   getGalleryItems,
+  setGalleryItemPrimary,
   updateGalleryItemStatus,
 } from '@/lib/api';
 import { GalleryItem, RenderingStatus } from '@/lib/types';
@@ -55,6 +56,8 @@ interface ProjectGalleryModalProps {
   onOpenChange: (open: boolean) => void;
   projectId: string;
   projectTitle?: string;
+  /** Show the "make primary" control (YouTube workspace only). */
+  allowPrimary?: boolean;
   /** Called after a deletion so the project page can refresh its counters. */
   onChanged?: () => void;
 }
@@ -69,6 +72,7 @@ export function ProjectGalleryModal({
   onOpenChange,
   projectId,
   projectTitle,
+  allowPrimary = false,
   onChanged,
 }: ProjectGalleryModalProps) {
   const [items, setItems] = useState<GalleryItem[]>([]);
@@ -187,6 +191,37 @@ export function ProjectGalleryModal({
         onChanged?.();
       } catch {
         toast.error('Could not update this rendering\u2019s status.');
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [onChanged],
+  );
+
+  const handleMakePrimary = useCallback(
+    async (item: GalleryItem) => {
+      if (item.is_primary) return;
+      setIsMutating(true);
+      try {
+        const updated = await setGalleryItemPrimary(item.id, true);
+        setItems((previous) =>
+          previous.map((entry) =>
+            entry.id === item.id
+              ? { ...updated, is_primary: true }
+              : { ...entry, is_primary: false },
+          ),
+        );
+        setPlayerItem((previous) => {
+          if (!previous) return previous;
+          if (previous.id === item.id) {
+            return { ...updated, is_primary: true };
+          }
+          return { ...previous, is_primary: false };
+        });
+        toast.success(`"${item.title}" is now the primary video.`);
+        onChanged?.();
+      } catch {
+        toast.error('Could not set this rendering as the primary video.');
       } finally {
         setIsMutating(false);
       }
@@ -432,6 +467,11 @@ export function ProjectGalleryModal({
                   onOpen={() => setPlayerItem(item)}
                   onDownload={(event) => handleDownload(item, event)}
                   onDelete={() => setDeleteTargets([item])}
+                  onMakePrimary={
+                    allowPrimary
+                      ? () => void handleMakePrimary(item)
+                      : undefined
+                  }
                   onStatusChange={(status) =>
                     void handleStatusChange(item, status)
                   }

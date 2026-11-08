@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Download, Play, Trash2 } from 'lucide-react';
+import { Download, Play, Star, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -85,6 +85,8 @@ interface GalleryAssetCardProps {
   onOpen?: () => void;
   onDownload?: (event: React.MouseEvent) => void;
   onDelete?: (event: React.MouseEvent) => void;
+  /** Promote this rendering to the project's primary video. */
+  onMakePrimary?: (event: React.MouseEvent) => void;
   /** When provided, the status badge becomes a quick status changer. */
   onStatusChange?: (status: RenderingStatus) => void;
   /** Show which project produced this asset (main Gallery only). */
@@ -98,6 +100,7 @@ export function GalleryAssetCard({
   onOpen,
   onDownload,
   onDelete,
+  onMakePrimary,
   onStatusChange,
   showProject = true,
 }: GalleryAssetCardProps) {
@@ -112,13 +115,14 @@ export function GalleryAssetCard({
       onClick={onOpen}
     >
       <div
-        className="relative bg-black"
+        className="group/media relative bg-black"
         style={{
           aspectRatio: `${item.resolution_width} / ${item.resolution_height}`,
         }}
       >
         <video
           src={getStreamUrl(item.id)}
+          poster={item.thumbnail_url ?? undefined}
           className="h-full w-full object-contain"
           preload="metadata"
           muted
@@ -134,6 +138,18 @@ export function GalleryAssetCard({
             video.currentTime = 0;
           }}
         />
+
+        {/* Project cover: shown at rest, fades out when the hover preview plays. */}
+        {item.thumbnail_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.thumbnail_url}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-200 group-hover/media:opacity-0"
+          />
+        )}
 
         {/* Play affordance */}
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-opacity group-hover:opacity-100">
@@ -232,6 +248,15 @@ export function GalleryAssetCard({
         <div className="flex items-start justify-between gap-1.5">
           <div className="min-w-0 flex-1">
             <MarqueeTitle text={item.title} />
+            {item.is_primary && (
+              <Badge
+                variant="secondary"
+                className="mt-1 h-4 gap-1 px-1.5 text-[10px]"
+              >
+                <Star className="size-2.5 fill-current" />
+                Primary
+              </Badge>
+            )}
             {showProject && item.project_title !== item.title && (
               <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
                 {item.project_title}
@@ -249,6 +274,25 @@ export function GalleryAssetCard({
             </div>
           </div>
           <div className="flex shrink-0 items-center">
+            {onMakePrimary && !item.is_primary && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label="Make primary video"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onMakePrimary(event);
+                    }}
+                  >
+                    <Star className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Make primary video</TooltipContent>
+              </Tooltip>
+            )}
             {onDownload && (
               <Tooltip>
                 <TooltipTrigger asChild>

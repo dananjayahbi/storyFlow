@@ -4,6 +4,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { ProjectGalleryModal } from '@/components/ProjectGalleryModal';
 import {
   getGalleryItems,
+  setGalleryItemPrimary,
   updateGalleryItemStatus,
 } from '@/lib/api';
 import type { GalleryItem } from '@/lib/types';
@@ -33,13 +34,14 @@ jest.mock('@/lib/api', () => ({
   getGalleryItems: jest.fn(),
   getStreamUrl: (id: string) => `/api/gallery/${id}/stream/`,
   getDownloadUrl: (id: string) => `/api/gallery/${id}/download/`,
+  setGalleryItemPrimary: jest.fn(),
   updateGalleryItemStatus: jest.fn(),
   bulkUpdateGalleryStatus: jest.fn(),
   deleteGalleryItem: jest.fn(),
   bulkDeleteGalleryItems: jest.fn(),
 }));
 
-function renderModal() {
+function renderModal(allowPrimary = false) {
   return render(
     <TooltipProvider>
       <ProjectGalleryModal
@@ -47,6 +49,7 @@ function renderModal() {
         onOpenChange={() => {}}
         projectId="project-1"
         projectTitle="First video"
+        allowPrimary={allowPrimary}
       />
     </TooltipProvider>,
   );
@@ -89,6 +92,22 @@ describe('ProjectGalleryModal', () => {
     await user.click(screen.getByText('First video'));
 
     expect(await screen.findAllByText(/Rendered in 2m 5s/)).toHaveLength(2);
+  });
+
+  it('promotes a rendering to the primary video', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    (setGalleryItemPrimary as jest.Mock).mockResolvedValue({
+      ...mockItem,
+      is_primary: true,
+    });
+    renderModal(true);
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Make primary video' }),
+    );
+
+    expect(setGalleryItemPrimary).toHaveBeenCalledWith('video-1', true);
+    expect(await screen.findByText('Primary')).toBeInTheDocument();
   });
 
   it('updates the status of one rendering from the player popup', async () => {

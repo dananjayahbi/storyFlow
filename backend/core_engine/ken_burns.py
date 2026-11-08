@@ -133,6 +133,38 @@ FOCUS_OVERFLOW_RATIO = 0.10
 ZOOM_IN_RANGE = 0.12
 ZOOM_OUT_RANGE = 0.15
 
+# ---------------------------------------------------------------------------
+# Manual (per-segment) Ken Burns presets
+# ---------------------------------------------------------------------------
+# A segment may opt out of the automatic planner and describe its own camera
+# move.  The configuration is stored as a small JSON object so the editor can
+# add animation-specific settings without a migration per option.  All points
+# are normalised (0..1) against the prepared frame, matching the overlay the
+# editor draws on top of the image.
+MANUAL_ANIMATION_PAN = "pan"
+MANUAL_ANIMATION_ZOOM_IN = "zoom_in"
+MANUAL_ANIMATION_ZOOM_OUT = "zoom_out"
+MANUAL_ANIMATION_PAN_ZOOM = "pan_zoom"
+
+MANUAL_ANIMATIONS: Tuple[str, ...] = (
+    MANUAL_ANIMATION_PAN,
+    MANUAL_ANIMATION_ZOOM_IN,
+    MANUAL_ANIMATION_ZOOM_OUT,
+    MANUAL_ANIMATION_PAN_ZOOM,
+)
+
+MANUAL_PAN_MODE_POINTS = "points"
+MANUAL_PAN_MODE_AREA = "area"
+
+MANUAL_PAN_MODES: Tuple[str, ...] = (
+    MANUAL_PAN_MODE_POINTS,
+    MANUAL_PAN_MODE_AREA,
+)
+
+MANUAL_ZOOM_MIN = 1.0
+MANUAL_ZOOM_MAX = 4.0
+MANUAL_DEFAULT_ZOOM = 1.25
+
 #: A combined pan+zoom move uses this fraction of the pan budget so the two
 #: motions do not fight each other.
 PAN_ZOOM_FACTOR = 0.6
@@ -1104,6 +1136,262 @@ def plan_ken_burns_motion(
     return plan
 
 
+def normalise_ken_burns_config(config) -> dict | None:
+    """Return a clean manual Ken Burns config, or ``None`` when disabled.
+
+    The editor stores a per-segment object shaped like::
+
+        {
+            "enabled": true,
+            "animation": "pan" | "zoom_in" | "zoom_out" | "pan_zoom",
+            "pan_mode": "points" | "area",
+            "start": {"x": 0..1, "y": 0..1},
+            "end": {"x": 0..1, "y": 0..1},
+            "focal_point": {"x": 0..1, "y": 0..1},
+            "area": {"x", "y", "w", "h"} | None,
+            "zoom": 1.0..4.0
+        }
+
+    Invalid or missing values fall back to sensible defaults so a malformed
+    row never breaks a render.  ``None`` is returned whenever the automatic
+    planner should run (missing config, ``enabled`` false, unknown animation).
+    """
+    if not isinstance(config, dict):
+        return None
+    if not config.get("enabled"):
+        return None
+
+    animation = str(config.get("animation") or MANUAL_ANIMATION_PAN)
+    if animation not in MANUAL_ANIMATIONS:
+        return None
+
+    pan_mode = str(config.get("pan_mode") or MANUAL_PAN_MODE_POINTS)
+    if pan_mode not in MANUAL_PAN_MODES:
+        pan_mode = MANUAL_PAN_MODE_POINTS
+
+    def point(value, default: Tuple[float, float]) -> dict:
+        if not isinstance(value, dict):
+            return {"x": default[0], "y": default[1]}
+        try:
+            x = float(value.get("x", default[0]))
+            y = float(value.get("y", default[1]))
+        except (TypeError, ValueError):
+            return {"x": default[0], "y": default[1]}
+        return {
+            "x": max(0.0, min(1.0, x)),
+            "y": max(0.0, min(1.0, y)),
+        }
+
+    start = point(config.get("start"), (0.3, 0.5))
+    end = point(config.get("end"), (0.7, 0.5))
+    focal = point(config.get("focal_point"), (0.5, 0.5))
+
+    areas = normalise_focus_areas(config.get("area"))
+    area = areas[0] if areas else None
+
+    try:
+        zoom = float(config.get("zoom", MANUAL_DEFAULT_ZOOM))
+    except (TypeError, ValueError):
+        zoom = MANUAL_DEFAULT_ZOOM
+    zoom = max(MANUAL_ZOOM_MIN, min(MANUAL_ZOOM_MAX, zoom))
+
+    return {
+        "enabled": True,
+        "animation": animation,
+        "pan_mode": pan_mode,
+        "start": start,
+        "end": end,
+        "focal_point": focal,
+        "area": area,
+        "zoom": zoom,
+    }
+
+
+def _manual_zoom_factor(
+    config: dict,
+    source_width: int,
+    source_height: int,
+    output_width: int,
+    output_height: int,
+) -> float:
+    """Return the effective visual zoom for a manual move.
+
+    ``1.0`` shows the whole prepared frame (exactly what the editor displays)
+    and larger values crop tighter.  The value is capped by the prepared image
+    headroom so the crop is never upscaled beyond the source resolution.
+    """
+    requested = float(config.get("zoom", MANUAL_DEFAULT_ZOOM))
+    headroom = min(
+        source_width / max(1, output_width),
+        source_height / max(1, output_height),
+    )
+    return max(MANUAL_ZOOM_MIN, min(requested, headroom, MANUAL_ZOOM_MAX))
+
+
+def _manual_crop_dims(
+    zoom: float,
+    source_width: int,
+    source_height: int,
+) -> Tuple[int, int]:
+    """Return crop dimensions for a visual *zoom* factor (1.0 = full frame)."""
+    zoom = max(MANUAL_ZOOM_MIN, float(zoom))
+    crop_w = max(1, min(source_width, int(round(source_width / zoom))))
+    crop_h = max(1, min(source_height, int(round(source_height / zoom))))
+    return crop_w, crop_h
+
+
+def _centre_for_point(
+    point: dict,
+    source_width: int,
+    source_height: int,
+    crop_width: int,
+    crop_height: int,
+) -> Tuple[float, float]:
+    """Map a normalised point to a crop centre clamped inside the source."""
+    cx = float(point["x"]) * source_width
+    cy = float(point["y"]) * source_height
+    half_w = crop_width / 2.0
+    half_h = crop_height / 2.0
+    cx = max(half_w, min(cx, source_width - half_w))
+    cy = max(half_h, min(cy, source_height - half_h))
+    return cx, cy
+
+
+def _manual_pan_points(config: dict) -> Tuple[dict, dict]:
+    """Resolve the start/end points for a pan, honouring the area mode."""
+    if (
+        config.get("pan_mode") == MANUAL_PAN_MODE_AREA
+        and config.get("area")
+    ):
+        area = config["area"]
+        # Travel across the longer axis of the drawn rectangle so the move is
+        # easy to read: left→right for wide areas, top→bottom for tall ones.
+        if area["w"] >= area["h"]:
+            start = {"x": area["x"], "y": area["y"] + area["h"] / 2.0}
+            end = {"x": area["x"] + area["w"], "y": start["y"]}
+        else:
+            start = {"x": area["x"] + area["w"] / 2.0, "y": area["y"]}
+            end = {"x": start["x"], "y": area["y"] + area["h"]}
+        return start, end
+    return dict(config["start"]), dict(config["end"])
+
+
+def plan_manual_ken_burns_motion(
+    config,
+    duration: float,
+    source_width: int,
+    source_height: int,
+    output_width: int,
+    output_height: int,
+    zoom_intensity: float = 1.3,
+) -> dict | None:
+    """Build a motion plan from a per-segment manual Ken Burns config.
+
+    The animation always spans the full clip duration, so the travel speed is
+    derived automatically from the (TTS-driven) audio length.  Returns the
+    same plan shape as :func:`plan_ken_burns_motion`, or ``None`` when manual
+    mode is disabled so the caller can fall back to the automatic planner.
+
+    Supported animations:
+
+    * ``pan`` — constant-scale move from the start point to the end point.
+      With ``pan_mode="area"`` the points are the longer axis of the drawn
+      rectangle, so the camera sweeps across that area.
+    * ``zoom_in`` / ``zoom_out`` — keep the focal point centred while the crop
+      grows/shrinks between the frame and the requested zoom.
+    * ``pan_zoom`` — move from start to end while zooming in.
+    """
+    clean = normalise_ken_burns_config(config)
+    if clean is None:
+        return None
+
+    effective_duration = max(0.0, float(duration or 0.0))
+    target_zoom = _manual_zoom_factor(
+        clean, source_width, source_height, output_width, output_height,
+    )
+
+    animation = clean["animation"]
+    if animation == MANUAL_ANIMATION_ZOOM_IN:
+        start_zoom, end_zoom = MANUAL_ZOOM_MIN, target_zoom
+    elif animation == MANUAL_ANIMATION_ZOOM_OUT:
+        start_zoom, end_zoom = target_zoom, MANUAL_ZOOM_MIN
+    elif animation == MANUAL_ANIMATION_PAN_ZOOM:
+        # Begin slightly wider than the target so the combined move reads as
+        # both a travel and a push-in, without losing pan room.
+        start_zoom = 1.0 + (target_zoom - 1.0) * 0.25
+        end_zoom = target_zoom
+    else:
+        # A pan keeps a constant crop at the requested tightness.
+        start_zoom = end_zoom = target_zoom
+
+    start_crop = _manual_crop_dims(start_zoom, source_width, source_height)
+    end_crop = _manual_crop_dims(end_zoom, source_width, source_height)
+
+    if animation in (MANUAL_ANIMATION_ZOOM_IN, MANUAL_ANIMATION_ZOOM_OUT):
+        start_centre = _centre_for_point(
+            clean["focal_point"], source_width, source_height, *start_crop,
+        )
+        end_centre = _centre_for_point(
+            clean["focal_point"], source_width, source_height, *end_crop,
+        )
+        start_point = end_point = clean["focal_point"]
+    else:
+        start_point, end_point = _manual_pan_points(clean)
+        start_centre = _centre_for_point(
+            start_point, source_width, source_height, *start_crop,
+        )
+        end_centre = _centre_for_point(
+            end_point, source_width, source_height, *end_crop,
+        )
+
+    pan_speed = 0.0
+    if effective_duration > 0:
+        pan_speed = max(
+            abs(end_centre[0] - start_centre[0]) / (
+                effective_duration * max(1, start_crop[0])
+            ),
+            abs(end_centre[1] - start_centre[1]) / (
+                effective_duration * max(1, start_crop[1])
+            ),
+        )
+    zoom_speed = (
+        abs(end_zoom - start_zoom) / effective_duration
+        if effective_duration > 0 else 0.0
+    )
+
+    plan = {
+        "motion": f"manual_{animation}",
+        "manual": True,
+        "animation": animation,
+        "pan_mode": clean["pan_mode"],
+        "duration": float(duration or 0.0),
+        "source_width": int(source_width),
+        "source_height": int(source_height),
+        "focus_area": None,
+        "start_scale": float(start_zoom),
+        "end_scale": float(end_zoom),
+        "start_crop": start_crop,
+        "end_crop": end_crop,
+        "start_centre": start_centre,
+        "end_centre": end_centre,
+        "start_point": start_point,
+        "end_point": end_point,
+        "pan_speed": float(pan_speed),
+        "zoom_speed": float(zoom_speed),
+        "pan_room": 1.0,
+        "zoom_room": 1.0,
+        "direction": (0, 0, "manual", "manual"),
+    }
+    logger.debug(
+        "plan_manual_ken_burns_motion: animation=%s start=%s end=%s "
+        "crop=%dx%d→%dx%d pan_speed=%.4f zoom_speed=%.4f",
+        animation, start_point, end_point,
+        start_crop[0], start_crop[1], end_crop[0], end_crop[1],
+        pan_speed, zoom_speed,
+    )
+    return plan
+
+
 def sample_ken_burns_motion(
     plan: dict,
     t: float,
@@ -1452,6 +1740,7 @@ def apply_ken_burns(
     focus_y: float = 0.5,
     focus_area: dict | None = None,
     focus_areas: list | None = None,
+    manual_config: dict | None = None,
 ) -> VideoClip:
     """Apply the Ken Burns (zoom-and-pan) effect to a still image.
 
@@ -1498,6 +1787,10 @@ def apply_ken_burns(
         focus_areas: Legacy list form of ``focus_area``.  Only the first
             valid rectangle is used; the rest are ignored so old projects
             can still be rendered without rewriting their stored data.
+        manual_config: Optional per-segment manual Ken Burns configuration
+            (see :func:`normalise_ken_burns_config`).  When enabled it takes
+            precedence over the automatic planner; the animation still spans
+            the full clip duration so its speed follows the narration.
 
     Returns:
         A MoviePy :class:`VideoClip` with the specified duration and FPS,
@@ -1540,16 +1833,26 @@ def apply_ken_burns(
     areas = normalise_focus_areas(focus_areas) or normalise_focus_areas(
         focus_area
     )
-    motion_plan = plan_ken_burns_motion(
-        segment_index=segment_index,
+    motion_plan = plan_manual_ken_burns_motion(
+        manual_config,
         duration=duration,
         source_width=source_width,
         source_height=source_height,
         output_width=output_width,
         output_height=output_height,
         zoom_intensity=zoom_intensity,
-        focus_area=areas[0] if areas else None,
     )
+    if motion_plan is None:
+        motion_plan = plan_ken_burns_motion(
+            segment_index=segment_index,
+            duration=duration,
+            source_width=source_width,
+            source_height=source_height,
+            output_width=output_width,
+            output_height=output_height,
+            zoom_intensity=zoom_intensity,
+            focus_area=areas[0] if areas else None,
+        )
     logger.debug(
         "  Motion plan: %s (pan %.4f, zoom %.4f)",
         motion_plan["motion"], motion_plan["pan_speed"],

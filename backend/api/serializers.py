@@ -21,6 +21,13 @@ from core_engine.tts import (
     QWEN_SPEAKERS,
 )
 from core_engine.metadata_prompts import thumbnail_readiness
+from core_engine.ken_burns import (
+    MANUAL_ANIMATIONS,
+    MANUAL_PAN_MODES,
+    MANUAL_ZOOM_MAX,
+    MANUAL_ZOOM_MIN,
+    normalise_ken_burns_config,
+)
 
 # ── Allowed resolution presets (width × height) ──
 ALLOWED_RESOLUTIONS = {
@@ -47,6 +54,9 @@ ALLOWED_FPS = {24, 30, 60}
 
 #: Upper bound on the number of marked Ken Burns subject areas per segment.
 MAX_IMAGE_FOCUS_AREAS = 1
+
+#: Sentinel for "argument omitted" in shared helper functions.
+_MISSING = object()
 
 
 class TtsEngineValidationMixin:
@@ -160,6 +170,66 @@ class ProjectThumbnailSerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(url) if request else url
 
 
+def _absolute_media_url_for(path, request=None):
+    """Turn a stored media path into an absolute URL when possible."""
+    url = media_url(path)
+    if not url:
+        return None
+    return request.build_absolute_uri(url) if request else url
+
+
+def _active_project_thumbnail(project):
+    if not hasattr(project, 'thumbnails'):
+        return None
+    return project.thumbnails.filter(is_active=True).first()
+
+
+def _first_segment_image_name(project):
+    segment = (
+        project.segments.exclude(image_file='')
+        .exclude(image_file__isnull=True)
+        .order_by('sequence_index')
+        .first()
+    )
+    return segment.image_file.name if segment and segment.image_file else None
+
+
+def resolve_project_thumbnail(
+    project,
+    request=None,
+    *,
+    active_thumbnail=_MISSING,
+    segment_image_name=_MISSING,
+):
+    """Return ``(url, source)`` using the shared project-cover fallback.
+
+    This is the single priority order used by project serializers, gallery
+    assets and any other consumer:
+
+      1. The active thumbnail uploaded from Metadata management.
+      2. The legacy manual cover (``Project.thumbnail``).
+      3. The first segment that actually has an image.
+
+    ``(None, None)`` means the project has no usable cover.  Serializers may
+    pass already-cached values for *active_thumbnail* / *segment_image_name*
+    to avoid duplicate queries while keeping one priority implementation.
+    """
+    if active_thumbnail is _MISSING:
+        active_thumbnail = _active_project_thumbnail(project)
+    if active_thumbnail and active_thumbnail.image:
+        return (
+            _absolute_media_url_for(active_thumbnail.image.name, request),
+            'active',
+        )
+    if project.thumbnail:
+        return _absolute_media_url_for(project.thumbnail.name, request), 'manual'
+    if segment_image_name is _MISSING:
+        segment_image_name = _first_segment_image_name(project)
+    if segment_image_name:
+        return _absolute_media_url_for(segment_image_name, request), 'segment'
+    return None, None
+
+
 class ProjectThumbnailMixin:
     """Expose a project's cover image and the first segment-image fallback.
 
@@ -173,11 +243,10 @@ class ProjectThumbnailMixin:
     """
 
     def _absolute_media_url(self, path):
-        url = media_url(path)
-        if not url:
-            return None
-        request = self.context.get('request')
-        return request.build_absolute_uri(url) if request else url
+        return _absolute_media_url_for(
+            path,
+            (self.context or {}).get('request'),
+        )
 
     def _active_thumbnail(self, obj):
         cache = getattr(self, '_active_thumbnail_cache', None)
@@ -229,20 +298,30 @@ class ProjectThumbnailMixin:
     def get_has_manual_thumbnail(self, obj):
         return bool(obj.thumbnail)
 
+    def _thumbnail_details(self, obj):
+        """Cache the resolved URL/source pair for one serialized project."""
+        cache = getattr(self, '_thumbnail_details_cache', None)
+        if cache is None:
+            cache = self._thumbnail_details_cache = {}
+        key = str(obj.pk)
+        if key not in cache:
+            active = self._active_thumbnail(obj)
+            uses_segment = not (active and active.image) and not obj.thumbnail
+            cache[key] = resolve_project_thumbnail(
+                obj,
+                request=(self.context or {}).get('request'),
+                active_thumbnail=active,
+                segment_image_name=(
+                    self._segment_thumbnail(obj) if uses_segment else None
+                ),
+            )
+        return cache[key]
+
     def get_thumbnail_source(self, obj):
-        if self.get_has_active_thumbnail(obj):
-            return 'active'
-        if obj.thumbnail:
-            return 'manual'
-        return 'segment' if self._segment_thumbnail(obj) else None
+        return self._thumbnail_details(obj)[1]
 
     def get_thumbnail_url(self, obj):
-        active = self.get_active_thumbnail_url(obj)
-        if active:
-            return active
-        if obj.thumbnail:
-            return self._absolute_media_url(obj.thumbnail.name)
-        return self._absolute_media_url(self._segment_thumbnail(obj))
+        return self._thumbnail_details(obj)[0]
 
 
 class ProjectSerializer(ProjectThumbnailMixin, serializers.ModelSerializer):
@@ -289,7 +368,7 @@ class SegmentSerializer(serializers.ModelSerializer):
             'image_prompt', 'image_file', 'audio_file',
             'audio_duration', 'audio_engine', 'audio_timings', 'is_locked',
             'image_focus_x', 'image_focus_y', 'image_focus_area',
-            'image_focus_areas',
+            'image_focus_areas', 'ken_burns_config',
         ]
         read_only_fields = [
             'id', 'project', 'sequence_index',
@@ -377,6 +456,62 @@ class SegmentSerializer(serializers.ModelSerializer):
                 'Image focus area must stay inside the render frame.'
             )
         return {'x': x, 'y': y, 'w': w, 'h': h}
+
+    def validate_ken_burns_config(self, value):
+        """Validate the per-segment manual Ken Burns configuration.
+
+        An empty object (or ``None``) means the automatic planner is used.
+        Enabled configs carry an animation preset, normalised points/area and
+        a zoom factor; those are cleaned by
+        :func:`core_engine.ken_burns.normalise_ken_burns_config` so the
+        renderer and editor always see the same shape.
+        """
+        if value in (None, {}):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError(
+                'Ken Burns configuration must be an object.'
+            )
+
+        animation = value.get('animation')
+        if animation is not None and animation not in MANUAL_ANIMATIONS:
+            raise serializers.ValidationError(
+                'Unknown Ken Burns animation. Choose one of: '
+                + ', '.join(MANUAL_ANIMATIONS) + '.'
+            )
+        pan_mode = value.get('pan_mode')
+        if pan_mode is not None and pan_mode not in MANUAL_PAN_MODES:
+            raise serializers.ValidationError(
+                'Ken Burns pan mode must be "points" or "area".'
+            )
+        zoom = value.get('zoom')
+        if zoom is not None:
+            try:
+                zoom = float(zoom)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    'Ken Burns zoom must be a number.'
+                )
+            if not MANUAL_ZOOM_MIN <= zoom <= MANUAL_ZOOM_MAX:
+                raise serializers.ValidationError(
+                    f'Ken Burns zoom must be between {MANUAL_ZOOM_MIN} '
+                    f'and {MANUAL_ZOOM_MAX}.'
+                )
+        area = value.get('area')
+        if area not in (None, {}):
+            self._validate_focus_rectangle(area)
+
+        if not value.get('enabled'):
+            cleaned = dict(value)
+            cleaned['enabled'] = False
+            return cleaned
+
+        cleaned = normalise_ken_burns_config(value)
+        if cleaned is None:
+            raise serializers.ValidationError(
+                'Enable the manual Ken Burns mode with a valid animation.'
+            )
+        return cleaned
 
     def update(self, instance, validated_data):
         """Keep the legacy single area in sync with the ordered list."""
@@ -864,7 +999,7 @@ class ProjectDetailSerializer(
             'upload_title', 'upload_description',
             'reset_settings',
             # ── Per-project settings ──
-            'default_voice_id', 'tts_speed',
+            'default_voice_id', 'tts_speed', 'tts_system_prompt',
             'tts_engine', 'qwen_mode', 'qwen_speaker', 'qwen_language',
             'qwen_instruct', 'qwen_max_new_tokens',
             'qwen_clone_x_vector_only', 'active_voice_reference',

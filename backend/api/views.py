@@ -37,6 +37,7 @@ from .serializers import (
     LogoSerializer, OutroVideoSerializer,
     VoiceReferenceSerializer, ScriptSerializer, ChatSessionSerializer,
     BGMClipSerializer, ProjectThumbnailSerializer, ALLOWED_RESOLUTIONS,
+    resolve_project_thumbnail,
 )
 from .parsers import ParseError
 from .renderings import delete_rendering, resolve_rendering_video
@@ -1008,6 +1009,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
                         base_url=config['base_url'],
                         api_key=config['api_key'],
                         temperature=0.2,
+                        system_prompt=project.tts_system_prompt,
                     )
                     segment.tts_text = rewritten
                     segment.save(update_fields=['tts_text'])
@@ -1668,6 +1670,7 @@ class SegmentViewSet(viewsets.ModelViewSet):
                 base_url=config['base_url'],
                 api_key=config['api_key'],
                 temperature=0.2,
+                system_prompt=segment.project.tts_system_prompt,
             )
         except Exception as exc:  # noqa: BLE001 - surface a useful 502
             logger.warning('TTS script rewrite failed for %s: %s', segment.id, exc)
@@ -3656,6 +3659,9 @@ def _ensure_legacy_rendering(project):
                 'framerate': project.framerate,
                 'segment_count': Segment.objects.filter(project=project).count(),
                 'file_size': file_size,
+                'is_primary': not Rendering.objects.filter(
+                    project=project, is_primary=True,
+                ).exists(),
             },
         )
         return rendering
@@ -3668,9 +3674,15 @@ def _ensure_legacy_rendering(project):
         return None
 
 
-def _gallery_item(rendering, video_path):
-    """Serialise one Rendering for the Gallery API."""
+def _gallery_item(rendering, video_path, thumbnail=(None, None)):
+    """Serialise one Rendering for the Gallery API.
+
+    ``thumbnail`` is the ``(url, source)`` pair from the project's shared
+    cover fallback.  Callers that serialize several renderings of the same
+    project pass a cached pair so each project is resolved only once.
+    """
     project = rendering.project
+    thumbnail_url, thumbnail_source = thumbnail
     try:
         file_size = os.path.getsize(video_path) if video_path else rendering.file_size
     except OSError:
@@ -3685,6 +3697,7 @@ def _gallery_item(rendering, video_path):
         'title': rendering.title,
         'status': rendering.status,
         'status_label': rendering.get_status_display(),
+        'is_primary': bool(rendering.is_primary),
         'created_at': rendering.created_at.isoformat(),
         'updated_at': rendering.updated_at.isoformat(),
         'published_at': (
@@ -3698,6 +3711,8 @@ def _gallery_item(rendering, video_path):
         'file_size': file_size or 0,
         'duration': rendering.duration,
         'render_time_seconds': rendering.render_time_seconds,
+        'thumbnail_url': thumbnail_url,
+        'thumbnail_source': thumbnail_source,
         'stream_url': f'/api/gallery/{rendering.id}/stream/',
         'download_url': f'/api/gallery/{rendering.id}/download/',
     }
@@ -3711,6 +3726,7 @@ def gallery_list_view(request):
         project  — only renderings linked to this project id
         status   — one or more statuses (``rendered``,
                    ``ready_to_publish``, ``published``)
+        primary  — ``1``/``true`` keeps only each project's primary video
         q        — case-insensitive search in title/project title
         sort     — ``newest`` (default) or ``oldest``
 
@@ -3741,9 +3757,15 @@ def gallery_list_view(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    primary_only = (request.GET.get('primary') or '').strip().lower() in {
+        '1', 'true', 'yes', 'primary',
+    }
+
     queryset = Rendering.objects.select_related('project').filter(
         project__in=projects
     )
+    if primary_only:
+        queryset = queryset.filter(is_primary=True)
 
     query = (request.GET.get('q') or request.GET.get('search') or '').strip()
     if query:
@@ -3772,6 +3794,8 @@ def gallery_list_view(request):
     queryset = Rendering.objects.select_related('project').filter(
         project__in=projects
     )
+    if primary_only:
+        queryset = queryset.filter(is_primary=True)
     if query:
         queryset = queryset.filter(
             Q(title__icontains=query) | Q(project__title__icontains=query)
@@ -3783,6 +3807,8 @@ def gallery_list_view(request):
     )
 
     items = []
+    # Resolve each project's cover once even when it has several renderings.
+    thumbnail_cache = {}
     for rendering in queryset:
         # Each gallery card must stream its own file.  Falling back to the
         # project's newest output would make an older card play the new video
@@ -3791,7 +3817,18 @@ def gallery_list_view(request):
         if not video_path:
             # Never advertise an asset whose file has disappeared.
             continue
-        items.append(_gallery_item(rendering, video_path))
+        project_key = str(rendering.project_id)
+        if project_key not in thumbnail_cache:
+            thumbnail_cache[project_key] = resolve_project_thumbnail(
+                rendering.project, request,
+            )
+        items.append(
+            _gallery_item(
+                rendering,
+                video_path,
+                thumbnail=thumbnail_cache[project_key],
+            )
+        )
 
     return Response(items)
 
@@ -3826,30 +3863,67 @@ def gallery_detail_view(request, rendering_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     if request.method == 'PATCH':
-        new_status = (request.data.get('status') or '').strip()
-        if new_status not in RENDERING_STATUSES:
+        updated_fields = []
+        if 'status' in request.data:
+            new_status = (request.data.get('status') or '').strip()
+            if new_status not in RENDERING_STATUSES:
+                return Response(
+                    {
+                        'error': (
+                            'Status must be one of: '
+                            f"{', '.join(sorted(RENDERING_STATUSES))}."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            rendering.status = new_status
+            if new_status == RENDERING_STATUS_PUBLISHED:
+                if not rendering.published_at:
+                    rendering.published_at = django_timezone.now()
+            else:
+                rendering.published_at = None
+            updated_fields.extend(['status', 'published_at'])
+
+        if 'is_primary' in request.data:
+            raw_primary = request.data.get('is_primary')
+            primary = (
+                raw_primary
+                if isinstance(raw_primary, bool)
+                else str(raw_primary).strip().lower() in {'1', 'true', 'yes'}
+            )
+            if primary:
+                Rendering.objects.filter(
+                    project=rendering.project,
+                ).exclude(pk=rendering.pk).update(is_primary=False)
+                rendering.is_primary = True
+            elif rendering.is_primary:
+                # Keep the "one primary per project" invariant when the
+                # operator explicitly clears the flag.
+                rendering.is_primary = False
+                fallback = (
+                    Rendering.objects.filter(project=rendering.project)
+                    .exclude(pk=rendering.pk)
+                    .order_by('-created_at')
+                    .first()
+                )
+                if fallback:
+                    fallback.is_primary = True
+                    fallback.save(update_fields=['is_primary'])
+            updated_fields.append('is_primary')
+
+        if not updated_fields:
             return Response(
-                {
-                    'error': (
-                        'Status must be one of: '
-                        f"{', '.join(sorted(RENDERING_STATUSES))}."
-                    )
-                },
+                {'error': 'Provide status and/or is_primary.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        rendering.status = new_status
-        if new_status == RENDERING_STATUS_PUBLISHED:
-            if not rendering.published_at:
-                rendering.published_at = django_timezone.now()
-        else:
-            rendering.published_at = None
-        rendering.save(update_fields=['status', 'published_at', 'updated_at'])
+        rendering.save(update_fields=[*updated_fields, 'updated_at'])
 
     video_path = (
         resolve_rendering_video(rendering)
         or _resolve_video_path(rendering.project)
     )
-    return Response(_gallery_item(rendering, video_path))
+    thumbnail = resolve_project_thumbnail(rendering.project, request)
+    return Response(_gallery_item(rendering, video_path, thumbnail=thumbnail))
 
 
 @api_view(['POST'])

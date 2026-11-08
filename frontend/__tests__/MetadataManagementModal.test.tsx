@@ -291,6 +291,47 @@ describe('MetadataManagementModal', () => {
     expect(onProjectRefreshed).toHaveBeenCalled();
   });
 
+  it('downloads each saved thumbnail as a file', async () => {
+    const thumbnails: ProjectThumbnail[] = [
+      {
+        id: 'thumb-1',
+        url: '/media/YouTube/account/project/thumbnails/first.png',
+        prompt: '',
+        is_active: true,
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ];
+    const project = makeProject([makeSegment(0), makeSegment(1)], {
+      thumbnails,
+    });
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(['image'], { type: 'image/png' }),
+    });
+    const originalFetch = global.fetch;
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const clickSpy = jest
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+
+    try {
+      renderModal(project);
+      fireEvent.click(screen.getByLabelText('Download thumbnail'));
+
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/media/YouTube/account/project/thumbnails/first.png',
+        ),
+      );
+      await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+      expect(global.URL.createObjectURL).toHaveBeenCalledTimes(1);
+    } finally {
+      clickSpy.mockRestore();
+      global.fetch = originalFetch;
+    }
+  });
+
   it('generates an upload-ready title and can promote it to the project title', async () => {
     const project = makeProject([makeSegment(0), makeSegment(1)], {
       title_system_prompt: 'Saved title prompt.',

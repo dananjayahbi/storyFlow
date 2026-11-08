@@ -108,6 +108,8 @@ export interface ProjectDetail extends Omit<Project, 'segment_count'> {
   // ── Per-project settings ──
   default_voice_id: string;
   tts_speed: number;
+  /** Optional project-specific system prompt for TTS script rewriting. */
+  tts_system_prompt?: string;
   tts_engine?: 'kokoro' | 'qwen';
   qwen_mode?: 'custom_voice' | 'clone';
   qwen_speaker?: string;
@@ -159,6 +161,44 @@ export interface ImageFocusArea {
   h: number;
 }
 
+/** Normalised point inside the rendered image frame (0..1). */
+export interface KenBurnsPoint {
+  x: number;
+  y: number;
+}
+
+/**
+ * Animation presets available in the per-segment manual Ken Burns editor.
+ * Each preset has its own settings:
+ * - `pan` uses start/end points (or a drawn area) and a constant crop.
+ * - `zoom_in` / `zoom_out` use a focal point and zoom strength.
+ * - `pan_zoom` combines the start/end path with a push-in.
+ */
+export type KenBurnsAnimation = 'pan' | 'zoom_in' | 'zoom_out' | 'pan_zoom';
+
+/** How a pan path is defined: two points or a drawn rectangle. */
+export type KenBurnsPanMode = 'points' | 'area';
+
+/**
+ * Per-segment manual Ken Burns override.  When `enabled` is false the
+ * automatic planner keeps choosing the animation exactly as before.
+ */
+export interface KenBurnsConfig {
+  enabled: boolean;
+  animation: KenBurnsAnimation;
+  pan_mode: KenBurnsPanMode;
+  /** Pan start point (normalised to the visible render frame). */
+  start: KenBurnsPoint;
+  /** Pan end point (normalised to the visible render frame). */
+  end: KenBurnsPoint;
+  /** Centre of a zoom animation. */
+  focal_point: KenBurnsPoint;
+  /** Optional rectangle used when `pan_mode` is `area`. */
+  area: ImageFocusArea | null;
+  /** Visual zoom multiplier relative to the full frame (1.0 = no zoom). */
+  zoom: number;
+}
+
 export interface Segment {
   id: string;
   project: string;
@@ -193,6 +233,8 @@ export interface Segment {
   image_focus_area?: ImageFocusArea | null;
   /** List form for compatibility; only the first (single) area is used. */
   image_focus_areas?: ImageFocusArea[] | null;
+  /** Optional manual Ken Burns override (disabled = automatic planner). */
+  ken_burns_config?: KenBurnsConfig | null;
 }
 
 export interface GlobalSettings {
@@ -352,6 +394,7 @@ export interface UpdateSegmentPayload {
   image_focus_y?: number;
   image_focus_area?: ImageFocusArea | null;
   image_focus_areas?: ImageFocusArea[];
+  ken_burns_config?: KenBurnsConfig;
 }
 
 export interface ReorderPayload {
@@ -731,6 +774,8 @@ export interface GalleryItem {
   title: string;
   status: RenderingStatus;
   status_label: string;
+  /** True for the project's current hero video. */
+  is_primary?: boolean;
   created_at: string;
   updated_at: string;
   published_at: string | null;
@@ -742,6 +787,13 @@ export interface GalleryItem {
   duration: number | null;
   /** Wall-clock seconds spent rendering this video, when known. */
   render_time_seconds?: number | null;
+  /**
+   * The owning project's configured cover, using the same fallback as the
+   * Projects page (active thumbnail → manual cover → first segment image).
+   */
+  thumbnail_url?: string | null;
+  /** Which source produced `thumbnail_url`. */
+  thumbnail_source?: 'active' | 'manual' | 'segment' | null;
   stream_url: string;
   download_url: string;
 }

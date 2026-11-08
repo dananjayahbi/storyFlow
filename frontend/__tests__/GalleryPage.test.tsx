@@ -4,8 +4,10 @@ import { getGalleryItems } from '@/lib/api';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import type { GalleryItem } from '@/lib/types';
 
+let mockPathname = '/facebook/gallery';
+
 jest.mock('next/navigation', () => ({
-  usePathname: () => '/facebook/gallery',
+  usePathname: () => mockPathname,
 }));
 
 const mockItem: GalleryItem = {
@@ -58,6 +60,48 @@ describe('GalleryPage layout', () => {
     expect(grid?.className).toContain('xl:columns-5');
     expect(grid?.className).toContain('2xl:columns-6');
     expect(grid?.className).not.toContain('lg:columns-3');
+  });
+
+  it('shows the owning project cover on each video tile', async () => {
+    const coverUrl = 'http://localhost:8000/media/Facebook/covers/active.png';
+    (getGalleryItems as jest.Mock).mockResolvedValue([
+      {
+        ...mockItem,
+        thumbnail_url: coverUrl,
+        thumbnail_source: 'active',
+      },
+    ]);
+
+    const { container } = renderPage();
+    await screen.findByText('First video');
+
+    const video = container.querySelector('video');
+    expect(video).toHaveAttribute('poster', coverUrl);
+    expect(container.querySelector(`img[src="${coverUrl}"]`)).not.toBeNull();
+  });
+
+  it('shows only primary videos by default on YouTube', async () => {
+    mockPathname = '/youtube/gallery';
+    const secondary: GalleryItem = {
+      ...mockItem,
+      id: 'video-2',
+      title: 'Second cut',
+      project_title: 'First video',
+      is_primary: false,
+    };
+    (getGalleryItems as jest.Mock).mockResolvedValue([
+      { ...mockItem, title: 'Primary cut', is_primary: true },
+      secondary,
+    ]);
+
+    try {
+      renderPage();
+      expect(await screen.findByText('Primary cut')).toBeInTheDocument();
+      expect(screen.queryByText('Second cut')).not.toBeInTheDocument();
+    } finally {
+      mockPathname = '/facebook/gallery';
+      (getGalleryItems as jest.Mock).mockResolvedValue([mockItem]);
+    }
   });
 
   it('keeps the filter section compact and on one row', async () => {

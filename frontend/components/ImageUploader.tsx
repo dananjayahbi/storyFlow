@@ -1,11 +1,28 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Upload, X, Move, LocateFixed, Scan, Focus } from 'lucide-react';
+import {
+  Upload, X, Move, LocateFixed, Scan, Focus, Crosshair, Play, RotateCcw, Eye,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { getApiBaseUrl } from '@/lib/apiConfig';
-import type { ImageFocusArea } from '@/lib/types';
+import {
+  DEFAULT_KEN_BURNS_CONFIG,
+  KEN_BURNS_ANIMATION_OPTIONS,
+  KEN_BURNS_PAN_MODE_OPTIONS,
+  animationLabel,
+  animationUsesPan,
+  animationUsesZoom,
+  describeKenBurnsConfig,
+  resolveKenBurnsConfig,
+} from '@/lib/kenBurns';
+import type { ImageFocusArea, KenBurnsConfig } from '@/lib/types';
 
 interface ImageUploaderProps {
   segmentId: string;
@@ -27,9 +44,20 @@ interface ImageUploaderProps {
   /** Legacy single-area callback (used when no list callback is supplied). */
   onFocusAreaChange?: (segmentId: string, area: ImageFocusArea | null) => Promise<void>;
   onFocusAreasChange?: (segmentId: string, areas: ImageFocusArea[]) => Promise<void>;
+  /** Optional per-segment manual Ken Burns override. */
+  kenBurnsConfig?: KenBurnsConfig | null;
+  onKenBurnsConfigChange?: (
+    segmentId: string,
+    config: KenBurnsConfig,
+  ) => Promise<void>;
+  /** Opens the modal that plays the animation exactly as the renderer will. */
+  onRequestKenBurnsPreview?: () => void;
   onUpload: (segmentId: string, file: File) => Promise<void>;
   onRemove: (segmentId: string) => Promise<void>;
 }
+
+/** Which point/area the manual Ken Burns tool is currently picking. */
+type KenBurnsTool = 'start' | 'end' | 'focal' | 'area' | null;
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_SIZE = 20 * 1024 * 1024; // 20MB
@@ -63,6 +91,7 @@ export function ImageUploader({
   segmentId, currentImage, isLocked,
   frameWidth = 1920, frameHeight = 1080, focusX = 0.5, focusY = 0.5,
   focusArea = null, focusAreas = null,
+  kenBurnsConfig = null, onKenBurnsConfigChange, onRequestKenBurnsPreview,
   onFocusChange, onFocusAreaChange, onFocusAreasChange, onUpload, onRemove,
 }: ImageUploaderProps) {
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -76,6 +105,13 @@ export function ImageUploader({
   // may still store a list; the first entry is shown and the rest are ignored.
   const initialArea = focusAreas?.[0] ?? focusArea ?? null;
   const [area, setArea] = useState<ImageFocusArea | null>(initialArea);
+  // Manual Ken Burns editor state.  The stored config is mirrored locally so
+  // dragging the tools feels instant; every change is also persisted.
+  const [kbConfig, setKbConfig] = useState<KenBurnsConfig>(
+    () => resolveKenBurnsConfig(kenBurnsConfig),
+  );
+  const [kbTool, setKbTool] = useState<KenBurnsTool>(null);
+  const selectionModeRef = useRef<'focus' | 'kb' | null>(null);
   const dragCounterRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -102,12 +138,18 @@ export function ImageUploader({
   }, [focusAreas, focusArea, segmentId, currentImage]);
 
   useEffect(() => {
+    setKbConfig(resolveKenBurnsConfig(kenBurnsConfig));
+  }, [kenBurnsConfig, segmentId, currentImage]);
+
+  useEffect(() => {
     // New image or aspect ratio → any in-flight drag is stale.
     dragRef.current = null;
     selectionRef.current = null;
+    selectionModeRef.current = null;
     setSelection(null);
     setIsPanning(false);
     setIsMarking(false);
+    setKbTool(null);
   }, [currentImage, frameWidth, frameHeight]);
 
   const handleFile = async (file: File) => {
@@ -208,13 +250,64 @@ export function ImageUploader({
     }
   };
 
+  const emitKenBurns = (next: KenBurnsConfig) => {
+    setKbConfig(next);
+    if (onKenBurnsConfigChange) {
+      onKenBurnsConfigChange(segmentId, next).catch(() => {
+        setError('Failed to save the Ken Burns animation.');
+      });
+    }
+  };
+
+  const updateKenBurns = (patch: Partial<KenBurnsConfig>) => {
+    emitKenBurns({ ...kbConfig, ...patch });
+  };
+
+  const resetKenBurns = () => {
+    setKbTool(null);
+    emitKenBurns({
+      ...DEFAULT_KEN_BURNS_CONFIG,
+      enabled: false,
+    });
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isLocked) return;
     e.preventDefault();
 
+    // Manual Ken Burns tools take precedence: a click places the requested
+    // point, or starts drawing the pan area rectangle.
+    if (kbConfig.enabled && kbTool) {
+      const point = framePoint(e);
+      if (kbTool === 'start' || kbTool === 'end' || kbTool === 'focal') {
+        const rounded = {
+          x: Number(point.x.toFixed(4)),
+          y: Number(point.y.toFixed(4)),
+        };
+        const key = kbTool === 'focal' ? 'focal_point' : kbTool;
+        emitKenBurns({ ...kbConfig, [key]: rounded });
+        setKbTool(null);
+        return;
+      }
+      if (kbTool === 'area') {
+        selectionModeRef.current = 'kb';
+        selectionRef.current = {
+          pointerId: e.pointerId,
+          startX: point.x,
+          startY: point.y,
+          currentX: point.x,
+          currentY: point.y,
+        };
+        setSelection({ x: point.x, y: point.y, w: 0, h: 0 });
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+
     // Focus-area marking takes precedence over image panning.
     if (isMarking) {
       const point = framePoint(e);
+      selectionModeRef.current = 'focus';
       selectionRef.current = {
         pointerId: e.pointerId,
         startX: point.x,
@@ -285,6 +378,8 @@ export function ImageUploader({
       const y = Math.min(selecting.startY, selecting.currentY);
       const w = Math.min(Math.abs(selecting.currentX - selecting.startX), 1 - x);
       const h = Math.min(Math.abs(selecting.currentY - selecting.startY), 1 - y);
+      const mode = selectionModeRef.current;
+      selectionModeRef.current = null;
       setSelection(null);
 
       if (w >= MIN_FOCUS_AREA && h >= MIN_FOCUS_AREA) {
@@ -294,11 +389,24 @@ export function ImageUploader({
           w: Number(w.toFixed(4)),
           h: Number(h.toFixed(4)),
         };
-        setIsMarking(false);
-        // Drawing again replaces the existing rectangle.
-        emitArea(next);
+        if (mode === 'kb') {
+          setKbTool(null);
+          emitKenBurns({
+            ...kbConfig,
+            pan_mode: 'area',
+            area: next,
+          });
+        } else {
+          setIsMarking(false);
+          // Drawing again replaces the existing rectangle.
+          emitArea(next);
+        }
       } else {
-        setError('Draw a larger area to mark the focus.');
+        setError(
+          mode === 'kb'
+            ? 'Draw a larger area for the pan.'
+            : 'Draw a larger area to mark the focus.',
+        );
       }
       return;
     }
@@ -368,18 +476,28 @@ export function ImageUploader({
             style={{ aspectRatio: `${frameWidth || 16} / ${frameHeight || 9}`, touchAction: 'none' }}
             className={cn(
               'relative w-full overflow-hidden rounded-md border bg-muted select-none',
-              !isLocked && !isMarking && 'cursor-grab',
+              !isLocked && !isMarking && !kbTool && 'cursor-grab',
               isPanning && 'cursor-grabbing',
-              isMarking && 'cursor-crosshair',
+              (isMarking || kbTool) && 'cursor-crosshair',
             )}
             title={
               isLocked
                 ? 'Unlock the segment to edit the image'
-                : isMarking
-                  ? 'Drag to mark the Ken Burns focus area'
-                  : 'Drag to reposition the image inside the render frame'
+                : kbTool
+                  ? kbTool === 'area'
+                    ? 'Drag to draw the pan area'
+                    : 'Click to place the Ken Burns point'
+                  : isMarking
+                    ? 'Drag to mark the Ken Burns focus area'
+                    : 'Drag to reposition the image inside the render frame'
             }
-            aria-label={`Render frame ${frameWidth}×${frameHeight}. ${isMarking ? 'Drag to mark the Ken Burns focus area.' : 'Drag to reposition the image.'}`}
+            aria-label={`Render frame ${frameWidth}×${frameHeight}. ${
+              kbTool
+                ? 'Click to place the Ken Burns point.'
+                : isMarking
+                  ? 'Drag to mark the Ken Burns focus area.'
+                  : 'Drag to reposition the image.'
+            }`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -411,6 +529,79 @@ export function ImageUploader({
               </div>
             )}
 
+            {/* Manual Ken Burns overlays */}
+            {kbConfig.enabled && animationUsesPan(kbConfig.animation) && (
+              <>
+                {kbConfig.pan_mode === 'points' && (
+                  <>
+                    <svg
+                      className="pointer-events-none absolute inset-0 h-full w-full text-primary"
+                      viewBox="0 0 100 100"
+                      preserveAspectRatio="none"
+                      aria-hidden="true"
+                    >
+                      <line
+                        x1={kbConfig.start.x * 100}
+                        y1={kbConfig.start.y * 100}
+                        x2={kbConfig.end.x * 100}
+                        y2={kbConfig.end.y * 100}
+                        stroke="currentColor"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </svg>
+                    {([
+                      ['start', kbConfig.start, 'A', 'Pan start point'],
+                      ['end', kbConfig.end, 'B', 'Pan end point'],
+                    ] as const).map(([key, point, label, title]) => (
+                      <div
+                        key={key}
+                        className="pointer-events-none absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white bg-primary text-[9px] font-bold text-primary-foreground shadow"
+                        style={{
+                          left: `${point.x * 100}%`,
+                          top: `${point.y * 100}%`,
+                        }}
+                        title={`${title} (${Math.round(point.x * 100)}%, ${Math.round(point.y * 100)}%)`}
+                      >
+                        {label}
+                      </div>
+                    ))}
+                  </>
+                )}
+                {kbConfig.pan_mode === 'area' && kbConfig.area && (
+                  <div
+                    className="pointer-events-none absolute border-2 border-dashed border-primary bg-primary/5"
+                    style={{
+                      left: `${kbConfig.area.x * 100}%`,
+                      top: `${kbConfig.area.y * 100}%`,
+                      width: `${kbConfig.area.w * 100}%`,
+                      height: `${kbConfig.area.h * 100}%`,
+                    }}
+                  >
+                    <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
+                      Pan area
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+
+            {kbConfig.enabled && animationUsesZoom(kbConfig.animation) && (
+              <div
+                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2"
+                style={{
+                  left: `${kbConfig.focal_point.x * 100}%`,
+                  top: `${kbConfig.focal_point.y * 100}%`,
+                }}
+                title={`Zoom focal point (${Math.round(kbConfig.focal_point.x * 100)}%, ${Math.round(kbConfig.focal_point.y * 100)}%)`}
+              >
+                <span className="absolute -inset-3 rounded-full border border-primary/70" />
+                <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-2 ring-white" />
+                <Crosshair className="h-5 w-5 text-primary drop-shadow" />
+              </div>
+            )}
+
             {/* Live selection while marking a new area */}
             {shownArea && shownArea.w > 0 && shownArea.h > 0 && (
               <div
@@ -429,7 +620,32 @@ export function ImageUploader({
               </div>
             )}
 
-            {!isLocked && (
+            {kbConfig.enabled && kbTool && (
+              <div
+                className="absolute left-1/2 top-2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/70 px-2.5 py-1 text-[10px] text-white shadow"
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <Crosshair className="h-3 w-3" />
+                <span>
+                  {kbTool === 'area'
+                    ? 'Drag to draw the pan area'
+                    : kbTool === 'focal'
+                      ? 'Click to place the zoom focal point'
+                      : kbTool === 'start'
+                        ? 'Click to place the pan start point'
+                        : 'Click to place the pan end point'}
+                </span>
+                <button
+                  type="button"
+                  className="ml-1 rounded px-1 text-white/80 hover:bg-white/20 hover:text-white"
+                  onClick={() => setKbTool(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {!isLocked && !kbConfig.enabled && (
               <div
                 className="absolute left-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
                 onPointerDown={(event) => event.stopPropagation()}
@@ -464,7 +680,13 @@ export function ImageUploader({
             {!isLocked && (
               <div className="absolute left-2 bottom-2 flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/90 opacity-0 transition-opacity group-hover:opacity-100">
                 <Move className="h-3 w-3" />
-                <span>{isMarking ? 'Drag to mark focus' : 'Drag to reposition'}</span>
+                <span>
+                  {kbTool
+                    ? 'Click to place point'
+                    : isMarking
+                      ? 'Drag to mark focus'
+                      : 'Drag to reposition'}
+                </span>
               </div>
             )}
             {isRepositioned && !isLocked && (
@@ -493,7 +715,223 @@ export function ImageUploader({
             </Button>
           )}
         </div>
-        {!isLocked && area && (
+        {/* Manual Ken Burns controls */}
+        <div className="space-y-2 rounded-md border bg-muted/20 p-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-[11px] font-medium">
+              <Checkbox
+                checked={kbConfig.enabled}
+                disabled={isLocked}
+                onCheckedChange={(checked) => {
+                  setKbTool(null);
+                  emitKenBurns({ ...kbConfig, enabled: checked === true });
+                }}
+                aria-label="Manual Ken Burns"
+              />
+              Manual Ken Burns
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground">
+                {kbConfig.enabled
+                  ? animationLabel(kbConfig.animation)
+                  : 'Automatic'}
+              </span>
+              {onRequestKenBurnsPreview && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-6 gap-1 px-2 text-[10px]"
+                  onClick={onRequestKenBurnsPreview}
+                  aria-label="Preview Ken Burns animation"
+                  title="Preview the animation exactly as it will render"
+                >
+                  <Eye className="h-3 w-3" />
+                  Preview
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            {describeKenBurnsConfig(kbConfig)}
+          </p>
+
+          {kbConfig.enabled && (
+            <div className="space-y-2">
+              <Select
+                value={kbConfig.animation}
+                disabled={isLocked}
+                onValueChange={(value) => {
+                  setKbTool(null);
+                  emitKenBurns({
+                    ...kbConfig,
+                    animation: value as KenBurnsConfig['animation'],
+                  });
+                }}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-8 w-full text-xs"
+                  aria-label="Ken Burns animation"
+                >
+                  <SelectValue placeholder="Choose animation" />
+                </SelectTrigger>
+                <SelectContent>
+                  {KEN_BURNS_ANIMATION_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <div className="flex flex-col">
+                        <span>{option.label}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {option.description}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {animationUsesPan(kbConfig.animation) && (
+                <div className="space-y-1.5">
+                  <div className="flex gap-1">
+                    {KEN_BURNS_PAN_MODE_OPTIONS.map((option) => (
+                      <Button
+                        key={option.value}
+                        type="button"
+                        size="sm"
+                        variant={
+                          kbConfig.pan_mode === option.value
+                            ? 'default'
+                            : 'outline'
+                        }
+                        className="h-7 flex-1 px-2 text-[10px]"
+                        disabled={isLocked}
+                        onClick={() => {
+                          setKbTool(null);
+                          emitKenBurns({
+                            ...kbConfig,
+                            pan_mode: option.value,
+                          });
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {kbConfig.pan_mode === 'points' ? (
+                    <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={kbTool === 'start' ? 'default' : 'outline'}
+                        className="h-7 flex-1 px-2 text-[10px]"
+                        disabled={isLocked}
+                        onClick={() => setKbTool(kbTool === 'start' ? null : 'start')}
+                      >
+                        <Play className="mr-1 h-3 w-3" />
+                        Set start
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={kbTool === 'end' ? 'default' : 'outline'}
+                        className="h-7 flex-1 px-2 text-[10px]"
+                        disabled={isLocked}
+                        onClick={() => setKbTool(kbTool === 'end' ? null : 'end')}
+                      >
+                        <Play className="mr-1 h-3 w-3 rotate-180" />
+                        Set end
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={kbTool === 'area' ? 'default' : 'outline'}
+                        className="h-7 flex-1 px-2 text-[10px]"
+                        disabled={isLocked}
+                        onClick={() => setKbTool(kbTool === 'area' ? null : 'area')}
+                      >
+                        <Scan className="mr-1 h-3 w-3" />
+                        {kbConfig.area ? 'Redraw pan area' : 'Draw pan area'}
+                      </Button>
+                      {kbConfig.area && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-[10px]"
+                          disabled={isLocked}
+                          onClick={() => {
+                            setKbTool(null);
+                            emitKenBurns({ ...kbConfig, area: null });
+                          }}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {animationUsesZoom(kbConfig.animation) && (
+                <div className="space-y-1.5">
+                  {kbConfig.animation !== 'pan_zoom' && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={kbTool === 'focal' ? 'default' : 'outline'}
+                      className="h-7 w-full px-2 text-[10px]"
+                      disabled={isLocked}
+                      onClick={() => setKbTool(kbTool === 'focal' ? null : 'focal')}
+                    >
+                      <Crosshair className="mr-1 h-3 w-3" />
+                      Set focal point
+                    </Button>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground">Zoom</span>
+                    <Slider
+                      min={1}
+                      max={2}
+                      step={0.05}
+                      value={[kbConfig.zoom]}
+                      disabled={isLocked}
+                      onValueChange={(values) =>
+                        updateKenBurns({ zoom: values[0] ?? 1.25 })
+                      }
+                      aria-label="Ken Burns zoom strength"
+                    />
+                    <span className="w-9 text-right text-[10px] tabular-nums text-muted-foreground">
+                      {kbConfig.zoom.toFixed(2)}x
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                  Generate the TTS first — the animation speed adapts to the
+                  narration duration.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 shrink-0 px-1.5 text-[10px]"
+                  disabled={isLocked}
+                  onClick={resetKenBurns}
+                >
+                  <RotateCcw className="mr-1 h-3 w-3" />
+                  Auto
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {!isLocked && !kbConfig.enabled && area && (
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-1">
               <span className="inline-flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">

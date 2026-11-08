@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   FileText,
   ImagePlus,
   Images,
@@ -95,6 +96,22 @@ function errorMessage(error: unknown, fallback: string): string {
     || maybe?.message
     || fallback
   );
+}
+
+function thumbnailFilename(
+  projectTitle: string,
+  thumbnail: ProjectThumbnail,
+  index: number,
+): string {
+  const path = (thumbnail.url ?? '').split('?')[0];
+  const match = path.match(/\.(png|jpe?g|webp)$/i);
+  const extension = (match?.[1] ?? 'png').toLowerCase();
+  const slug = projectTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'storyflow';
+  return `${slug}-thumbnail-${index + 1}.${extension}`;
 }
 
 async function copyText(value: string): Promise<void> {
@@ -209,6 +226,9 @@ export function MetadataManagementModal({
   const [generating, setGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [busyThumbnailId, setBusyThumbnailId] = useState<string | null>(null);
+  const [downloadingThumbnailId, setDownloadingThumbnailId] = useState<
+    string | null
+  >(null);
   const [thumbnails, setThumbnails] = useState<ProjectThumbnail[]>([]);
   const [draggingExternal, setDraggingExternal] = useState(false);
   const [draggingThumbnail, setDraggingThumbnail] = useState(false);
@@ -617,6 +637,41 @@ export function MetadataManagementModal({
       );
     } finally {
       setBusyThumbnailId(null);
+    }
+  };
+
+  const handleDownloadThumbnail = async (
+    thumbnail: ProjectThumbnail,
+    index: number,
+  ) => {
+    if (!thumbnail.url) {
+      toast.error('This thumbnail has no downloadable image yet.');
+      return;
+    }
+    setDownloadingThumbnailId(thumbnail.id);
+    try {
+      // Fetch as a blob instead of relying on the anchor's `download`
+      // attribute, which browsers ignore for cross-origin media URLs.
+      const response = await fetch(thumbnail.url);
+      if (!response.ok) {
+        throw new Error(`Download failed (${response.status}).`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = thumbnailFilename(project.title, thumbnail, index);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      toast.success('Thumbnail downloaded.');
+    } catch (downloadError) {
+      toast.error(
+        errorMessage(downloadError, 'Could not download that thumbnail.'),
+      );
+    } finally {
+      setDownloadingThumbnailId(null);
     }
   };
 
@@ -1064,7 +1119,7 @@ export function MetadataManagementModal({
                   </p>
                 ) : (
                   <ul className="grid grid-cols-2 gap-3">
-                    {thumbnails.map((thumbnail) => (
+                    {thumbnails.map((thumbnail, index) => (
                       <li
                         key={thumbnail.id}
                         className={cn(
@@ -1102,19 +1157,42 @@ export function MetadataManagementModal({
                               )}
                             </Button>
                           )}
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="size-7 text-destructive hover:text-destructive"
-                            onClick={() =>
-                              void handleDeleteThumbnail(thumbnail.id)
-                            }
-                            disabled={busyThumbnailId === thumbnail.id}
-                            aria-label="Delete thumbnail"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
+                          <div className="flex items-center gap-0.5">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7"
+                              onClick={() =>
+                                void handleDownloadThumbnail(thumbnail, index)
+                              }
+                              disabled={
+                                downloadingThumbnailId === thumbnail.id ||
+                                !thumbnail.url
+                              }
+                              aria-label="Download thumbnail"
+                              title="Download this thumbnail"
+                            >
+                              {downloadingThumbnailId === thumbnail.id ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Download className="size-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              className="size-7 text-destructive hover:text-destructive"
+                              onClick={() =>
+                                void handleDeleteThumbnail(thumbnail.id)
+                              }
+                              disabled={busyThumbnailId === thumbnail.id}
+                              aria-label="Delete thumbnail"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
                         </div>
                       </li>
                     ))}

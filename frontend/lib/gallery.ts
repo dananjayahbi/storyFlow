@@ -83,6 +83,7 @@ export function filterGalleryItems(
   filters: {
     status?: RenderingStatus | 'all';
     project?: string;
+    primary?: 'primary' | 'all';
     query?: string;
     sort?: 'newest' | 'oldest';
   },
@@ -93,6 +94,9 @@ export function filterGalleryItems(
       return false;
     }
     if (filters.project && filters.project !== 'all' && item.project_id !== filters.project) {
+      return false;
+    }
+    if (filters.primary === 'primary' && !item.is_primary) {
       return false;
     }
     if (query) {

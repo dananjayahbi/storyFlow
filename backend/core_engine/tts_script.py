@@ -486,8 +486,14 @@ def rewrite_for_tts(
     api_key: str = "",
     temperature: float = 0.2,
     timeout: int = 180,
+    system_prompt: str = "",
 ) -> str:
     """Rewrite one narration block into a TTS-ready version using the LLM.
+
+    ``system_prompt`` lets a project supply its own style guide/rules.  The
+    built-in :data:`TTS_REWRITE_SYSTEM_PROMPT` is used when it is empty, so
+    existing projects keep their current behaviour.  The deterministic
+    normalisation and 1:1 length guard still run on every reply.
 
     Raises :class:`TTSScriptError` on an unusable reply.  Importing the AI
     client lazily keeps this module importable without Django settings.
@@ -498,8 +504,11 @@ def rewrite_for_tts(
 
     from core_engine import ai_client
 
+    resolved_system_prompt = (
+        (system_prompt or "").strip() or TTS_REWRITE_SYSTEM_PROMPT
+    )
     messages = [
-        {"role": "system", "content": TTS_REWRITE_SYSTEM_PROMPT},
+        {"role": "system", "content": resolved_system_prompt},
         {
             "role": "user",
             "content": (

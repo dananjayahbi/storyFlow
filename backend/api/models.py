@@ -194,6 +194,10 @@ class Project(models.Model):
     # TTS
     default_voice_id = models.CharField(max_length=100, default='af_bella')
     tts_speed = models.FloatField(default=1.0)
+    # Optional per-project system prompt for the TTS script rewrite.  Empty
+    # falls back to the built-in TTS_REWRITE_SYSTEM_PROMPT, so existing
+    # projects keep their current behaviour until the operator supplies one.
+    tts_system_prompt = models.TextField(blank=True, default='')
 
     # TTS engine selection ("kokoro" is fast/CPU, "qwen" is GPU + cloning)
     tts_engine = models.CharField(
@@ -428,6 +432,11 @@ class Rendering(models.Model):
     # in seconds.  Null for legacy rows that predate the measurement.
     render_time_seconds = models.FloatField(null=True, blank=True)
     published_at = models.DateTimeField(null=True, blank=True)
+    # The project's current hero video.  New renderings automatically become
+    # primary (the newest version wins); the operator can promote an older
+    # version from the project gallery.  Only the account gallery shows the
+    # primary asset by default.
+    is_primary = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -502,6 +511,11 @@ class Segment(models.Model):
     # rectangle is supported per image; legacy rows with several entries are
     # rendered using the first one without rewriting stored project data.
     image_focus_areas = models.JSONField(null=True, blank=True, default=None)
+    # Optional per-segment manual Ken Burns override.  When ``enabled`` is
+    # false (or the object is empty) the automatic planner runs exactly as
+    # before.  See ``core_engine.ken_burns.normalise_ken_burns_config`` for
+    # the supported shape: animation preset plus normalised points/area/zoom.
+    ken_burns_config = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"Segment {self.sequence_index} of {self.project.title}"

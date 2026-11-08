@@ -13,6 +13,8 @@ interface TimelineProps {
   frameWidth?: number;
   /** Render frame height in pixels (project resolution). */
   frameHeight?: number;
+  /** Project Ken Burns zoom intensity, forwarded to the preview renderer. */
+  zoomIntensity?: number;
   onAddSegment?: () => Promise<void>;
   onUpdateSegment: (id: string, data: UpdateSegmentPayload) => Promise<void>;
   onDeleteSegment: (id: string) => Promise<void>;
@@ -21,7 +23,7 @@ interface TimelineProps {
 }
 
 export function Timeline({
-  segments, frameWidth = 1920, frameHeight = 1080,
+  segments, frameWidth = 1920, frameHeight = 1080, zoomIntensity = 1.3,
   onAddSegment, onUpdateSegment, onDeleteSegment, onUploadImage, onRemoveImage,
 }: TimelineProps) {
   if (segments.length === 0) {
@@ -45,6 +47,7 @@ export function Timeline({
             segment={segment}
             frameWidth={frameWidth}
             frameHeight={frameHeight}
+            zoomIntensity={zoomIntensity}
             onUpdate={onUpdateSegment}
             onDelete={onDeleteSegment}
             onUploadImage={onUploadImage}

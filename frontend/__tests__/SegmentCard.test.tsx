@@ -141,6 +141,39 @@ describe('SegmentCard', () => {
     });
   });
 
+  it('opens the Ken Burns preview for a block with an image', () => {
+    jest
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation(() => 1);
+    const segmentWithImage: Segment = {
+      ...mockSegment,
+      image_file: '/media/projects/castle.jpg',
+    };
+
+    renderWithTooltip(
+      <SegmentCard
+        segment={segmentWithImage}
+        onUpdate={mockUpdate}
+        onDelete={mockDelete}
+        onUploadImage={mockUploadImage}
+        onRemoveImage={mockRemoveImage}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Preview Ken Burns animation/i }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: /Ken Burns preview/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('img', { name: /Ken Burns animation preview/i }),
+    ).toBeInTheDocument();
+
+    jest.restoreAllMocks();
+  });
+
   it('shows an existing TTS script expanded by default', () => {
     const segmentWithScript: Segment = {
       ...mockSegment,

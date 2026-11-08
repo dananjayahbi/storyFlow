@@ -484,6 +484,65 @@ class TestSegmentUpdate(APITestCase):
             )
             self.assertEqual(response.status_code, 400, payload)
 
+    def test_patch_manual_ken_burns_config(self):
+        payload = {
+            'enabled': True,
+            'animation': 'pan',
+            'pan_mode': 'points',
+            'start': {'x': 0.2, 'y': 0.4},
+            'end': {'x': 0.8, 'y': 0.6},
+            'focal_point': {'x': 0.5, 'y': 0.5},
+            'zoom': 1.3,
+        }
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'ken_burns_config': payload},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        stored = response.data['ken_burns_config']
+        self.assertTrue(stored['enabled'])
+        self.assertEqual(stored['animation'], 'pan')
+        self.assertEqual(stored['start'], {'x': 0.2, 'y': 0.4})
+        self.assertEqual(stored['end'], {'x': 0.8, 'y': 0.6})
+        self.segment.refresh_from_db()
+        self.assertEqual(self.segment.ken_burns_config['animation'], 'pan')
+
+    def test_patch_manual_ken_burns_config_can_be_disabled(self):
+        self.segment.ken_burns_config = {
+            'enabled': True,
+            'animation': 'zoom_in',
+            'zoom': 1.4,
+        }
+        self.segment.save()
+        response = self.client.patch(
+            f'/api/segments/{self.segment.id}/',
+            {'ken_burns_config': {'enabled': False}},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['ken_burns_config']['enabled'])
+
+    def test_patch_manual_ken_burns_config_rejects_invalid_values(self):
+        invalid_payloads = [
+            'not-an-object',
+            {'enabled': True, 'animation': 'spin'},
+            {'enabled': True, 'pan_mode': 'diagonal'},
+            {'enabled': True, 'zoom': 0.5},
+            {'enabled': True, 'zoom': 9},
+            {
+                'enabled': True,
+                'area': {'x': -0.1, 'y': 0.1, 'w': 0.2, 'h': 0.2},
+            },
+        ]
+        for payload in invalid_payloads:
+            response = self.client.patch(
+                f'/api/segments/{self.segment.id}/',
+                {'ken_burns_config': payload},
+                format='json',
+            )
+            self.assertEqual(response.status_code, 400, payload)
+
     def test_lock_segment(self):
         response = self.client.patch(
             f'/api/segments/{self.segment.id}/',
@@ -2043,6 +2102,143 @@ class KenBurnsMathTests(TestCase):
         self.assertEqual(
             interpolate_focus_path([(12, 34)], 3.0, 10.0), (12.0, 34.0)
         )
+
+
+# ===================================================================
+# Manual Ken Burns Tests (Feature update #31)
+# ===================================================================
+
+class KenBurnsManualTests(TestCase):
+    """Tests for the per-segment manual Ken Burns planner."""
+
+    def test_disabled_or_invalid_config_falls_back_to_auto(self):
+        from core_engine.ken_burns import normalise_ken_burns_config
+
+        self.assertIsNone(normalise_ken_burns_config(None))
+        self.assertIsNone(normalise_ken_burns_config({}))
+        self.assertIsNone(
+            normalise_ken_burns_config({'enabled': False, 'animation': 'pan'})
+        )
+        self.assertIsNone(
+            normalise_ken_burns_config({'enabled': True, 'animation': 'spin'})
+        )
+
+    def test_normalise_fills_defaults_and_clamps_values(self):
+        from core_engine.ken_burns import (
+            MANUAL_ANIMATION_PAN,
+            MANUAL_PAN_MODE_POINTS,
+            normalise_ken_burns_config,
+        )
+
+        clean = normalise_ken_burns_config({
+            'enabled': True,
+            'start': {'x': -2, 'y': 4},
+            'zoom': 99,
+        })
+        self.assertEqual(clean['animation'], MANUAL_ANIMATION_PAN)
+        self.assertEqual(clean['pan_mode'], MANUAL_PAN_MODE_POINTS)
+        self.assertEqual(clean['start'], {'x': 0.0, 'y': 1.0})
+        self.assertEqual(clean['zoom'], 4.0)
+        self.assertIsNone(clean['area'])
+
+    def test_manual_pan_moves_from_start_to_end(self):
+        from core_engine.ken_burns import (
+            plan_manual_ken_burns_motion,
+            sample_ken_burns_motion,
+        )
+
+        plan = plan_manual_ken_burns_motion(
+            {
+                'enabled': True,
+                'animation': 'pan',
+                'pan_mode': 'points',
+                'start': {'x': 0.2, 'y': 0.5},
+                'end': {'x': 0.8, 'y': 0.5},
+                'zoom': 1.3,
+            },
+            duration=5.0,
+            source_width=1950,
+            source_height=1300,
+            output_width=1500,
+            output_height=1000,
+            zoom_intensity=1.3,
+        )
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan['motion'], 'manual_pan')
+        self.assertEqual(plan['start_crop'], plan['end_crop'])
+
+        x0, _y0, _w0, _h0 = sample_ken_burns_motion(plan, 0.0)
+        x1, _y1, _w1, _h1 = sample_ken_burns_motion(plan, 5.0)
+        self.assertLess(x0, x1)
+        self.assertGreater(plan['pan_speed'], 0.0)
+
+        slower = plan_manual_ken_burns_motion(
+            {
+                'enabled': True,
+                'animation': 'pan',
+                'start': {'x': 0.2, 'y': 0.5},
+                'end': {'x': 0.8, 'y': 0.5},
+                'zoom': 1.3,
+            },
+            duration=10.0,
+            source_width=1950,
+            source_height=1300,
+            output_width=1500,
+            output_height=1000,
+            zoom_intensity=1.3,
+        )
+        # Same distance over a longer (TTS) duration is a slower move.
+        self.assertLess(slower['pan_speed'], plan['pan_speed'])
+
+    def test_manual_zoom_keeps_focal_point_centred(self):
+        from core_engine.ken_burns import (
+            plan_manual_ken_burns_motion,
+            sample_ken_burns_motion,
+        )
+
+        plan = plan_manual_ken_burns_motion(
+            {
+                'enabled': True,
+                'animation': 'zoom_in',
+                'focal_point': {'x': 0.5, 'y': 0.5},
+                'zoom': 1.5,
+            },
+            duration=4.0,
+            source_width=1950,
+            source_height=1300,
+            output_width=1500,
+            output_height=1000,
+            zoom_intensity=1.3,
+        )
+        self.assertEqual(plan['motion'], 'manual_zoom_in')
+        self.assertGreater(plan['start_crop'][0], plan['end_crop'][0])
+        self.assertGreater(plan['zoom_speed'], 0.0)
+
+        sx, sy, sw, sh = sample_ken_burns_motion(plan, 0.0)
+        ex, ey, ew, eh = sample_ken_burns_motion(plan, 4.0)
+        self.assertAlmostEqual(sx + sw / 2, 1950 * 0.5, delta=2)
+        self.assertAlmostEqual(sy + sh / 2, 1300 * 0.5, delta=2)
+        self.assertAlmostEqual(ex + ew / 2, 1950 * 0.5, delta=2)
+        self.assertAlmostEqual(ey + eh / 2, 1300 * 0.5, delta=2)
+
+    def test_manual_pan_area_uses_longer_axis(self):
+        from core_engine.ken_burns import _manual_pan_points
+
+        horizontal = _manual_pan_points({
+            'pan_mode': 'area',
+            'area': {'x': 0.1, 'y': 0.2, 'w': 0.8, 'h': 0.2},
+        })
+        self.assertEqual(horizontal[0]['x'], 0.1)
+        self.assertEqual(horizontal[1]['x'], 0.9)
+        self.assertEqual(horizontal[0]['y'], horizontal[1]['y'])
+
+        vertical = _manual_pan_points({
+            'pan_mode': 'area',
+            'area': {'x': 0.2, 'y': 0.1, 'w': 0.2, 'h': 0.8},
+        })
+        self.assertEqual(vertical[0]['y'], 0.1)
+        self.assertEqual(vertical[1]['y'], 0.9)
+        self.assertEqual(vertical[0]['x'], vertical[1]['x'])
 
 
 # ===================================================================

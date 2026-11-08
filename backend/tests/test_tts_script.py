@@ -159,6 +159,61 @@ class TtsScriptEndpointTests(APITestCase):
             self.segment.text_content, 'In 1984 the CIA arrived. [laughs]'
         )
 
+    @patch(
+        'core_engine.ai_client.chat_completion',
+        return_value='In nineteen eighty-four the C-I-A arrived.',
+    )
+    def test_rewrite_uses_builtin_system_prompt_by_default(self, mock_chat):
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-tts-script/'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        messages = mock_chat.call_args.kwargs['messages']
+        self.assertEqual(
+            messages[0]['content'], tts_script.TTS_REWRITE_SYSTEM_PROMPT
+        )
+
+    @patch(
+        'core_engine.ai_client.chat_completion',
+        return_value='In nineteen eighty-four the C-I-A arrived.',
+    )
+    def test_rewrite_uses_the_project_system_prompt(self, mock_chat):
+        custom = 'Speak like a calm nature documentary narrator.'
+        self.project.tts_system_prompt = custom
+        self.project.save(update_fields=['tts_system_prompt'])
+
+        response = self.client.post(
+            f'/api/segments/{self.segment.id}/generate-tts-script/'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        messages = mock_chat.call_args.kwargs['messages']
+        self.assertEqual(messages[0]['content'], custom)
+
+    @patch(
+        'core_engine.ai_client.chat_completion',
+        return_value='In nineteen eighty-four the C-I-A arrived.',
+    )
+    def test_batch_feeds_the_project_prompt_to_every_block(self, mock_chat):
+        custom = 'Breathe after every sentence.'
+        self.project.tts_system_prompt = custom
+        self.project.save(update_fields=['tts_system_prompt'])
+        Segment.objects.create(
+            project=self.project,
+            sequence_index=1,
+            text_content='A second block.',
+        )
+        manager = InlineTaskManager()
+        with patch('api.views.get_task_manager', return_value=manager):
+            response = self.client.post(
+                f'/api/projects/{self.project.id}/generate-all-tts-scripts/',
+                {'only_missing': True},
+                format='json',
+            )
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertEqual(mock_chat.call_count, 2)
+        for call in mock_chat.call_args_list:
+            self.assertEqual(call.kwargs['messages'][0]['content'], custom)
+
     @patch('core_engine.ai_client.chat_completion', return_value='')
     def test_empty_model_reply_is_rejected(self, _mock_chat):
         response = self.client.post(
